@@ -827,6 +827,20 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             rratio_match = re.search(r'\(roundrect_rratio\s+([\d.]+)\)', pad_text)
             roundrect_rratio = float(rratio_match.group(1)) if rratio_match else 0.0
 
+            # For custom pads, compute bounding box from primitives
+            if pad_shape == 'custom' and '(primitives' in pad_text:
+                prim_coords = re.findall(r'\(xy\s+([\d.-]+)\s+([\d.-]+)\)', pad_text)
+                if prim_coords:
+                    pxs = [float(x) for x, _ in prim_coords]
+                    pys = [float(y) for _, y in prim_coords]
+                    prim_min_x, prim_max_x = min(pxs), max(pxs)
+                    prim_min_y, prim_max_y = min(pys), max(pys)
+                    size_x = prim_max_x - prim_min_x
+                    size_y = prim_max_y - prim_min_y
+                    # Shift pad center to the primitive centroid
+                    local_x += (prim_min_x + prim_max_x) / 2
+                    local_y += (prim_min_y + prim_max_y) / 2
+
             # Calculate global coordinates
             global_x, global_y = local_to_global(fp_x, fp_y, fp_rotation, local_x, local_y)
 

@@ -2100,6 +2100,12 @@ Examples:
     parser.add_argument("--gnd-via-distance", type=float, default=2.0,
         help="Maximum distance from signal via to place GND via in mm (default: 2.0)")
 
+    # Zone island stitching (requires pcbnew + shapely)
+    parser.add_argument("--stitch-islands", action="store_true",
+        help="After zone fill, find isolated copper islands and add stitching vias (requires pcbnew)")
+    parser.add_argument("--stitch-layer", type=str, default="F.Cu",
+        help="Layer to check for zone islands (default: F.Cu)")
+
     args = parser.parse_args()
 
     # Handle output file: use --overwrite, explicit output, or auto-generate with _routed suffix
@@ -2246,6 +2252,18 @@ Examples:
                 vias=via_dicts
             )
             print(f"Wrote {len(gnd_vias)} GND vias to {args.output_file}")
+
+
+    # Stitch zone islands if requested
+    if args.stitch_islands and not args.dry_run:
+        print(f"\nStitching isolated zone islands on {args.stitch_layer}...")
+        from stitch_zone_islands import find_and_stitch_islands
+        net_name = args.nets[0] if len(args.nets) == 1 else args.gnd_via_net
+        find_and_stitch_islands(
+            args.output_file, args.output_file,
+            net_name=net_name, layer_name=args.stitch_layer,
+            via_size=args.via_size, via_drill=args.via_drill
+        )
 
 
 if __name__ == "__main__":

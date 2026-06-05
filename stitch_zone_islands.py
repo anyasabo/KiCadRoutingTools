@@ -78,19 +78,59 @@ def find_and_stitch_islands(input_path, output_path, net_name="GND", layer_name=
         board.Save(output_path)
         return
 
-    for x, y, area in islands:
-        via = pcbnew.PCB_VIA(board)
-        via.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
-        via.SetWidth(pcbnew.FromMM(via_size))
-        via.SetDrill(pcbnew.FromMM(via_drill))
-        via.SetNet(net)
-        board.Add(via)
-        print(f"  Added via at ({x:.2f}, {y:.2f}) for {area:.1f}mm² island")
+    total_vias = 0
+    max_passes = 3
+    for pass_num in range(max_passes):
+        if not islands:
+            break
 
-    filler = pcbnew.ZONE_FILLER(board)
-    filler.Fill([zones[i] for i in range(len(zones))])
+        for x, y, area in islands:
+            via = pcbnew.PCB_VIA(board)
+            via.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(y)))
+            via.SetWidth(pcbnew.FromMM(via_size))
+            via.SetDrill(pcbnew.FromMM(via_drill))
+            via.SetNet(net)
+            board.Add(via)
+            print(f"  Added via at ({x:.2f}, {y:.2f}) for {area:.1f}mm² island")
+            total_vias += 1
+
+        # Refill and recheck — zone fill can shift island boundaries
+        filler = pcbnew.ZONE_FILLER(board)
+        filler.Fill([zones[i] for i in range(len(zones))])
+
+        # Update connection list with newly placed vias
+        existing_vias = []
+        for track in board.GetTracks():
+            if track.GetNetCode() == net_code and track.GetClass() == "PCB_VIA":
+                existing_vias.append((pcbnew.ToMM(track.GetX()), pcbnew.ToMM(track.GetY())))
+        for fp in board.GetFootprints():
+            for pad in fp.Pads():
+                if pad.GetNetCode() == net_code:
+                    existing_vias.append((pcbnew.ToMM(pad.GetX()), pcbnew.ToMM(pad.GetY())))
+
+        # Recheck for remaining islands
+        filled = target_zone.GetFilledPolysList(layer_id)
+        islands = []
+        for outline_idx in range(filled.OutlineCount()):
+            outline = filled.Outline(outline_idx)
+            pts = [(pcbnew.ToMM(outline.CPoint(i).x), pcbnew.ToMM(outline.CPoint(i).y))
+                   for i in range(outline.PointCount())]
+            if len(pts) < 3:
+                continue
+            poly = Polygon(pts)
+            if not poly.is_valid:
+                poly = poly.buffer(0)
+            if poly.area < min_island_area:
+                continue
+            if not any(poly.contains(Point(vx, vy)) for vx, vy in existing_vias):
+                centroid = poly.centroid
+                islands.append((centroid.x, centroid.y, poly.area))
+
+        if islands:
+            print(f"  Pass {pass_num + 1}: {len(islands)} islands remain, retrying...")
+
     board.Save(output_path)
-    print(f"Saved {output_path} with {len(islands)} new stitching vias")
+    print(f"Saved {output_path} with {total_vias} new stitching vias")
 
 
 if __name__ == "__main__":

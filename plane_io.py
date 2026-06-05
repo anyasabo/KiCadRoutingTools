@@ -256,7 +256,8 @@ def write_plane_output(
     exclude_net_ids: List[int] = None,
     zones_to_replace: List[Tuple[int, str]] = None,
     add_teardrops: bool = False,
-    net_id_to_name: Dict[int, str] = None
+    net_id_to_name: Dict[int, str] = None,
+    zone_names_for_replace: List[Tuple[str, str]] = None
 ) -> bool:
     """Write the complete output file with zone (optional), vias, and traces.
 
@@ -292,7 +293,8 @@ def write_plane_output(
 
     # Filter out zones to be replaced
     if zones_to_replace:
-        content = filter_zones_from_content(content, zones_to_replace)
+        content = filter_zones_from_content(content, zones_to_replace,
+                                            zone_names_to_remove=zone_names_for_replace)
 
     # Filter out excluded nets if specified
     if exclude_net_ids:

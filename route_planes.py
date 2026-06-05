@@ -1117,9 +1117,26 @@ def _write_output_and_reroute(
         print(f"  Adding {len(all_debug_lines)} debug lines on User.4")
 
     kicad_v10_names = pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None
+    # For KiCad 10 zone replacement: zones_to_replace has (net_id, layer) but net_id
+    # may be 0 for zones parsed from KiCad 10 format (which uses net names not IDs).
+    # Build a name-based list by resolving net_id → name, falling back to pcb_data.nets.
+    zone_names_for_replace = None
+    if kicad_v10_names and zones_to_replace:
+        zone_names_for_replace = []
+        for net_id, layer in zones_to_replace:
+            name = kicad_v10_names.get(net_id, "")
+            if not name and net_id == 0:
+                # KiCad 10 zone had no numeric ID — find the net name from pcb_data.zones
+                for z in pcb_data.zones:
+                    if z.layer == layer and z.net_name:
+                        name = z.net_name
+                        break
+            if name:
+                zone_names_for_replace.append((name, layer))
     if not write_plane_output(input_file, output_file, combined_zone_sexpr, all_new_vias, all_new_segments,
                               exclude_net_ids=all_ripped_net_ids, zones_to_replace=zones_to_replace,
-                              add_teardrops=add_teardrops, net_id_to_name=kicad_v10_names):
+                              add_teardrops=add_teardrops, net_id_to_name=kicad_v10_names,
+                              zone_names_for_replace=zone_names_for_replace):
         print("Error writing output file")
         return False
 
@@ -2264,6 +2281,33 @@ Examples:
             net_name=net_name, layer_name=args.stitch_layer,
             via_size=args.via_size, via_drill=args.via_drill
         )
+
+    # Remove micro-stub track artifacts (< 0.05mm segments from router termination)
+    if not args.dry_run and os.path.exists(args.output_file):
+        import re as _re
+        with open(args.output_file, 'r') as f:
+            content = f.read()
+        segments = list(_re.finditer(
+            r'\(segment\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s*\(end\s+([\d.-]+)\s+([\d.-]+)\)', content))
+        to_remove = []
+        for m in segments:
+            x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
+            if ((x2-x1)**2 + (y2-y1)**2) ** 0.5 < 0.05:
+                start = m.start()
+                depth = 0
+                for i, c in enumerate(content[start:], start):
+                    if c == '(': depth += 1
+                    elif c == ')':
+                        depth -= 1
+                        if depth == 0:
+                            to_remove.append((start, i+1))
+                            break
+        if to_remove:
+            for s, e in sorted(to_remove, reverse=True):
+                content = content[:s] + content[e:]
+            with open(args.output_file, 'w') as f:
+                f.write(content)
+            print(f"\nRemoved {len(to_remove)} micro-stub track artifacts (< 0.05mm)")
 
 
 if __name__ == "__main__":

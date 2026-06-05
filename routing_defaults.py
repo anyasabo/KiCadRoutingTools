@@ -75,7 +75,7 @@ BUS_ATTRACTION_BONUS = 5000  # Cost bonus for staying near neighbor
 
 # Clearance parameters
 ROUTING_CLEARANCE_MARGIN = 1.0
-HOLE_TO_HOLE_CLEARANCE = 0.2  # mm
+HOLE_TO_HOLE_CLEARANCE = 0.5  # mm - matches PCBWay/JLCPCB DRU requirement
 BOARD_EDGE_CLEARANCE = 0.0  # mm
 
 # Default layers

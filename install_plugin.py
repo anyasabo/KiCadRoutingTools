@@ -19,17 +19,16 @@ Content Manager is detected (it sits next to the local install in
 --keep-pcm is given.
 """
 
-import os
-import sys
-import json
-import shutil
-import platform
 import argparse
+import json
+import os
+import platform
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from startup_checks import get_cargo_version
-
 
 PLUGIN_NAME = "KiCadRoutingTools"
 PLUGIN_DISPLAY_NAME = "KiCad Routing Tools"
@@ -100,17 +99,17 @@ def get_kicad_base_dir() -> Path:
         # back to the OneDrive path so a fresh install lands somewhere KiCad
         # will pick up (KiCad itself follows the same redirection).
         onedrive = (
-            os.environ.get("OneDrive")
-            or os.environ.get("OneDriveConsumer")
-            or os.environ.get("OneDriveCommercial")
+            os.environ.get("OneDrive") or os.environ.get("OneDriveConsumer") or os.environ.get("OneDriveCommercial")
         )
         candidates = []
         if onedrive:
             candidates.append(Path(onedrive) / "Documents" / "KiCad")
-        candidates.extend([
-            Path.home() / "OneDrive" / "Documents" / "KiCad",
-            Path.home() / "Documents" / "KiCad",
-        ])
+        candidates.extend(
+            [
+                Path.home() / "OneDrive" / "Documents" / "KiCad",
+                Path.home() / "Documents" / "KiCad",
+            ]
+        )
         for candidate in candidates:
             if candidate.exists():
                 return candidate
@@ -158,10 +157,10 @@ def install_dependencies():
     # Parse and display requirements
     print("Required packages:")
     packages = []
-    with open(requirements_file, 'r') as f:
+    with open(requirements_file) as f:
         for line in f:
             line = line.strip()
-            if line and not line.startswith('#'):
+            if line and not line.startswith("#"):
                 packages.append(line)
                 print(f"  - {line}")
     print()
@@ -190,7 +189,7 @@ def install_dependencies():
             print("  Warning: Failed to install some dependencies.")
             if kicad_python:
                 print("  You may need to run as Administrator:")
-                print(f"    \"{kicad_python}\" -m pip install -r \"{requirements_file}\"")
+                print(f'    "{kicad_python}" -m pip install -r "{requirements_file}"')
             else:
                 print("  You may need to install them manually to KiCad's Python.")
             return False
@@ -203,7 +202,7 @@ def install_dependencies():
         print()
         print("  Error: Permission denied. Try running as Administrator.")
         if kicad_python:
-            print(f"  Or run manually: \"{kicad_python}\" -m pip install -r \"{requirements_file}\"")
+            print(f'  Or run manually: "{kicad_python}" -m pip install -r "{requirements_file}"')
         return False
     except Exception as e:
         print(f"  Warning: Could not install dependencies: {e}")
@@ -233,7 +232,8 @@ def check_rust_router():
     # Try to import the Rust library
     try:
         import grid_router
-        installed_version = getattr(grid_router, '__version__', 'unknown')
+
+        installed_version = getattr(grid_router, "__version__", "unknown")
     except ImportError:
         print("  Error: Rust router module not found")
         print("  Please build it first with:")
@@ -242,7 +242,7 @@ def check_rust_router():
 
     # Check version match
     if installed_version != cargo_version:
-        print(f"  Error: Rust router version mismatch")
+        print("  Error: Rust router version mismatch")
         print(f"    Installed: {installed_version}")
         print(f"    Expected:  {cargo_version}")
         print("  Please rebuild with:")
@@ -270,13 +270,14 @@ def copy_plugin(source_dir: Path, dest_dir: Path):
         ignored = []
         for f in files:
             # Skip hidden files, cache, and non-essential directories
-            if f.startswith('.') or f == '__pycache__' or f.endswith('.pyc'):
-                ignored.append(f)
-            # Skip test files and docs
-            elif f.startswith('test_') or f == 'docs':
-                ignored.append(f)
-            # Skip kicad_files (sample PCBs)
-            elif f == 'kicad_files':
+            if (
+                f.startswith(".")
+                or f == "__pycache__"
+                or f.endswith(".pyc")
+                or f.startswith("test_")
+                or f == "docs"
+                or f == "kicad_files"
+            ):
                 ignored.append(f)
         return ignored
 
@@ -367,7 +368,7 @@ def disable_pcm_install(pcm_dir: Path, version: str) -> Path | None:
         return dest
     except OSError as e:
         print(f"    Error: could not move PCM copy aside: {e}")
-        print(f"    Please remove it manually via KiCad's Plugin & Content Manager,")
+        print("    Please remove it manually via KiCad's Plugin & Content Manager,")
         print(f"    or delete: {pcm_dir}")
         return None
 
@@ -380,8 +381,7 @@ def handle_pcm_conflicts(plugins_dir: Path, version: str) -> int:
     conflicts = find_conflicting_pcm_installs(plugins_dir)
     if not conflicts:
         return 0
-    print(f"  Found {len(conflicts)} PCM-installed copy(ies) of this plugin that "
-          f"would shadow the local install:")
+    print(f"  Found {len(conflicts)} PCM-installed copy(ies) of this plugin that would shadow the local install:")
     disabled = 0
     for pcm_dir in conflicts:
         print(f"    - {pcm_dir}")
@@ -390,9 +390,9 @@ def handle_pcm_conflicts(plugins_dir: Path, version: str) -> int:
             print(f"      Disabled (moved to {backup})")
             disabled += 1
     if disabled:
-        print(f"  Note: the Plugin & Content Manager may still list this package as")
-        print(f"        installed; you can formally remove it there (Plugins -> Manage")
-        print(f"        -> Uninstall), or just delete the backup folder above.")
+        print("  Note: the Plugin & Content Manager may still list this package as")
+        print("        installed; you can formally remove it there (Plugins -> Manage")
+        print("        -> Uninstall), or just delete the backup folder above.")
     return disabled
 
 
@@ -405,27 +405,17 @@ Examples:
     python install_plugin.py              # Install the plugin
     python install_plugin.py --symlink    # Create symlink (for development)
     python install_plugin.py --uninstall  # Remove the plugin
-"""
+""",
     )
+    parser.add_argument("--no-deps", action="store_true", help="Skip installing Python dependencies")
+    parser.add_argument("--uninstall", "-u", action="store_true", help="Remove the plugin instead of installing")
     parser.add_argument(
-        "--no-deps",
-        action="store_true",
-        help="Skip installing Python dependencies"
-    )
-    parser.add_argument(
-        "--uninstall", "-u",
-        action="store_true",
-        help="Remove the plugin instead of installing"
-    )
-    parser.add_argument(
-        "--symlink", "-s",
-        action="store_true",
-        help="Create symlink instead of copying (for development)"
+        "--symlink", "-s", action="store_true", help="Create symlink instead of copying (for development)"
     )
     parser.add_argument(
         "--keep-pcm",
         action="store_true",
-        help="Don't disable conflicting PCM (Plugin & Content Manager) copies of this plugin"
+        help="Don't disable conflicting PCM (Plugin & Content Manager) copies of this plugin",
     )
 
     args = parser.parse_args()

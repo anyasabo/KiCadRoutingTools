@@ -2,18 +2,18 @@
 DRC Checker - Find overlapping tracks and vias between different nets.
 """
 
-import sys
 import argparse
-import math
 import fnmatch
+import math
+import sys
 from collections import defaultdict
-from typing import List, Tuple, Set, Optional, Dict, Any
-from kicad_parser import parse_kicad_pcb, Segment, Via, Pad
+from typing import Any
+
 from geometry_utils import (
     point_to_segment_distance,
-    closest_point_on_segment,
     segment_to_segment_closest_points,
 )
+from kicad_parser import Pad, Segment, Via, parse_kicad_pcb
 from net_queries import expand_pad_layers
 
 
@@ -25,15 +25,17 @@ class SpatialIndex:
         self.cell_size = cell_size
         self.inv_cell_size = 1.0 / cell_size
         # Dict[layer][cell_key] -> list of (object, net_id)
-        self.cells_by_layer: Dict[str, Dict[Tuple[int, int], List[Tuple[Any, int]]]] = defaultdict(lambda: defaultdict(list))
+        self.cells_by_layer: dict[str, dict[tuple[int, int], list[tuple[Any, int]]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
         # For objects that span all layers (vias)
-        self.all_layer_cells: Dict[Tuple[int, int], List[Tuple[Any, int]]] = defaultdict(list)
+        self.all_layer_cells: dict[tuple[int, int], list[tuple[Any, int]]] = defaultdict(list)
 
-    def _get_cell(self, x: float, y: float) -> Tuple[int, int]:
+    def _get_cell(self, x: float, y: float) -> tuple[int, int]:
         """Get cell coordinates for a point."""
         return (int(x * self.inv_cell_size), int(y * self.inv_cell_size))
 
-    def _get_segment_cells(self, seg: Segment) -> Set[Tuple[int, int]]:
+    def _get_segment_cells(self, seg: Segment) -> set[tuple[int, int]]:
         """Get all cells a segment passes through."""
         cells = set()
         x1, y1 = seg.start_x, seg.start_y
@@ -46,7 +48,7 @@ class SpatialIndex:
         # Walk along segment and add intermediate cells
         dx = x2 - x1
         dy = y2 - y1
-        length = math.sqrt(dx*dx + dy*dy)
+        length = math.sqrt(dx * dx + dy * dy)
         if length > 0:
             # Sample every half cell size
             steps = max(1, int(length * self.inv_cell_size * 2))
@@ -70,7 +72,7 @@ class SpatialIndex:
         cell = self._get_cell(via.x, via.y)
         self.all_layer_cells[cell].append((via, net_id))
 
-    def add_pad(self, pad: Pad, net_id: int, expanded_layers: List[str]):
+    def add_pad(self, pad: Pad, net_id: int, expanded_layers: list[str]):
         """Add a pad to the index."""
         # Pad covers a rectangular area
         half_x = pad.size_x / 2
@@ -79,14 +81,14 @@ class SpatialIndex:
         max_cell = self._get_cell(pad.global_x + half_x, pad.global_y + half_y)
 
         for layer in expanded_layers:
-            if not layer.endswith('.Cu'):
+            if not layer.endswith(".Cu"):
                 continue
             layer_cells = self.cells_by_layer[layer]
             for cx in range(min_cell[0], max_cell[0] + 1):
                 for cy in range(min_cell[1], max_cell[1] + 1):
                     layer_cells[(cx, cy)].append((pad, net_id))
 
-    def get_nearby_segments(self, seg: Segment) -> List[Tuple[Segment, int]]:
+    def get_nearby_segments(self, seg: Segment) -> list[tuple[Segment, int]]:
         """Get segments that might be near the given segment (same layer, nearby cells)."""
         cells = self._get_segment_cells(seg)
         layer_cells = self.cells_by_layer[seg.layer]
@@ -100,7 +102,7 @@ class SpatialIndex:
                     result.append((obj, net_id))
         return result
 
-    def get_nearby_for_via(self, via: Via, layer: str) -> List[Tuple[Any, int]]:
+    def get_nearby_for_via(self, via: Via, layer: str) -> list[tuple[Any, int]]:
         """Get objects near a via on a specific layer."""
         cell = self._get_cell(via.x, via.y)
         # Check neighboring cells too (via has size)
@@ -116,7 +118,7 @@ class SpatialIndex:
                         result.append((obj, net_id))
         return result
 
-    def get_nearby_vias(self, via: Via) -> List[Tuple[Via, int]]:
+    def get_nearby_vias(self, via: Via) -> list[tuple[Via, int]]:
         """Get vias near the given via."""
         cell = self._get_cell(via.x, via.y)
         result = []
@@ -130,7 +132,7 @@ class SpatialIndex:
                         result.append((obj, net_id))
         return result
 
-    def get_nearby_pads(self, x: float, y: float, layer: str) -> List[Tuple[Pad, int]]:
+    def get_nearby_pads(self, x: float, y: float, layer: str) -> list[tuple[Pad, int]]:
         """Get pads near a point on a specific layer."""
         cell = self._get_cell(x, y)
         result = []
@@ -146,7 +148,7 @@ class SpatialIndex:
         return result
 
 
-def matches_any_pattern(name: str, patterns: List[str]) -> bool:
+def matches_any_pattern(name: str, patterns: list[str]) -> bool:
     """Check if a net name matches any of the given patterns (fnmatch style)."""
     for pattern in patterns:
         if fnmatch.fnmatch(name, pattern):
@@ -160,7 +162,7 @@ def segment_to_segment_distance(seg1: Segment, seg2: Segment) -> float:
     return dist
 
 
-def segments_cross(seg1: Segment, seg2: Segment, tolerance: float = 0.001) -> Tuple[bool, Optional[Tuple[float, float]]]:
+def segments_cross(seg1: Segment, seg2: Segment, tolerance: float = 0.001) -> tuple[bool, tuple[float, float] | None]:
     """Check if two segments on the same layer cross each other.
 
     Returns (True, intersection_point) if they cross, (False, None) otherwise.
@@ -178,8 +180,12 @@ def segments_cross(seg1: Segment, seg2: Segment, tolerance: float = 0.001) -> Tu
     def points_equal(ax, ay, bx, by):
         return abs(ax - bx) < tolerance and abs(ay - by) < tolerance
 
-    if (points_equal(x1, y1, x3, y3) or points_equal(x1, y1, x4, y4) or
-        points_equal(x2, y2, x3, y3) or points_equal(x2, y2, x4, y4)):
+    if (
+        points_equal(x1, y1, x3, y3)
+        or points_equal(x1, y1, x4, y4)
+        or points_equal(x2, y2, x3, y3)
+        or points_equal(x2, y2, x4, y4)
+    ):
         return False, None
 
     # Direction vectors
@@ -235,7 +241,9 @@ def check_segment_overlap(seg1: Segment, seg2: Segment, clearance: float, cleara
     return False, 0.0, None, None
 
 
-def check_via_segment_overlap(via: Via, seg: Segment, clearance: float, clearance_margin: float = 0.05) -> Tuple[bool, float]:
+def check_via_segment_overlap(
+    via: Via, seg: Segment, clearance: float, clearance_margin: float = 0.05
+) -> tuple[bool, float]:
     """Check if a via overlaps with a segment on any common layer.
 
     Args:
@@ -243,13 +251,11 @@ def check_via_segment_overlap(via: Via, seg: Segment, clearance: float, clearanc
     """
     # Standard through-hole vias go through ALL copper layers, not just the ones listed
     # Only skip non-copper layers
-    if not seg.layer.endswith('.Cu'):
+    if not seg.layer.endswith(".Cu"):
         return False, 0.0
 
     required_dist = via.size / 2 + seg.width / 2 + clearance
-    actual_dist = point_to_segment_distance(via.x, via.y,
-                                            seg.start_x, seg.start_y,
-                                            seg.end_x, seg.end_y)
+    actual_dist = point_to_segment_distance(via.x, via.y, seg.start_x, seg.start_y, seg.end_x, seg.end_y)
     overlap = required_dist - actual_dist
 
     tolerance = clearance * clearance_margin
@@ -258,7 +264,7 @@ def check_via_segment_overlap(via: Via, seg: Segment, clearance: float, clearanc
     return False, 0.0
 
 
-def check_via_via_overlap(via1: Via, via2: Via, clearance: float, clearance_margin: float = 0.05) -> Tuple[bool, float]:
+def check_via_via_overlap(via1: Via, via2: Via, clearance: float, clearance_margin: float = 0.05) -> tuple[bool, float]:
     """Check if two vias overlap.
 
     Args:
@@ -266,7 +272,7 @@ def check_via_via_overlap(via1: Via, via2: Via, clearance: float, clearance_marg
     """
     # All vias are through-hole, so they always potentially conflict
     required_dist = via1.size / 2 + via2.size / 2 + clearance
-    actual_dist = math.sqrt((via1.x - via2.x)**2 + (via1.y - via2.y)**2)
+    actual_dist = math.sqrt((via1.x - via2.x) ** 2 + (via1.y - via2.y) ** 2)
     overlap = required_dist - actual_dist
 
     tolerance = clearance * clearance_margin
@@ -275,9 +281,9 @@ def check_via_via_overlap(via1: Via, via2: Via, clearance: float, clearance_marg
     return False, 0.0
 
 
-def point_to_rect_distance(px: float, py: float, cx: float, cy: float,
-                           half_x: float, half_y: float,
-                           corner_radius: float = 0.0) -> float:
+def point_to_rect_distance(
+    px: float, py: float, cx: float, cy: float, half_x: float, half_y: float, corner_radius: float = 0.0
+) -> float:
     """Calculate distance from a point to an axis-aligned rectangle with optional rounded corners.
 
     Args:
@@ -313,9 +319,17 @@ def point_to_rect_distance(px: float, py: float, cx: float, cy: float,
     return math.sqrt(dx * dx + dy * dy)
 
 
-def segment_to_rect_distance(x1: float, y1: float, x2: float, y2: float,
-                             cx: float, cy: float, half_x: float, half_y: float,
-                             corner_radius: float = 0.0) -> Tuple[float, Tuple[float, float]]:
+def segment_to_rect_distance(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    cx: float,
+    cy: float,
+    half_x: float,
+    half_y: float,
+    corner_radius: float = 0.0,
+) -> tuple[float, tuple[float, float]]:
     """Calculate minimum distance from a segment to an axis-aligned rectangle.
 
     Args:
@@ -329,11 +343,11 @@ def segment_to_rect_distance(x1: float, y1: float, x2: float, y2: float,
     """
     # Sample points along the segment and find minimum distance to rectangle
     # This is a simplified approach - for production code would use proper geometry
-    min_dist = float('inf')
+    min_dist = float("inf")
     closest_pt = (x1, y1)
 
     # Check endpoints and intermediate points
-    num_samples = max(10, int(math.sqrt((x2-x1)**2 + (y2-y1)**2) / 0.05))  # Sample every ~0.05mm
+    num_samples = max(10, int(math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) / 0.05))  # Sample every ~0.05mm
     for i in range(num_samples + 1):
         t = i / num_samples
         px = x1 + t * (x2 - x1)
@@ -346,9 +360,9 @@ def segment_to_rect_distance(x1: float, y1: float, x2: float, y2: float,
     return min_dist, closest_pt
 
 
-def check_pad_segment_overlap(pad: Pad, seg: Segment, clearance: float,
-                               routing_layers: List[str],
-                               clearance_margin: float = 0.05) -> Tuple[bool, float, Optional[Tuple[float, float]]]:
+def check_pad_segment_overlap(
+    pad: Pad, seg: Segment, clearance: float, routing_layers: list[str], clearance_margin: float = 0.05
+) -> tuple[bool, float, tuple[float, float] | None]:
     """Check if a segment is too close to a pad on the same layer.
 
     Args:
@@ -369,18 +383,24 @@ def check_pad_segment_overlap(pad: Pad, seg: Segment, clearance: float,
         return False, 0.0, None
 
     # Corner radius based on pad shape (circle/oval use min dimension, roundrect uses rratio)
-    if pad.shape in ('circle', 'oval'):
+    if pad.shape in ("circle", "oval"):
         corner_radius = min(pad.size_x, pad.size_y) / 2
-    elif pad.shape == 'roundrect':
+    elif pad.shape == "roundrect":
         corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
     else:
         corner_radius = 0.0
 
     # Calculate distance from segment to rectangular pad (with optional rounded corners)
     dist_to_pad, closest_pt = segment_to_rect_distance(
-        seg.start_x, seg.start_y, seg.end_x, seg.end_y,
-        pad.global_x, pad.global_y, pad.size_x / 2, pad.size_y / 2,
-        corner_radius
+        seg.start_x,
+        seg.start_y,
+        seg.end_x,
+        seg.end_y,
+        pad.global_x,
+        pad.global_y,
+        pad.size_x / 2,
+        pad.size_y / 2,
+        corner_radius,
     )
 
     # Required clearance: segment half-width + clearance
@@ -395,9 +415,9 @@ def check_pad_segment_overlap(pad: Pad, seg: Segment, clearance: float,
     return False, 0.0, None
 
 
-def check_pad_via_overlap(pad: Pad, via: Via, clearance: float,
-                          routing_layers: List[str],
-                          clearance_margin: float = 0.05) -> Tuple[bool, float]:
+def check_pad_via_overlap(
+    pad: Pad, via: Via, clearance: float, routing_layers: list[str], clearance_margin: float = 0.05
+) -> tuple[bool, float]:
     """Check if a via is too close to a pad.
 
     Args:
@@ -414,23 +434,20 @@ def check_pad_via_overlap(pad: Pad, via: Via, clearance: float,
     expanded_layers = expand_pad_layers(pad.layers, routing_layers)
 
     # Vias are through-hole, so they conflict with pads on any copper layer
-    if not any(layer.endswith('.Cu') for layer in expanded_layers):
+    if not any(layer.endswith(".Cu") for layer in expanded_layers):
         return False, 0.0
 
     # Corner radius based on pad shape (circle/oval use min dimension, roundrect uses rratio)
-    if pad.shape in ('circle', 'oval'):
+    if pad.shape in ("circle", "oval"):
         corner_radius = min(pad.size_x, pad.size_y) / 2
-    elif pad.shape == 'roundrect':
+    elif pad.shape == "roundrect":
         corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
     else:
         corner_radius = 0.0
 
     # Distance from via center to pad edge (accounts for rounded corners)
     dist_to_pad = point_to_rect_distance(
-        via.x, via.y,
-        pad.global_x, pad.global_y,
-        pad.size_x / 2, pad.size_y / 2,
-        corner_radius
+        via.x, via.y, pad.global_x, pad.global_y, pad.size_x / 2, pad.size_y / 2, corner_radius
     )
 
     # Required clearance: via half-size + clearance
@@ -445,8 +462,9 @@ def check_pad_via_overlap(pad: Pad, via: Via, clearance: float,
     return False, 0.0
 
 
-def check_via_drill_overlap(via1: Via, via2: Via, hole_to_hole_clearance: float,
-                            clearance_margin: float = 0.05) -> Tuple[bool, float]:
+def check_via_drill_overlap(
+    via1: Via, via2: Via, hole_to_hole_clearance: float, clearance_margin: float = 0.05
+) -> tuple[bool, float]:
     """Check if two via drill holes violate hole-to-hole clearance.
 
     Args:
@@ -459,7 +477,7 @@ def check_via_drill_overlap(via1: Via, via2: Via, hole_to_hole_clearance: float,
     """
     # Required distance between drill hole centers
     required_dist = via1.drill / 2 + via2.drill / 2 + hole_to_hole_clearance
-    actual_dist = math.sqrt((via1.x - via2.x)**2 + (via1.y - via2.y)**2)
+    actual_dist = math.sqrt((via1.x - via2.x) ** 2 + (via1.y - via2.y) ** 2)
     overlap = required_dist - actual_dist
 
     tolerance = hole_to_hole_clearance * clearance_margin
@@ -468,8 +486,9 @@ def check_via_drill_overlap(via1: Via, via2: Via, hole_to_hole_clearance: float,
     return False, 0.0
 
 
-def check_pad_drill_via_overlap(pad: Pad, via: Via, hole_to_hole_clearance: float,
-                                clearance_margin: float = 0.05) -> Tuple[bool, float]:
+def check_pad_drill_via_overlap(
+    pad: Pad, via: Via, hole_to_hole_clearance: float, clearance_margin: float = 0.05
+) -> tuple[bool, float]:
     """Check if a via drill hole is too close to a pad's drill hole.
 
     Args:
@@ -486,7 +505,7 @@ def check_pad_drill_via_overlap(pad: Pad, via: Via, hole_to_hole_clearance: floa
 
     # Required distance between drill hole centers
     required_dist = pad.drill / 2 + via.drill / 2 + hole_to_hole_clearance
-    actual_dist = math.sqrt((pad.global_x - via.x)**2 + (pad.global_y - via.y)**2)
+    actual_dist = math.sqrt((pad.global_x - via.x) ** 2 + (pad.global_y - via.y) ** 2)
     overlap = required_dist - actual_dist
 
     tolerance = hole_to_hole_clearance * clearance_margin
@@ -495,8 +514,9 @@ def check_pad_drill_via_overlap(pad: Pad, via: Via, hole_to_hole_clearance: floa
     return False, 0.0
 
 
-def check_segment_board_edge(seg: Segment, board_bounds: Tuple[float, float, float, float],
-                             clearance: float, clearance_margin: float = 0.05) -> Tuple[bool, float, str]:
+def check_segment_board_edge(
+    seg: Segment, board_bounds: tuple[float, float, float, float], clearance: float, clearance_margin: float = 0.05
+) -> tuple[bool, float, str]:
     """Check if a segment is too close to the board edge.
 
     Args:
@@ -549,8 +569,9 @@ def check_segment_board_edge(seg: Segment, board_bounds: Tuple[float, float, flo
     return False, 0.0, ""
 
 
-def check_via_board_edge(via: Via, board_bounds: Tuple[float, float, float, float],
-                         clearance: float, clearance_margin: float = 0.05) -> Tuple[bool, float, str]:
+def check_via_board_edge(
+    via: Via, board_bounds: tuple[float, float, float, float], clearance: float, clearance_margin: float = 0.05
+) -> tuple[bool, float, str]:
     """Check if a via is too close to the board edge.
 
     Args:
@@ -603,7 +624,7 @@ def check_via_board_edge(via: Via, board_bounds: Tuple[float, float, float, floa
     return False, 0.0, ""
 
 
-def write_debug_lines(pcb_file: str, violations: List[dict], clearance: float, layer: str = "User.7"):
+def write_debug_lines(pcb_file: str, violations: list[dict], clearance: float, layer: str = "User.7"):
     """Write debug lines to PCB file showing violation locations.
 
     Adds gr_line elements connecting closest points of violating segments.
@@ -611,21 +632,23 @@ def write_debug_lines(pcb_file: str, violations: List[dict], clearance: float, l
     import uuid
 
     # Read the PCB file
-    with open(pcb_file, 'r', encoding='utf-8') as f:
+    with open(pcb_file, encoding="utf-8") as f:
         content = f.read()
 
     # Generate gr_line elements for segment-segment violations
     debug_lines = []
     print(f"\nDebug lines (center-to-center distance, required clearance = {clearance}mm):")
     for v in violations:
-        if v['type'] == 'segment-segment' and 'closest_pt1' in v and v['closest_pt1']:
-            pt1 = v['closest_pt1']
-            pt2 = v['closest_pt2']
-            dist = math.sqrt((pt2[0] - pt1[0])**2 + (pt2[1] - pt1[1])**2)
+        if v["type"] == "segment-segment" and "closest_pt1" in v and v["closest_pt1"]:
+            pt1 = v["closest_pt1"]
+            pt2 = v["closest_pt2"]
+            dist = math.sqrt((pt2[0] - pt1[0]) ** 2 + (pt2[1] - pt1[1]) ** 2)
             # Track width is typically 0.1mm, so required center-to-center = 0.1 + clearance = 0.2mm
             required = 0.1 + clearance  # half-width + half-width + clearance = track_width + clearance
             violation_amt = required - dist
-            print(f"  {v['net1']} <-> {v['net2']}: dist={dist:.4f}mm, required={required:.3f}mm, violation={violation_amt:.4f}mm")
+            print(
+                f"  {v['net1']} <-> {v['net2']}: dist={dist:.4f}mm, required={required:.3f}mm, violation={violation_amt:.4f}mm"
+            )
             print(f"    from ({pt1[0]:.4f}, {pt1[1]:.4f}) to ({pt2[0]:.4f}, {pt2[1]:.4f})")
 
             line = f'''\t(gr_line
@@ -641,24 +664,30 @@ def write_debug_lines(pcb_file: str, violations: List[dict], clearance: float, l
             debug_lines.append(line)
 
     if not debug_lines:
-        print(f"No debug lines to write")
+        print("No debug lines to write")
         return
 
     # Insert before the final closing paren
-    debug_text = '\n'.join(debug_lines)
-    last_paren = content.rfind(')')
-    new_content = content[:last_paren] + '\n' + debug_text + '\n' + content[last_paren:]
+    debug_text = "\n".join(debug_lines)
+    last_paren = content.rfind(")")
+    new_content = content[:last_paren] + "\n" + debug_text + "\n" + content[last_paren:]
 
-    with open(pcb_file, 'w', encoding='utf-8') as f:
+    with open(pcb_file, "w", encoding="utf-8") as f:
         f.write(new_content)
 
     print(f"\nWrote {len(debug_lines)} debug line(s) to layer {layer}")
 
 
-def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[str]] = None,
-            debug_output: bool = False, quiet: bool = False,
-            hole_to_hole_clearance: float = 0.2, board_edge_clearance: float = 0.0,
-            clearance_margin: float = 0.05):
+def run_drc(
+    pcb_file: str,
+    clearance: float = 0.1,
+    net_patterns: list[str] | None = None,
+    debug_output: bool = False,
+    quiet: bool = False,
+    hole_to_hole_clearance: float = 0.2,
+    board_edge_clearance: float = 0.0,
+    clearance_margin: float = 0.05,
+):
     """Run DRC checks on the PCB file.
 
     Args:
@@ -703,9 +732,9 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
         print(f"Filtering to nets matching: {net_patterns}")
 
     # Get routing layers for pad layer expansion
-    routing_layers = list(set(seg.layer for seg in pcb_data.segments if seg.layer.endswith('.Cu')))
+    routing_layers = list(set(seg.layer for seg in pcb_data.segments if seg.layer.endswith(".Cu")))
     if not routing_layers:
-        routing_layers = ['F.Cu', 'B.Cu']  # Fallback
+        routing_layers = ["F.Cu", "B.Cu"]  # Fallback
 
     # Build spatial index for fast proximity queries
     if not quiet:
@@ -777,17 +806,19 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                 net2_name = pcb_data.nets.get(net2, None)
                 net1_str = net1_name.name if net1_name else f"net_{net1}"
                 net2_str = net2_name.name if net2_name else f"net_{net2}"
-                violations.append({
-                    'type': 'segment-segment',
-                    'net1': net1_str,
-                    'net2': net2_str,
-                    'layer': seg1.layer,
-                    'overlap_mm': overlap,
-                    'loc1': (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
-                    'loc2': (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
-                    'closest_pt1': pt1,
-                    'closest_pt2': pt2,
-                })
+                violations.append(
+                    {
+                        "type": "segment-segment",
+                        "net1": net1_str,
+                        "net2": net2_str,
+                        "layer": seg1.layer,
+                        "overlap_mm": overlap,
+                        "loc1": (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
+                        "loc2": (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
+                        "closest_pt1": pt1,
+                        "closest_pt2": pt2,
+                    }
+                )
 
             # Also check for segment crossings (different nets)
             crosses, cross_point = segments_cross(seg1, seg2)
@@ -796,15 +827,17 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                 net2_name = pcb_data.nets.get(net2, None)
                 net1_str = net1_name.name if net1_name else f"net_{net1}"
                 net2_str = net2_name.name if net2_name else f"net_{net2}"
-                violations.append({
-                    'type': 'segment-crossing',
-                    'net1': net1_str,
-                    'net2': net2_str,
-                    'layer': seg1.layer,
-                    'cross_point': cross_point,
-                    'loc1': (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
-                    'loc2': (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
-                })
+                violations.append(
+                    {
+                        "type": "segment-crossing",
+                        "net1": net1_str,
+                        "net2": net2_str,
+                        "layer": seg1.layer,
+                        "cross_point": cross_point,
+                        "loc1": (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
+                        "loc2": (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
+                    }
+                )
 
     # Check for same-net segment crossings using spatial index
     if not quiet:
@@ -827,15 +860,17 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
             if crosses:
                 net_name = pcb_data.nets.get(net_id, None)
                 net_str = net_name.name if net_name else f"net_{net_id}"
-                violations.append({
-                    'type': 'segment-crossing-same-net',
-                    'net1': net_str,
-                    'net2': net_str,
-                    'layer': seg1.layer,
-                    'cross_point': cross_point,
-                    'loc1': (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
-                    'loc2': (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
-                })
+                violations.append(
+                    {
+                        "type": "segment-crossing-same-net",
+                        "net1": net_str,
+                        "net2": net_str,
+                        "layer": seg1.layer,
+                        "cross_point": cross_point,
+                        "loc1": (seg1.start_x, seg1.start_y, seg1.end_x, seg1.end_y),
+                        "loc2": (seg2.start_x, seg2.start_y, seg2.end_x, seg2.end_y),
+                    }
+                )
 
     # Check via-to-segment violations using spatial index
     if not quiet:
@@ -863,15 +898,17 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                     seg_net_name = pcb_data.nets.get(seg_net, None)
                     via_net_str = via_net_name.name if via_net_name else f"net_{via_net}"
                     seg_net_str = seg_net_name.name if seg_net_name else f"net_{seg_net}"
-                    violations.append({
-                        'type': 'via-segment',
-                        'net1': via_net_str,
-                        'net2': seg_net_str,
-                        'layer': seg.layer,
-                        'overlap_mm': overlap,
-                        'via_loc': (via.x, via.y),
-                        'seg_loc': (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
-                    })
+                    violations.append(
+                        {
+                            "type": "via-segment",
+                            "net1": via_net_str,
+                            "net2": seg_net_str,
+                            "layer": seg.layer,
+                            "overlap_mm": overlap,
+                            "via_loc": (via.x, via.y),
+                            "seg_loc": (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
+                        }
+                    )
 
     # Check via-to-via violations using spatial index
     if not quiet:
@@ -900,14 +937,16 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                 net2_name = pcb_data.nets.get(net2, None)
                 net1_str = net1_name.name if net1_name else f"net_{net1}"
                 net2_str = net2_name.name if net2_name else f"net_{net2}"
-                violations.append({
-                    'type': 'via-via' if net1 != net2 else 'via-via-same-net',
-                    'net1': net1_str,
-                    'net2': net2_str,
-                    'overlap_mm': overlap,
-                    'loc1': (via1.x, via1.y),
-                    'loc2': (via2.x, via2.y),
-                })
+                violations.append(
+                    {
+                        "type": "via-via" if net1 != net2 else "via-via-same-net",
+                        "net1": net1_str,
+                        "net2": net2_str,
+                        "overlap_mm": overlap,
+                        "loc1": (via1.x, via1.y),
+                        "loc2": (via2.x, via2.y),
+                    }
+                )
 
     # Check pad-to-segment violations using spatial index
     if not quiet:
@@ -936,17 +975,19 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                     seg_net_name = pcb_data.nets.get(seg_net, None)
                     pad_net_str = pad_net_name.name if pad_net_name else f"net_{pad_net}"
                     seg_net_str = seg_net_name.name if seg_net_name else f"net_{seg_net}"
-                    violations.append({
-                        'type': 'pad-segment',
-                        'net1': pad_net_str,
-                        'net2': seg_net_str,
-                        'layer': seg.layer,
-                        'overlap_mm': overlap,
-                        'pad_loc': (pad.global_x, pad.global_y),
-                        'pad_ref': f"{pad.component_ref}.{pad.pad_number}",
-                        'seg_loc': (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
-                        'closest_pt': closest_pt,
-                    })
+                    violations.append(
+                        {
+                            "type": "pad-segment",
+                            "net1": pad_net_str,
+                            "net2": seg_net_str,
+                            "layer": seg.layer,
+                            "overlap_mm": overlap,
+                            "pad_loc": (pad.global_x, pad.global_y),
+                            "pad_ref": f"{pad.component_ref}.{pad.pad_number}",
+                            "seg_loc": (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
+                            "closest_pt": closest_pt,
+                        }
+                    )
 
     # Check pad-to-via violations using spatial index
     if not quiet:
@@ -965,23 +1006,23 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                 if not via_net_matches and not pad_net_matches:
                     continue
 
-                has_violation, overlap = check_pad_via_overlap(
-                    pad, via, clearance, routing_layers, clearance_margin
-                )
+                has_violation, overlap = check_pad_via_overlap(pad, via, clearance, routing_layers, clearance_margin)
                 if has_violation:
                     pad_net_name = pcb_data.nets.get(pad_net, None)
                     via_net_name = pcb_data.nets.get(via_net, None)
                     pad_net_str = pad_net_name.name if pad_net_name else f"net_{pad_net}"
                     via_net_str = via_net_name.name if via_net_name else f"net_{via_net}"
-                    violations.append({
-                        'type': 'pad-via',
-                        'net1': pad_net_str,
-                        'net2': via_net_str,
-                        'overlap_mm': overlap,
-                        'pad_loc': (pad.global_x, pad.global_y),
-                        'pad_ref': f"{pad.component_ref}.{pad.pad_number}",
-                        'via_loc': (via.x, via.y),
-                    })
+                    violations.append(
+                        {
+                            "type": "pad-via",
+                            "net1": pad_net_str,
+                            "net2": via_net_str,
+                            "overlap_mm": overlap,
+                            "pad_loc": (pad.global_x, pad.global_y),
+                            "pad_ref": f"{pad.component_ref}.{pad.pad_number}",
+                            "via_loc": (via.x, via.y),
+                        }
+                    )
 
     # Dummy variables for compatibility with remaining code
     via_net_ids = list(vias_by_net.keys())
@@ -1009,14 +1050,16 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                     net2_name = pcb_data.nets.get(via2.net_id, None)
                     net1_str = net1_name.name if net1_name else f"net_{via1.net_id}"
                     net2_str = net2_name.name if net2_name else f"net_{via2.net_id}"
-                    violations.append({
-                        'type': 'via-drill-hole',
-                        'net1': net1_str,
-                        'net2': net2_str,
-                        'overlap_mm': overlap,
-                        'loc1': (via1.x, via1.y),
-                        'loc2': (via2.x, via2.y),
-                    })
+                    violations.append(
+                        {
+                            "type": "via-drill-hole",
+                            "net1": net1_str,
+                            "net2": net2_str,
+                            "overlap_mm": overlap,
+                            "loc1": (via1.x, via1.y),
+                            "loc2": (via2.x, via2.y),
+                        }
+                    )
 
         # Check via drill to pad drill (through-hole pads)
         # NOTE: Hole-to-hole clearance applies regardless of net (manufacturing constraint)
@@ -1039,15 +1082,17 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                         via_net_str = via_net_name.name if via_net_name else f"net_{via.net_id}"
                         pad_net_str = pad_net_name.name if pad_net_name else f"net_{pad_net}"
                         same_net = pad_net == via.net_id
-                        violations.append({
-                            'type': 'pad-drill-via-drill-same-net' if same_net else 'pad-drill-via-drill',
-                            'net1': pad_net_str,
-                            'net2': via_net_str,
-                            'overlap_mm': overlap,
-                            'pad_loc': (pad.global_x, pad.global_y),
-                            'pad_ref': f"{pad.component_ref}.{pad.pad_number}",
-                            'via_loc': (via.x, via.y),
-                        })
+                        violations.append(
+                            {
+                                "type": "pad-drill-via-drill-same-net" if same_net else "pad-drill-via-drill",
+                                "net1": pad_net_str,
+                                "net2": via_net_str,
+                                "overlap_mm": overlap,
+                                "pad_loc": (pad.global_x, pad.global_y),
+                                "pad_ref": f"{pad.component_ref}.{pad.pad_number}",
+                                "via_loc": (via.x, via.y),
+                            }
+                        )
 
     # Check board edge clearances
     board_bounds = pcb_data.board_info.board_bounds
@@ -1064,14 +1109,16 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
             if has_violation:
                 net_name = pcb_data.nets.get(seg.net_id, None)
                 net_str = net_name.name if net_name else f"net_{seg.net_id}"
-                violations.append({
-                    'type': 'segment-board-edge',
-                    'net1': net_str,
-                    'edge': edge,
-                    'layer': seg.layer,
-                    'overlap_mm': overlap,
-                    'seg_loc': (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
-                })
+                violations.append(
+                    {
+                        "type": "segment-board-edge",
+                        "net1": net_str,
+                        "edge": edge,
+                        "layer": seg.layer,
+                        "overlap_mm": overlap,
+                        "seg_loc": (seg.start_x, seg.start_y, seg.end_x, seg.end_y),
+                    }
+                )
 
         # Check vias
         for via in pcb_data.vias:
@@ -1082,13 +1129,15 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
             if has_violation:
                 net_name = pcb_data.nets.get(via.net_id, None)
                 net_str = net_name.name if net_name else f"net_{via.net_id}"
-                violations.append({
-                    'type': 'via-board-edge',
-                    'net1': net_str,
-                    'edge': edge,
-                    'overlap_mm': overlap,
-                    'via_loc': (via.x, via.y),
-                })
+                violations.append(
+                    {
+                        "type": "via-board-edge",
+                        "net1": net_str,
+                        "edge": edge,
+                        "overlap_mm": overlap,
+                        "via_loc": (via.x, via.y),
+                    }
+                )
 
     # Report violations
     if quiet:
@@ -1107,7 +1156,7 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
             # Group by type
             by_type = {}
             for v in violations:
-                t = v['type']
+                t = v["type"]
                 if t not in by_type:
                     by_type[t] = []
                 by_type[t].append(v)
@@ -1116,52 +1165,70 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
                 print(f"\n{vtype.upper()} violations ({len(vlist)}):")
                 print("-" * 40)
                 for v in vlist[:20]:  # Show first 20 of each type
-                    if vtype == 'segment-segment':
+                    if vtype == "segment-segment":
                         print(f"  {v['net1']} <-> {v['net2']}")
                         print(f"    Layer: {v['layer']}, Overlap: {v['overlap_mm']:.3f}mm")
-                        print(f"    Seg1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})-({v['loc1'][2]:.2f},{v['loc1'][3]:.2f})")
-                        print(f"    Seg2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})-({v['loc2'][2]:.2f},{v['loc2'][3]:.2f})")
-                    elif vtype == 'via-segment':
+                        print(
+                            f"    Seg1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})-({v['loc1'][2]:.2f},{v['loc1'][3]:.2f})"
+                        )
+                        print(
+                            f"    Seg2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})-({v['loc2'][2]:.2f},{v['loc2'][3]:.2f})"
+                        )
+                    elif vtype == "via-segment":
                         print(f"  Via:{v['net1']} <-> Seg:{v['net2']}")
                         print(f"    Layer: {v['layer']}, Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Via: ({v['via_loc'][0]:.2f},{v['via_loc'][1]:.2f})")
-                        print(f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})")
-                    elif vtype == 'via-via':
+                        print(
+                            f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})"
+                        )
+                    elif vtype == "via-via":
                         print(f"  {v['net1']} <-> {v['net2']}")
                         print(f"    Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Via1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})")
                         print(f"    Via2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})")
-                    elif vtype in ('segment-crossing', 'segment-crossing-same-net'):
+                    elif vtype in ("segment-crossing", "segment-crossing-same-net"):
                         print(f"  {v['net1']} <-> {v['net2']}")
-                        print(f"    Layer: {v['layer']}, Cross at: ({v['cross_point'][0]:.3f},{v['cross_point'][1]:.3f})")
-                        print(f"    Seg1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})-({v['loc1'][2]:.2f},{v['loc1'][3]:.2f})")
-                        print(f"    Seg2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})-({v['loc2'][2]:.2f},{v['loc2'][3]:.2f})")
-                    elif vtype == 'pad-segment':
+                        print(
+                            f"    Layer: {v['layer']}, Cross at: ({v['cross_point'][0]:.3f},{v['cross_point'][1]:.3f})"
+                        )
+                        print(
+                            f"    Seg1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})-({v['loc1'][2]:.2f},{v['loc1'][3]:.2f})"
+                        )
+                        print(
+                            f"    Seg2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})-({v['loc2'][2]:.2f},{v['loc2'][3]:.2f})"
+                        )
+                    elif vtype == "pad-segment":
                         print(f"  Pad:{v['net1']} ({v['pad_ref']}) <-> Seg:{v['net2']}")
                         print(f"    Layer: {v['layer']}, Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Pad: ({v['pad_loc'][0]:.2f},{v['pad_loc'][1]:.2f})")
-                        print(f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})")
-                    elif vtype == 'pad-via':
+                        print(
+                            f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})"
+                        )
+                    elif vtype == "pad-via":
                         print(f"  Pad:{v['net1']} ({v['pad_ref']}) <-> Via:{v['net2']}")
                         print(f"    Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Pad: ({v['pad_loc'][0]:.2f},{v['pad_loc'][1]:.2f})")
                         print(f"    Via: ({v['via_loc'][0]:.2f},{v['via_loc'][1]:.2f})")
-                    elif vtype == 'via-drill-hole':
+                    elif vtype == "via-drill-hole":
                         print(f"  Via:{v['net1']} <-> Via:{v['net2']} (drill hole clearance)")
                         print(f"    Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Via1: ({v['loc1'][0]:.2f},{v['loc1'][1]:.2f})")
                         print(f"    Via2: ({v['loc2'][0]:.2f},{v['loc2'][1]:.2f})")
-                    elif vtype in ('pad-drill-via-drill', 'pad-drill-via-drill-same-net'):
-                        same_net_msg = " [SAME NET]" if vtype.endswith('same-net') else ""
-                        print(f"  Pad:{v['net1']} ({v['pad_ref']}) <-> Via:{v['net2']} (drill hole clearance){same_net_msg}")
+                    elif vtype in ("pad-drill-via-drill", "pad-drill-via-drill-same-net"):
+                        same_net_msg = " [SAME NET]" if vtype.endswith("same-net") else ""
+                        print(
+                            f"  Pad:{v['net1']} ({v['pad_ref']}) <-> Via:{v['net2']} (drill hole clearance){same_net_msg}"
+                        )
                         print(f"    Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Pad: ({v['pad_loc'][0]:.2f},{v['pad_loc'][1]:.2f})")
                         print(f"    Via: ({v['via_loc'][0]:.2f},{v['via_loc'][1]:.2f})")
-                    elif vtype == 'segment-board-edge':
+                    elif vtype == "segment-board-edge":
                         print(f"  {v['net1']} too close to {v['edge']} board edge")
                         print(f"    Layer: {v['layer']}, Overlap: {v['overlap_mm']:.3f}mm")
-                        print(f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})")
-                    elif vtype == 'via-board-edge':
+                        print(
+                            f"    Seg: ({v['seg_loc'][0]:.2f},{v['seg_loc'][1]:.2f})-({v['seg_loc'][2]:.2f},{v['seg_loc'][3]:.2f})"
+                        )
+                    elif vtype == "via-board-edge":
                         print(f"  Via:{v['net1']} too close to {v['edge']} board edge")
                         print(f"    Overlap: {v['overlap_mm']:.3f}mm")
                         print(f"    Via: ({v['via_loc'][0]:.2f},{v['via_loc'][1]:.2f})")
@@ -1181,26 +1248,51 @@ def run_drc(pcb_file: str, clearance: float = 0.1, net_patterns: Optional[List[s
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Check PCB for DRC violations (clearance errors)')
-    parser.add_argument('pcb', help='Input PCB file')
-    parser.add_argument('--clearance', '-c', type=float, default=0.2,
-                        help='Minimum clearance in mm (default: 0.2)')
-    parser.add_argument('--hole-to-hole-clearance', type=float, default=0.2,
-                        help='Minimum drill hole edge-to-edge clearance in mm (default: 0.2)')
-    parser.add_argument('--board-edge-clearance', type=float, default=0.0,
-                        help='Minimum clearance from board edge in mm (0 = use --clearance value)')
-    parser.add_argument('--clearance-margin', type=float, default=0.05,
-                        help='Fraction of clearance to use as tolerance (default: 0.05 = 5%%). Violations smaller than clearance*margin are ignored.')
-    parser.add_argument('--nets', '-n', nargs='+', default=None,
-                        help='Optional net name patterns to focus on (fnmatch wildcards supported, e.g., "*lvds*")')
-    parser.add_argument('--debug-lines', '-d', action='store_true',
-                        help='Write debug lines to User.7 layer showing violation locations')
-    parser.add_argument('--quiet', '-q', action='store_true',
-                        help='Only print a summary line unless there are violations')
+    parser = argparse.ArgumentParser(description="Check PCB for DRC violations (clearance errors)")
+    parser.add_argument("pcb", help="Input PCB file")
+    parser.add_argument("--clearance", "-c", type=float, default=0.2, help="Minimum clearance in mm (default: 0.2)")
+    parser.add_argument(
+        "--hole-to-hole-clearance",
+        type=float,
+        default=0.2,
+        help="Minimum drill hole edge-to-edge clearance in mm (default: 0.2)",
+    )
+    parser.add_argument(
+        "--board-edge-clearance",
+        type=float,
+        default=0.0,
+        help="Minimum clearance from board edge in mm (0 = use --clearance value)",
+    )
+    parser.add_argument(
+        "--clearance-margin",
+        type=float,
+        default=0.05,
+        help="Fraction of clearance to use as tolerance (default: 0.05 = 5%%). Violations smaller than clearance*margin are ignored.",
+    )
+    parser.add_argument(
+        "--nets",
+        "-n",
+        nargs="+",
+        default=None,
+        help='Optional net name patterns to focus on (fnmatch wildcards supported, e.g., "*lvds*")',
+    )
+    parser.add_argument(
+        "--debug-lines", "-d", action="store_true", help="Write debug lines to User.7 layer showing violation locations"
+    )
+    parser.add_argument(
+        "--quiet", "-q", action="store_true", help="Only print a summary line unless there are violations"
+    )
 
     args = parser.parse_args()
 
-    violations = run_drc(args.pcb, args.clearance, args.nets, args.debug_lines, args.quiet,
-                         args.hole_to_hole_clearance, args.board_edge_clearance,
-                         args.clearance_margin)
+    violations = run_drc(
+        args.pcb,
+        args.clearance,
+        args.nets,
+        args.debug_lines,
+        args.quiet,
+        args.hole_to_hole_clearance,
+        args.board_edge_clearance,
+        args.clearance_margin,
+    )
     sys.exit(1 if violations else 0)

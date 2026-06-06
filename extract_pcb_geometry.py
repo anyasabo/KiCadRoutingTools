@@ -13,21 +13,21 @@ Examples:
     python extract_pcb_geometry.py board.kicad_pcb --nets "*lvds*" --output lvds.json
 """
 
-import sys
-import json
 import argparse
 import fnmatch
-from pathlib import Path
+import json
+import sys
 from collections import defaultdict
-from typing import Dict, List, Any, Optional
+from pathlib import Path
+from typing import Any
 
 # Add current directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from kicad_parser import parse_kicad_pcb, PCBData, POSITION_DECIMALS
+from kicad_parser import POSITION_DECIMALS, PCBData, parse_kicad_pcb
 
 
-def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> Dict[str, Any]:
+def extract_geometry(pcb: PCBData, net_patterns: list[str] | None = None) -> dict[str, Any]:
     """
     Extract all geometry from a PCBData object into a dictionary.
 
@@ -39,7 +39,7 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
         Dictionary with all geometry data
     """
 
-    def matches_pattern(net_name: str, patterns: List[str]) -> bool:
+    def matches_pattern(net_name: str, patterns: list[str]) -> bool:
         """Check if net name matches any of the patterns."""
         if not patterns:
             return True
@@ -50,10 +50,7 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
 
     # Filter net IDs if patterns provided
     if net_patterns:
-        filtered_net_ids = {
-            net_id for net_id, name in net_names.items()
-            if matches_pattern(name, net_patterns)
-        }
+        filtered_net_ids = {net_id for net_id, name in net_names.items() if matches_pattern(name, net_patterns)}
     else:
         filtered_net_ids = None  # Include all
 
@@ -64,39 +61,40 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
     nets = {}
     for net_id, net in pcb.nets.items():
         if should_include(net_id):
-            nets[net_id] = {
-                "name": net.name,
-                "id": net_id
-            }
+            nets[net_id] = {"name": net.name, "id": net_id}
 
     # Extract segments (tracks)
     segments = []
     for seg in pcb.segments:
         if should_include(seg.net_id):
-            segments.append({
-                "net_id": seg.net_id,
-                "net_name": net_names.get(seg.net_id, f"net_{seg.net_id}"),
-                "start": {"x": seg.start_x, "y": seg.start_y},
-                "end": {"x": seg.end_x, "y": seg.end_y},
-                "layer": seg.layer,
-                "width": seg.width,
-                "uuid": seg.uuid
-            })
+            segments.append(
+                {
+                    "net_id": seg.net_id,
+                    "net_name": net_names.get(seg.net_id, f"net_{seg.net_id}"),
+                    "start": {"x": seg.start_x, "y": seg.start_y},
+                    "end": {"x": seg.end_x, "y": seg.end_y},
+                    "layer": seg.layer,
+                    "width": seg.width,
+                    "uuid": seg.uuid,
+                }
+            )
 
     # Extract vias
     vias = []
     for via in pcb.vias:
         if should_include(via.net_id):
-            vias.append({
-                "net_id": via.net_id,
-                "net_name": net_names.get(via.net_id, f"net_{via.net_id}"),
-                "x": via.x,
-                "y": via.y,
-                "size": via.size,
-                "drill": via.drill,
-                "layers": via.layers,
-                "uuid": via.uuid
-            })
+            vias.append(
+                {
+                    "net_id": via.net_id,
+                    "net_name": net_names.get(via.net_id, f"net_{via.net_id}"),
+                    "x": via.x,
+                    "y": via.y,
+                    "size": via.size,
+                    "drill": via.drill,
+                    "layers": via.layers,
+                    "uuid": via.uuid,
+                }
+            )
 
     # Extract pads (grouped by component)
     pads = []
@@ -116,7 +114,7 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
                     "layers": pad.layers,
                     "rotation": pad.rotation,
                     "pinfunction": pad.pinfunction,
-                    "pintype": pad.pintype
+                    "pintype": pad.pintype,
                 }
                 pads.append(pad_data)
                 pads_by_component[pad.component_ref].append(pad_data)
@@ -131,7 +129,7 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
             "y": fp.y,
             "rotation": fp.rotation,
             "layer": fp.layer,
-            "pad_count": len(fp.pads) if fp.pads else 0
+            "pad_count": len(fp.pads) if fp.pads else 0,
         }
 
     # Build stub analysis (segments with unconnected endpoints)
@@ -155,13 +153,15 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
         # Stub endpoints have count == 1
         for (x, y), count in endpoints.items():
             if count == 1:
-                stubs.append({
-                    "net_id": net_id,
-                    "net_name": net_names.get(net_id, f"net_{net_id}"),
-                    "x": x,
-                    "y": y,
-                    "segment_count": len(segs)
-                })
+                stubs.append(
+                    {
+                        "net_id": net_id,
+                        "net_name": net_names.get(net_id, f"net_{net_id}"),
+                        "x": x,
+                        "y": y,
+                        "segment_count": len(segs),
+                    }
+                )
 
     return {
         "source_file": None,  # Will be set by caller
@@ -178,17 +178,17 @@ def extract_geometry(pcb: PCBData, net_patterns: Optional[List[str]] = None) -> 
             "via_count": len(vias),
             "pad_count": len(pads),
             "footprint_count": len(footprints),
-            "stub_count": len(stubs)
-        }
+            "stub_count": len(stubs),
+        },
     }
 
 
-def print_summary(data: Dict[str, Any]) -> None:
+def print_summary(data: dict[str, Any]) -> None:
     """Print a human-readable summary of the geometry."""
     s = data["summary"]
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"PCB Geometry Summary: {data.get('source_file', 'unknown')}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  Nets:       {s['net_count']:,}")
     print(f"  Segments:   {s['segment_count']:,}")
     print(f"  Vias:       {s['via_count']:,}")
@@ -210,39 +210,33 @@ def print_summary(data: Dict[str, Any]) -> None:
     # Top components by pad count
     if data["pads_by_component"]:
         print("Top components by pad count:")
-        sorted_comps = sorted(
-            data["pads_by_component"].items(),
-            key=lambda x: len(x[1]),
-            reverse=True
-        )[:10]
+        sorted_comps = sorted(data["pads_by_component"].items(), key=lambda x: len(x[1]), reverse=True)[:10]
         for ref, pads in sorted_comps:
             print(f"  {ref}: {len(pads)} pads")
         print()
 
 
-def find_stubs_near_point(data: Dict[str, Any], x: float, y: float, radius: float) -> List[Dict]:
+def find_stubs_near_point(data: dict[str, Any], x: float, y: float, radius: float) -> list[dict]:
     """Find stub endpoints within radius of a point."""
     import math
+
     results = []
     for stub in data["stubs"]:
-        dist = math.sqrt((stub["x"] - x)**2 + (stub["y"] - y)**2)
+        dist = math.sqrt((stub["x"] - x) ** 2 + (stub["y"] - y) ** 2)
         if dist <= radius:
             results.append({**stub, "distance": dist})
     return sorted(results, key=lambda s: s["distance"])
 
 
 def find_stubs_near_line(
-    data: Dict[str, Any],
-    x1: float, y1: float,
-    x2: float, y2: float,
-    max_distance: float
-) -> List[Dict]:
+    data: dict[str, Any], x1: float, y1: float, x2: float, y2: float, max_distance: float
+) -> list[dict]:
     """Find stub endpoints within max_distance of a line segment."""
     import math
 
     dx = x2 - x1
     dy = y2 - y1
-    length = math.sqrt(dx*dx + dy*dy)
+    length = math.sqrt(dx * dx + dy * dy)
     if length < 0.001:
         return find_stubs_near_point(data, x1, y1, max_distance)
 
@@ -263,11 +257,7 @@ def find_stubs_near_line(
             # Perpendicular distance
             perp_dist = abs(vx * dy - vy * dx)
             if perp_dist <= max_distance:
-                results.append({
-                    **stub,
-                    "distance": perp_dist,
-                    "along": along
-                })
+                results.append({**stub, "distance": perp_dist, "along": along})
 
     return sorted(results, key=lambda s: s["distance"])
 
@@ -283,13 +273,14 @@ Examples:
   %(prog)s board.kicad_pcb --summary          # Print summary only
   %(prog)s board.kicad_pcb --nets "*lvds*"    # Filter to LVDS nets
   %(prog)s board.kicad_pcb --nets "*lvds*" "*clk*"  # Multiple patterns
-        """
+        """,
     )
     parser.add_argument("input_file", help="Input KiCad PCB file")
     parser.add_argument("output_file", nargs="?", help="Output JSON file (default: <input>_geometry.json)")
     parser.add_argument("--summary", action="store_true", help="Print summary and exit (no JSON output)")
-    parser.add_argument("--nets", nargs="+", metavar="PATTERN",
-                        help="Filter to nets matching glob patterns (e.g., '*lvds*')")
+    parser.add_argument(
+        "--nets", nargs="+", metavar="PATTERN", help="Filter to nets matching glob patterns (e.g., '*lvds*')"
+    )
     parser.add_argument("--indent", type=int, default=2, help="JSON indent (default: 2, use 0 for compact)")
     parser.add_argument("-o", "--output", dest="output_file_alt", help="Alternative way to specify output file")
 
@@ -319,19 +310,19 @@ Examples:
 
     if not args.summary:
         indent = args.indent if args.indent > 0 else None
-        with open(output_file, 'w') as f:
+        with open(output_file, "w") as f:
             json.dump(data, f, indent=indent)
         print(f"Wrote {output_file}")
 
 
 # Convenience functions for interactive use
-def load_geometry(json_file: str) -> Dict[str, Any]:
+def load_geometry(json_file: str) -> dict[str, Any]:
     """Load geometry from a JSON file."""
     with open(json_file) as f:
         return json.load(f)
 
 
-def quick_extract(pcb_file: str, net_patterns: Optional[List[str]] = None) -> Dict[str, Any]:
+def quick_extract(pcb_file: str, net_patterns: list[str] | None = None) -> dict[str, Any]:
     """Quick extraction without writing to file - useful for interactive use."""
     pcb = parse_kicad_pcb(pcb_file)
     data = extract_geometry(pcb, net_patterns)

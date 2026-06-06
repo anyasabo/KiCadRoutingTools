@@ -5,28 +5,26 @@ Routes individual nets using A* pathfinding on a grid obstacle map.
 """
 
 import math
-import time
-from typing import Dict, List, Optional, Set, Tuple
-from terminal_colors import RED, YELLOW, RESET
-
-from kicad_parser import PCBData, Segment, Via
-from routing_config import GridRouteConfig, GridCoord
-from routing_utils import build_layer_map
-from connectivity import (
-    get_net_endpoints,
-    get_multipoint_net_pads,
-    find_closest_point_on_segments,
-    compute_mst_edges,
-    get_zone_connected_pad_groups
-)
-from obstacle_map import build_obstacle_map, get_same_net_through_hole_positions
-from bresenham_utils import walk_line
-from geometry_utils import simplify_path
+import os
 
 # Import Rust router
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+import time
+
+from bresenham_utils import walk_line
+from connectivity import (
+    compute_mst_edges,
+    get_net_endpoints,
+    get_zone_connected_pad_groups,
+)
+from geometry_utils import simplify_path
+from kicad_parser import PCBData, Segment, Via
+from obstacle_map import build_obstacle_map, get_same_net_through_hole_positions
+from routing_config import GridCoord, GridRouteConfig
+from routing_utils import build_layer_map
+from terminal_colors import RESET, YELLOW
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
 try:
     from grid_router import GridObstacleMap, GridRouter, VisualRouter
@@ -57,7 +55,7 @@ def print_route_stats(stats: dict, print_prefix: str = "  "):
     print(f"{print_prefix}  Closed set size: {int(stats.get('closed_set_size', 0)):,} (unique visited)")
 
     # Computed ratios
-    h_ratio = stats.get('heuristic_ratio', 0)
+    h_ratio = stats.get("heuristic_ratio", 0)
     if h_ratio > 0:
         # Note: h_ratio > 1.0 is expected when using weighted A* (h_weight > 1.0)
         # The heuristic is multiplied by h_weight to trade optimality for speed
@@ -69,21 +67,25 @@ def print_route_stats(stats: dict, print_prefix: str = "  "):
             quality = f"weighted A* (h_weight ~{h_ratio:.1f})"
         print(f"{print_prefix}  Heuristic ratio: {h_ratio:.3f} (h/g, {quality})")
 
-    exp_ratio = stats.get('expansion_ratio', 0)
+    exp_ratio = stats.get("expansion_ratio", 0)
     if exp_ratio > 0:
-        quality = "excellent" if exp_ratio < 2 else "good" if exp_ratio < 5 else "poor" if exp_ratio < 20 else "very poor"
+        quality = (
+            "excellent" if exp_ratio < 2 else "good" if exp_ratio < 5 else "poor" if exp_ratio < 20 else "very poor"
+        )
         print(f"{print_prefix}  Expansion ratio: {exp_ratio:.1f}x path length ({quality})")
 
-    revisit_ratio = stats.get('revisit_ratio', 0)
+    revisit_ratio = stats.get("revisit_ratio", 0)
     if revisit_ratio >= 0:
         print(f"{print_prefix}  Revisit ratio:   {revisit_ratio:.3f} (path improvements / expanded)")
 
-    skip_ratio = stats.get('skip_ratio', 0)
+    skip_ratio = stats.get("skip_ratio", 0)
     if skip_ratio >= 0:
         print(f"{print_prefix}  Skip ratio:      {skip_ratio:.3f} (duplicates / total pops)")
 
 
-def _print_obstacle_map(obstacles: 'GridObstacleMap', center_gx: int, center_gy: int, layer: int, radius: int = 20, print_prefix: str = ""):
+def _print_obstacle_map(
+    obstacles: "GridObstacleMap", center_gx: int, center_gy: int, layer: int, radius: int = 20, print_prefix: str = ""
+):
     """Print a visual map of blocking around a center point."""
     print(f"{print_prefix}  Obstacle map around ({center_gx}, {center_gy}) layer={layer} (radius={radius}):")
     for dy in range(-radius, radius + 1):
@@ -91,20 +93,17 @@ def _print_obstacle_map(obstacles: 'GridObstacleMap', center_gx: int, center_gy:
         for dx in range(-radius, radius + 1):
             cx, cy = center_gx + dx, center_gy + dy
             if dx == 0 and dy == 0:
-                row.append('T')
+                row.append("T")
             elif obstacles.is_blocked(cx, cy, layer):
-                row.append('#')
+                row.append("#")
             else:
-                row.append('.')
+                row.append(".")
         print(f"{print_prefix}    {''.join(row)}")
 
 
 def _identify_blocking_obstacles(
-    blocked_positions: List[Tuple[int, int, int]],
-    pcb_data: PCBData,
-    config: GridRouteConfig,
-    current_net_id: int = -1
-) -> Dict[int, Tuple[str, int]]:
+    blocked_positions: list[tuple[int, int, int]], pcb_data: PCBData, config: GridRouteConfig, current_net_id: int = -1
+) -> dict[int, tuple[str, int]]:
     """
     Identify which nets are blocking specific grid positions.
 
@@ -126,7 +125,7 @@ def _identify_blocking_obstacles(
     via_expansion_mm = config.via_size / 2 + config.track_width / 2 + config.clearance
     via_expansion_grid = max(1, coord.to_grid_dist(via_expansion_mm))
 
-    blockers: Dict[int, Tuple[str, int]] = {}
+    blockers: dict[int, tuple[str, int]] = {}
 
     # Convert blocked positions to set for faster lookup
     blocked_set = set(blocked_positions)
@@ -147,7 +146,9 @@ def _identify_blocking_obstacles(
             for ex in range(-expansion_grid, expansion_grid + 1):
                 for ey in range(-expansion_grid, expansion_grid + 1):
                     if (gx + ex, gy + ey, layer_idx) in blocked_set:
-                        net_name = pcb_data.nets[seg.net_id].name if seg.net_id in pcb_data.nets else f"net_{seg.net_id}"
+                        net_name = (
+                            pcb_data.nets[seg.net_id].name if seg.net_id in pcb_data.nets else f"net_{seg.net_id}"
+                        )
                         if seg.net_id in blockers:
                             blockers[seg.net_id] = (net_name, blockers[seg.net_id][1] + 1)
                         else:
@@ -171,7 +172,9 @@ def _identify_blocking_obstacles(
             for ex in range(-via_expansion_grid, via_expansion_grid + 1):
                 for ey in range(-via_expansion_grid, via_expansion_grid + 1):
                     if (gx + ex, gy + ey, layer_idx) in blocked_set:
-                        net_name = pcb_data.nets[via.net_id].name if via.net_id in pcb_data.nets else f"net_{via.net_id}"
+                        net_name = (
+                            pcb_data.nets[via.net_id].name if via.net_id in pcb_data.nets else f"net_{via.net_id}"
+                        )
                         if via.net_id in blockers:
                             blockers[via.net_id] = (net_name, blockers[via.net_id][1] + 1)
                         else:
@@ -193,8 +196,8 @@ def _identify_blocking_obstacles(
             gx, gy = coord.to_grid(pad.global_x, pad.global_y)
 
             # Compute pad expansion
-            pad_half_x = pad.size_x / 2 if hasattr(pad, 'size_x') else 0.5
-            pad_half_y = pad.size_y / 2 if hasattr(pad, 'size_y') else 0.5
+            pad_half_x = pad.size_x / 2 if hasattr(pad, "size_x") else 0.5
+            pad_half_y = pad.size_y / 2 if hasattr(pad, "size_y") else 0.5
             pad_expansion_x = max(1, coord.to_grid_dist(pad_half_x + config.clearance + config.track_width / 2))
             pad_expansion_y = max(1, coord.to_grid_dist(pad_half_y + config.clearance + config.track_width / 2))
 
@@ -213,7 +216,9 @@ def _identify_blocking_obstacles(
                 for ex in range(-pad_expansion_x, pad_expansion_x + 1):
                     for ey in range(-pad_expansion_y, pad_expansion_y + 1):
                         if (gx + ex, gy + ey, layer_idx) in blocked_set:
-                            net_name = pcb_data.nets[pad.net_id].name if pad.net_id in pcb_data.nets else f"net_{pad.net_id}"
+                            net_name = (
+                                pcb_data.nets[pad.net_id].name if pad.net_id in pcb_data.nets else f"net_{pad.net_id}"
+                            )
                             if pad.net_id in blockers:
                                 blockers[pad.net_id] = (net_name, blockers[pad.net_id][1] + 1)
                             else:
@@ -229,8 +234,16 @@ def _identify_blocking_obstacles(
     return blockers
 
 
-def _diagnose_blocked_start(obstacles: 'GridObstacleMap', cells: List, label: str, print_prefix: str = "", track_margin: int = 0,
-                            pcb_data: PCBData = None, config: GridRouteConfig = None, current_net_id: int = -1):
+def _diagnose_blocked_start(
+    obstacles: "GridObstacleMap",
+    cells: list,
+    label: str,
+    print_prefix: str = "",
+    track_margin: int = 0,
+    pcb_data: PCBData = None,
+    config: GridRouteConfig = None,
+    current_net_id: int = -1,
+):
     """
     Diagnose why routing couldn't start from the given cells.
 
@@ -271,11 +284,13 @@ def _diagnose_blocked_start(obstacles: 'GridObstacleMap', cells: List, label: st
                     neighbor_blocked = obstacles.is_blocked(gx + dx, gy + dy, layer)
                 if neighbor_blocked:
                     blocked_neighbors += 1
-                    blocked_details.append(f"({gx+dx},{gy+dy})")
+                    blocked_details.append(f"({gx + dx},{gy + dy})")
 
         status = "BLOCKED" if cell_blocked else "ok"
         margin_str = f" (margin={track_margin})" if track_margin > 0 else ""
-        print(f"{print_prefix}  {label} cell ({gx}, {gy}, layer={layer}): {status}, {blocked_neighbors}/{total_neighbors} neighbors blocked{margin_str}")
+        print(
+            f"{print_prefix}  {label} cell ({gx}, {gy}, layer={layer}): {status}, {blocked_neighbors}/{total_neighbors} neighbors blocked{margin_str}"
+        )
         # Show which specific neighbors are blocked for debugging
         if blocked_neighbors == total_neighbors and blocked_neighbors > 0:
             print(f"{print_prefix}    ALL neighbors blocked: {', '.join(blocked_details)}")
@@ -307,18 +322,18 @@ def _diagnose_blocked_start(obstacles: 'GridObstacleMap', cells: List, label: st
 
 
 def _probe_route_with_frontier(
-    router: 'GridRouter',
-    obstacles: 'GridObstacleMap',
-    forward_sources: List,
-    forward_targets: List,
-    config: 'GridRouteConfig',
+    router: "GridRouter",
+    obstacles: "GridObstacleMap",
+    forward_sources: list,
+    forward_targets: list,
+    config: "GridRouteConfig",
     print_prefix: str = "",
-    direction_labels: Tuple[str, str] = ("forward", "backward"),
+    direction_labels: tuple[str, str] = ("forward", "backward"),
     track_margin: int = 0,
     pcb_data: PCBData = None,
     current_net_id: int = -1,
-    single_direction: bool = False
-) -> Tuple[Optional[List], int, List, List, bool, int, int]:
+    single_direction: bool = False,
+) -> tuple[list | None, int, list, list, bool, int, int]:
     """
     Probe routing with fail-fast on stuck directions.
 
@@ -357,7 +372,8 @@ def _probe_route_with_frontier(
 
     # Probe forward direction
     path, iterations, blocked_cells = router.route_with_frontier(
-        obstacles, forward_sources, forward_targets, probe_iterations, track_margin=track_margin)
+        obstacles, forward_sources, forward_targets, probe_iterations, track_margin=track_margin
+    )
     first_probe_iters = iterations
     first_total_iters = first_probe_iters
     first_blocked = blocked_cells
@@ -386,16 +402,29 @@ def _probe_route_with_frontier(
         first_reached_max = first_probe_iters >= probe_iterations
         if not first_reached_max:
             # Forward is stuck
-            print(f"{print_prefix}{first_label} stuck ({first_probe_iters} < {probe_iterations}) [single-direction bus mode]")
-            _diagnose_blocked_start(obstacles, forward_sources, first_label, print_prefix, track_margin,
-                                    pcb_data=pcb_data, config=config, current_net_id=current_net_id)
+            print(
+                f"{print_prefix}{first_label} stuck ({first_probe_iters} < {probe_iterations}) [single-direction bus mode]"
+            )
+            _diagnose_blocked_start(
+                obstacles,
+                forward_sources,
+                first_label,
+                print_prefix,
+                track_margin,
+                pcb_data=pcb_data,
+                config=config,
+                current_net_id=current_net_id,
+            )
             fwd_iters, bwd_iters = get_fwd_bwd_iters()
             return None, total_iterations, forward_blocked, backward_blocked, False, fwd_iters, bwd_iters
 
         # Forward probe reached max - do full search
-        print(f"{print_prefix}Probe: {first_label}={first_probe_iters} iters [single-direction bus mode], trying full iterations...")
+        print(
+            f"{print_prefix}Probe: {first_label}={first_probe_iters} iters [single-direction bus mode], trying full iterations..."
+        )
         path, full_iters, full_blocked = router.route_with_frontier(
-            obstacles, forward_sources, forward_targets, config.max_iterations, track_margin=track_margin)
+            obstacles, forward_sources, forward_targets, config.max_iterations, track_margin=track_margin
+        )
         first_total_iters += full_iters
         total_iterations += full_iters
 
@@ -408,7 +437,8 @@ def _probe_route_with_frontier(
 
     # Probe backward direction (bidirectional mode)
     path, iterations, blocked_cells = router.route_with_frontier(
-        obstacles, forward_targets, forward_sources, probe_iterations, track_margin=track_margin)
+        obstacles, forward_targets, forward_sources, probe_iterations, track_margin=track_margin
+    )
     second_probe_iters = iterations
     second_total_iters = second_probe_iters
     second_blocked = blocked_cells
@@ -429,19 +459,57 @@ def _probe_route_with_frontier(
     if not (first_reached_max and second_reached_max):
         # At least one probe didn't reach max - that direction is stuck, skip full search
         if not first_reached_max and not second_reached_max:
-            print(f"{print_prefix}Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})")
-            _diagnose_blocked_start(obstacles, forward_sources, first_label, print_prefix, track_margin,
-                                    pcb_data=pcb_data, config=config, current_net_id=current_net_id)
-            _diagnose_blocked_start(obstacles, forward_targets, second_label, print_prefix, track_margin,
-                                    pcb_data=pcb_data, config=config, current_net_id=current_net_id)
+            print(
+                f"{print_prefix}Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})"
+            )
+            _diagnose_blocked_start(
+                obstacles,
+                forward_sources,
+                first_label,
+                print_prefix,
+                track_margin,
+                pcb_data=pcb_data,
+                config=config,
+                current_net_id=current_net_id,
+            )
+            _diagnose_blocked_start(
+                obstacles,
+                forward_targets,
+                second_label,
+                print_prefix,
+                track_margin,
+                pcb_data=pcb_data,
+                config=config,
+                current_net_id=current_net_id,
+            )
         elif not first_reached_max:
-            print(f"{print_prefix}{first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}")
-            _diagnose_blocked_start(obstacles, forward_sources, first_label, print_prefix, track_margin,
-                                    pcb_data=pcb_data, config=config, current_net_id=current_net_id)
+            print(
+                f"{print_prefix}{first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}"
+            )
+            _diagnose_blocked_start(
+                obstacles,
+                forward_sources,
+                first_label,
+                print_prefix,
+                track_margin,
+                pcb_data=pcb_data,
+                config=config,
+                current_net_id=current_net_id,
+            )
         else:
-            print(f"{print_prefix}{second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}")
-            _diagnose_blocked_start(obstacles, forward_targets, second_label, print_prefix, track_margin,
-                                    pcb_data=pcb_data, config=config, current_net_id=current_net_id)
+            print(
+                f"{print_prefix}{second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}"
+            )
+            _diagnose_blocked_start(
+                obstacles,
+                forward_targets,
+                second_label,
+                print_prefix,
+                track_margin,
+                pcb_data=pcb_data,
+                config=config,
+                current_net_id=current_net_id,
+            )
             # Print visual obstacle map around the stuck target
             if forward_targets and config.debug_lines:
                 tgt = forward_targets[0]
@@ -450,10 +518,13 @@ def _probe_route_with_frontier(
         return None, total_iterations, forward_blocked, backward_blocked, False, fwd_iters, bwd_iters
 
     # Both probes reached max iterations - do full search on forward direction
-    print(f"{print_prefix}Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {first_label} with full iterations...")
+    print(
+        f"{print_prefix}Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {first_label} with full iterations..."
+    )
 
     path, full_iters, full_blocked = router.route_with_frontier(
-        obstacles, forward_sources, forward_targets, config.max_iterations, track_margin=track_margin)
+        obstacles, forward_sources, forward_targets, config.max_iterations, track_margin=track_margin
+    )
     first_total_iters += full_iters
     total_iterations += full_iters
 
@@ -467,7 +538,8 @@ def _probe_route_with_frontier(
     forward_blocked = full_blocked
 
     path, backward_full_iters, backward_full_blocked = router.route_with_frontier(
-        obstacles, forward_targets, forward_sources, config.max_iterations, track_margin=track_margin)
+        obstacles, forward_targets, forward_sources, config.max_iterations, track_margin=track_margin
+    )
     second_total_iters += backward_full_iters
     total_iterations += backward_full_iters
 
@@ -481,8 +553,9 @@ def _probe_route_with_frontier(
     return None, total_iterations, forward_blocked, backward_blocked, False, fwd_iters, bwd_iters
 
 
-def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
-              unrouted_stubs: Optional[List[Tuple[float, float]]] = None) -> Optional[dict]:
+def route_net(
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, unrouted_stubs: list[tuple[float, float]] | None = None
+) -> dict | None:
     """Route a single net using the Rust router."""
     # Find endpoints (segments or pads)
     sources, targets, error = get_net_endpoints(pcb_data, net_id, config)
@@ -491,7 +564,7 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
         return None
 
     if not sources or not targets:
-        print(f"  No valid source/target endpoints found")
+        print("  No valid source/target endpoints found")
         return None
 
     coord = GridCoord(config.grid_step)
@@ -531,8 +604,12 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
         obstacles.add_source_target_cell(gx, gy, layer)
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
     # Check which proximity zones the stub free ends are in for precise heuristic estimate
     src_in_stub = any(obstacles.get_stub_proximity_cost(gx, gy) > 0 for gx, gy, _ in prox_check_sources)
@@ -542,20 +619,28 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
     prox_h_cost = config.get_proximity_heuristic_for_zones(src_in_stub, src_in_bga, tgt_in_stub, tgt_in_bga)
     if config.verbose:
         zones = []
-        if src_in_stub: zones.append("src:stub")
-        if src_in_bga: zones.append("src:bga")
-        if tgt_in_stub: zones.append("tgt:stub")
-        if tgt_in_bga: zones.append("tgt:bga")
+        if src_in_stub:
+            zones.append("src:stub")
+        if src_in_bga:
+            zones.append("src:bga")
+        if tgt_in_stub:
+            zones.append("tgt:stub")
+        if tgt_in_bga:
+            zones.append("tgt:bga")
         print(f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}]")
 
-    router = GridRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                        turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                        vertical_attraction_radius=attraction_radius_grid,
-                        vertical_attraction_bonus=attraction_bonus,
-                        layer_costs=config.get_layer_costs(),
-                        proximity_heuristic_cost=prox_h_cost,
-                        layer_direction_preferences=config.get_layer_direction_preferences(),
-                        direction_preference_cost=config.direction_preference_cost)
+    router = GridRouter(
+        via_cost=config.via_cost * 1000,
+        h_weight=config.heuristic_weight,
+        turn_cost=config.turn_cost,
+        via_proximity_cost=int(config.via_proximity_cost),
+        vertical_attraction_radius=attraction_radius_grid,
+        vertical_attraction_bonus=attraction_bonus,
+        layer_costs=config.get_layer_costs(),
+        proximity_heuristic_cost=prox_h_cost,
+        layer_direction_preferences=config.get_layer_direction_preferences(),
+        direction_preference_cost=config.direction_preference_cost,
+    )
 
     # Calculate track margin for wide power tracks
     # Use ceiling + 1 to account for grid quantization and diagonal track approaches
@@ -587,13 +672,17 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
     probe_iterations = config.max_probe_iterations
 
     # Probe first direction
-    path, iterations, _ = router.route_multi(obstacles, first_sources, first_targets, probe_iterations, track_margin=track_margin)
+    path, iterations, _ = router.route_multi(
+        obstacles, first_sources, first_targets, probe_iterations, track_margin=track_margin
+    )
     first_probe_iters = iterations
     total_iterations = first_probe_iters
 
     if path is None:
         # Probe second direction
-        path, iterations, _ = router.route_multi(obstacles, second_sources, second_targets, probe_iterations, track_margin=track_margin)
+        path, iterations, _ = router.route_multi(
+            obstacles, second_sources, second_targets, probe_iterations, track_margin=track_margin
+        )
         second_probe_iters = iterations
         total_iterations += second_probe_iters
 
@@ -607,24 +696,66 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
             if not (first_reached_max and second_reached_max):
                 # At least one probe didn't reach max - that direction is stuck, skip full search
                 if not first_reached_max and not second_reached_max:
-                    print(f"Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})")
-                    _diagnose_blocked_start(obstacles, first_sources, first_label, "", track_margin,
-                                            pcb_data=pcb_data, config=config, current_net_id=net_id)
-                    _diagnose_blocked_start(obstacles, second_sources, second_label, "", track_margin,
-                                            pcb_data=pcb_data, config=config, current_net_id=net_id)
+                    print(
+                        f"Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})"
+                    )
+                    _diagnose_blocked_start(
+                        obstacles,
+                        first_sources,
+                        first_label,
+                        "",
+                        track_margin,
+                        pcb_data=pcb_data,
+                        config=config,
+                        current_net_id=net_id,
+                    )
+                    _diagnose_blocked_start(
+                        obstacles,
+                        second_sources,
+                        second_label,
+                        "",
+                        track_margin,
+                        pcb_data=pcb_data,
+                        config=config,
+                        current_net_id=net_id,
+                    )
                 elif not first_reached_max:
-                    print(f"{first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}")
-                    _diagnose_blocked_start(obstacles, first_sources, first_label, "", track_margin,
-                                            pcb_data=pcb_data, config=config, current_net_id=net_id)
+                    print(
+                        f"{first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}"
+                    )
+                    _diagnose_blocked_start(
+                        obstacles,
+                        first_sources,
+                        first_label,
+                        "",
+                        track_margin,
+                        pcb_data=pcb_data,
+                        config=config,
+                        current_net_id=net_id,
+                    )
                 else:
-                    print(f"{second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}")
-                    _diagnose_blocked_start(obstacles, second_sources, second_label, "", track_margin,
-                                            pcb_data=pcb_data, config=config, current_net_id=net_id)
+                    print(
+                        f"{second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}"
+                    )
+                    _diagnose_blocked_start(
+                        obstacles,
+                        second_sources,
+                        second_label,
+                        "",
+                        track_margin,
+                        pcb_data=pcb_data,
+                        config=config,
+                        current_net_id=net_id,
+                    )
             else:
                 # Both probes reached max - do full search on first direction
-                print(f"Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {first_label} with full iterations...")
+                print(
+                    f"Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {first_label} with full iterations..."
+                )
 
-                path, full_iters, _ = router.route_multi(obstacles, first_sources, first_targets, config.max_iterations, track_margin=track_margin)
+                path, full_iters, _ = router.route_multi(
+                    obstacles, first_sources, first_targets, config.max_iterations, track_margin=track_margin
+                )
                 total_iterations += full_iters
 
                 if path is not None:
@@ -632,7 +763,9 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
                 else:
                     # First direction failed, try second
                     print(f"No route found after {full_iters} iterations ({first_label}), trying {second_label}...")
-                    path, fallback_full_iters, _ = router.route_multi(obstacles, second_sources, second_targets, config.max_iterations, track_margin=track_margin)
+                    path, fallback_full_iters, _ = router.route_multi(
+                        obstacles, second_sources, second_targets, config.max_iterations, track_margin=track_margin
+                    )
                     total_iterations += fallback_full_iters
                     if path is not None:
                         reversed_path = start_backwards
@@ -679,11 +812,13 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
         orig_x, orig_y, orig_layer = start_original
         if abs(orig_x - first_grid_x) > 0.001 or abs(orig_y - first_grid_y) > 0.001:
             seg = Segment(
-                start_x=orig_x, start_y=orig_y,
-                end_x=first_grid_x, end_y=first_grid_y,
+                start_x=orig_x,
+                start_y=orig_y,
+                end_x=first_grid_x,
+                end_y=first_grid_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
@@ -699,22 +834,25 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
             # If so, skip creating a via - the pad provides the layer transition
             if (gx1, gy1) not in through_hole_positions:
                 via = Via(
-                    x=x1, y=y1,
+                    x=x1,
+                    y=y1,
                     size=config.via_size,
                     drill=config.via_drill,
                     layers=["F.Cu", "B.Cu"],  # Always through-hole
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_vias.append(via)
         else:
             if (x1, y1) != (x2, y2):
                 layer_name = layer_names[layer1]
                 seg = Segment(
-                    start_x=x1, start_y=y1,
-                    end_x=x2, end_y=y2,
+                    start_x=x1,
+                    start_y=y1,
+                    end_x=x2,
+                    end_y=y2,
                     width=config.get_net_track_width(net_id, layer_name),
                     layer=layer_name,
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_segments.append(seg)
 
@@ -724,27 +862,33 @@ def route_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
         orig_x, orig_y, orig_layer = end_original
         if abs(orig_x - last_grid_x) > 0.001 or abs(orig_y - last_grid_y) > 0.001:
             seg = Segment(
-                start_x=last_grid_x, start_y=last_grid_y,
-                end_x=orig_x, end_y=orig_y,
+                start_x=last_grid_x,
+                start_y=last_grid_y,
+                end_x=orig_x,
+                end_y=orig_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
     return {
-        'new_segments': new_segments,
-        'new_vias': new_vias,
-        'iterations': total_iterations,
-        'path_length': len(path),
-        'path': path,  # Include raw path for incremental obstacle updates
+        "new_segments": new_segments,
+        "new_vias": new_vias,
+        "iterations": total_iterations,
+        "path_length": len(path),
+        "path": path,  # Include raw path for incremental obstacle updates
     }
 
 
-def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
-                              obstacles: GridObstacleMap,
-                              attraction_path: Optional[List[Tuple[int, int, int]]] = None,
-                              reverse_direction: bool = False) -> Optional[dict]:
+def route_net_with_obstacles(
+    pcb_data: PCBData,
+    net_id: int,
+    config: GridRouteConfig,
+    obstacles: GridObstacleMap,
+    attraction_path: list[tuple[int, int, int]] | None = None,
+    reverse_direction: bool = False,
+) -> dict | None:
     """Route a single net using pre-built obstacles (for incremental routing).
 
     Args:
@@ -764,7 +908,7 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         return None
 
     if not sources or not targets:
-        print(f"  No valid source/target endpoints found")
+        print("  No valid source/target endpoints found")
         return None
 
     # Swap source/target for bus routing from clustered targets
@@ -803,8 +947,12 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         obstacles.add_source_target_cell(gx, gy, layer)
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
     # Check which proximity zones the stub free ends are in for precise heuristic estimate
     src_in_stub = any(obstacles.get_stub_proximity_cost(gx, gy) > 0 for gx, gy, _ in prox_check_sources)
@@ -814,33 +962,45 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
     prox_h_cost = config.get_proximity_heuristic_for_zones(src_in_stub, src_in_bga, tgt_in_stub, tgt_in_bga)
     if config.verbose:
         zones = []
-        if src_in_stub: zones.append("src:stub")
-        if src_in_bga: zones.append("src:bga")
-        if tgt_in_stub: zones.append("tgt:stub")
-        if tgt_in_bga: zones.append("tgt:bga")
+        if src_in_stub:
+            zones.append("src:stub")
+        if src_in_bga:
+            zones.append("src:bga")
+        if tgt_in_stub:
+            zones.append("tgt:stub")
+        if tgt_in_bga:
+            zones.append("tgt:bga")
         print(f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}]")
 
     # Calculate bus attraction parameters
-    bus_attraction_radius_grid = coord.to_grid_dist(config.bus_attraction_radius) if config.bus_attraction_radius > 0 else 0
+    bus_attraction_radius_grid = (
+        coord.to_grid_dist(config.bus_attraction_radius) if config.bus_attraction_radius > 0 else 0
+    )
     bus_attraction_bonus = int(config.bus_attraction_bonus) if config.bus_attraction_bonus > 0 else 0
 
-    router = GridRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                        turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                        vertical_attraction_radius=attraction_radius_grid,
-                        vertical_attraction_bonus=attraction_bonus,
-                        layer_costs=config.get_layer_costs(),
-                        proximity_heuristic_cost=prox_h_cost,
-                        layer_direction_preferences=config.get_layer_direction_preferences(),
-                        direction_preference_cost=config.direction_preference_cost,
-                        attraction_radius=bus_attraction_radius_grid,
-                        attraction_bonus=bus_attraction_bonus)
+    router = GridRouter(
+        via_cost=config.via_cost * 1000,
+        h_weight=config.heuristic_weight,
+        turn_cost=config.turn_cost,
+        via_proximity_cost=int(config.via_proximity_cost),
+        vertical_attraction_radius=attraction_radius_grid,
+        vertical_attraction_bonus=attraction_bonus,
+        layer_costs=config.get_layer_costs(),
+        proximity_heuristic_cost=prox_h_cost,
+        layer_direction_preferences=config.get_layer_direction_preferences(),
+        direction_preference_cost=config.direction_preference_cost,
+        attraction_radius=bus_attraction_radius_grid,
+        attraction_bonus=bus_attraction_bonus,
+    )
 
     # Set attraction path for bus routing (if provided)
     if attraction_path:
         router.set_attraction_path(attraction_path)
         if config.verbose:
             layers_in_path = set(p[2] for p in attraction_path)
-            print(f"    Bus attraction: {len(attraction_path)} path points, layers={layers_in_path}, radius={bus_attraction_radius_grid} grid, bonus={bus_attraction_bonus}")
+            print(
+                f"    Bus attraction: {len(attraction_path)} path points, layers={layers_in_path}, radius={bus_attraction_radius_grid} grid, bonus={bus_attraction_bonus}"
+            )
 
     # Calculate track margin for wide power tracks
     # Use ceiling + 1 to account for grid quantization and diagonal track approaches
@@ -869,11 +1029,21 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         print(f"    GridRouter sources: {forward_sources[:3]}{'...' if len(forward_sources) > 3 else ''}")
         print(f"    GridRouter targets: {forward_targets[:3]}{'...' if len(forward_targets) > 3 else ''}")
         if use_single_direction:
-            print(f"    Bus routing: single-direction mode (start from clustered endpoints)")
-    path, total_iterations, forward_blocked, backward_blocked, reversed_path, fwd_iters, bwd_iters = _route_main_connection(
-        router, obstacles, config, forward_sources, forward_targets, track_margin,
-        pcb_data, net_id, print_prefix="", direction_labels=direction_labels,
-        single_direction=use_single_direction
+            print("    Bus routing: single-direction mode (start from clustered endpoints)")
+    path, total_iterations, forward_blocked, backward_blocked, reversed_path, fwd_iters, bwd_iters = (
+        _route_main_connection(
+            router,
+            obstacles,
+            config,
+            forward_sources,
+            forward_targets,
+            track_margin,
+            pcb_data,
+            net_id,
+            print_prefix="",
+            direction_labels=direction_labels,
+            single_direction=use_single_direction,
+        )
     )
 
     # Adjust reversed_path based on start direction
@@ -884,12 +1054,12 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         dir_msg = "single direction" if use_single_direction else "both directions"
         print(f"No route found after {total_iterations} iterations ({dir_msg})")
         return {
-            'failed': True,
-            'iterations': total_iterations,
-            'blocked_cells_forward': forward_blocked,
-            'blocked_cells_backward': backward_blocked,
-            'iterations_forward': fwd_iters,
-            'iterations_backward': bwd_iters,
+            "failed": True,
+            "iterations": total_iterations,
+            "blocked_cells_forward": forward_blocked,
+            "blocked_cells_backward": backward_blocked,
+            "iterations_forward": fwd_iters,
+            "iterations_backward": bwd_iters,
         }
 
     print(f"Route found in {total_iterations} iterations, path length: {len(path)}")
@@ -903,7 +1073,8 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         else:
             stats_sources, stats_targets = forward_sources, forward_targets
         _, _, stats = router.route_multi(
-            obstacles, stats_sources, stats_targets, config.max_iterations, track_margin=track_margin)
+            obstacles, stats_sources, stats_targets, config.max_iterations, track_margin=track_margin
+        )
         print_route_stats(stats)
 
     if reversed_path:
@@ -938,11 +1109,13 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         orig_x, orig_y, orig_layer = start_original
         if abs(orig_x - first_grid_x) > 0.001 or abs(orig_y - first_grid_y) > 0.001:
             seg = Segment(
-                start_x=orig_x, start_y=orig_y,
-                end_x=first_grid_x, end_y=first_grid_y,
+                start_x=orig_x,
+                start_y=orig_y,
+                end_x=first_grid_x,
+                end_y=first_grid_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
@@ -958,22 +1131,25 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
             # If so, skip creating a via - the pad provides the layer transition
             if (gx1, gy1) not in through_hole_positions:
                 via = Via(
-                    x=x1, y=y1,
+                    x=x1,
+                    y=y1,
                     size=config.via_size,
                     drill=config.via_drill,
                     layers=["F.Cu", "B.Cu"],  # Always through-hole
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_vias.append(via)
         else:
             if (x1, y1) != (x2, y2):
                 layer_name = layer_names[layer1]
                 seg = Segment(
-                    start_x=x1, start_y=y1,
-                    end_x=x2, end_y=y2,
+                    start_x=x1,
+                    start_y=y1,
+                    end_x=x2,
+                    end_y=y2,
                     width=config.get_net_track_width(net_id, layer_name),
                     layer=layer_name,
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_segments.append(seg)
 
@@ -982,20 +1158,22 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
         orig_x, orig_y, orig_layer = end_original
         if abs(orig_x - last_grid_x) > 0.001 or abs(orig_y - last_grid_y) > 0.001:
             seg = Segment(
-                start_x=last_grid_x, start_y=last_grid_y,
-                end_x=orig_x, end_y=orig_y,
+                start_x=last_grid_x,
+                start_y=last_grid_y,
+                end_x=orig_x,
+                end_y=orig_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
     return {
-        'new_segments': new_segments,
-        'new_vias': new_vias,
-        'iterations': total_iterations,
-        'path_length': len(path),
-        'path': path,
+        "new_segments": new_segments,
+        "new_vias": new_vias,
+        "iterations": total_iterations,
+        "path_length": len(path),
+        "path": path,
     }
 
 
@@ -1003,7 +1181,8 @@ def route_net_with_obstacles(pcb_data: PCBData, net_id: int, config: GridRouteCo
 # Guide corridor (waypoint) routing (issue #7)
 # ---------------------------------------------------------------------------
 
-def build_corridor_waypoints(pcb_data: PCBData, config: GridRouteConfig) -> List[Tuple[int, int]]:
+
+def build_corridor_waypoints(pcb_data: PCBData, config: GridRouteConfig) -> list[tuple[int, int]]:
     """Convert user-drawn guide polylines into ordered grid waypoint cells.
 
     By default the waypoints are just the endpoints of each drawn line segment
@@ -1012,14 +1191,14 @@ def build_corridor_waypoints(pcb_data: PCBData, config: GridRouteConfig) -> List
     no two consecutive waypoints are farther apart than that spacing (useful to
     follow a curve more tightly). Returns [] when no guide paths are present.
     """
-    if not getattr(config, 'guide_corridor_enabled', False) or not pcb_data.guide_paths:
+    if not getattr(config, "guide_corridor_enabled", False) or not pcb_data.guide_paths:
         return []
 
     coord = GridCoord(config.grid_step)
-    spacing_mm = getattr(config, 'guide_corridor_spacing', 0.0) or 0.0
+    spacing_mm = getattr(config, "guide_corridor_spacing", 0.0) or 0.0
     spacing = coord.to_grid_dist(spacing_mm) if spacing_mm > 0 else 0
 
-    cells: List[Tuple[int, int]] = []
+    cells: list[tuple[int, int]] = []
     for gp in pcb_data.guide_paths:
         pts = list(gp.points)
         if gp.is_closed and len(pts) >= 2:
@@ -1036,12 +1215,11 @@ def build_corridor_waypoints(pcb_data: PCBData, config: GridRouteConfig) -> List
                     t = (k * spacing) / seg_len if seg_len else 0
                     if t >= 1.0:
                         break
-                    cells.append((round(g1[0] + t * (g2[0] - g1[0])),
-                                  round(g1[1] + t * (g2[1] - g1[1]))))
+                    cells.append((round(g1[0] + t * (g2[0] - g1[0])), round(g1[1] + t * (g2[1] - g1[1]))))
         cells.append(coord.to_grid(*pts[-1]))  # final vertex of this chain
 
     # Drop consecutive duplicates
-    out: List[Tuple[int, int]] = []
+    out: list[tuple[int, int]] = []
     for c in cells:
         if not out or out[-1] != c:
             out.append(c)
@@ -1099,9 +1277,16 @@ def _route_leg(router, obstacles, config, sources, targets, track_margin, pcb_da
     probe may return it reversed), so legs chain correctly end-to-start.
     """
     path, iters, _fb, _bb, reversed_path, _fi, _bi = _probe_route_with_frontier(
-        router, obstacles, sources, targets, config,
-        print_prefix="      ", track_margin=track_margin,
-        pcb_data=pcb_data, current_net_id=net_id)
+        router,
+        obstacles,
+        sources,
+        targets,
+        config,
+        print_prefix="      ",
+        track_margin=track_margin,
+        pcb_data=pcb_data,
+        current_net_id=net_id,
+    )
     if path is not None and reversed_path:
         path = path[::-1]
     return path, iters
@@ -1136,7 +1321,7 @@ def assign_waypoints_to_mst_edges(waypoints, pad_grid, mst_edges):
     buckets = {frozenset((ia, ib)): [] for ia, ib, _ in mst_edges}
     if not mst_edges:
         return buckets
-    for (wx, wy) in waypoints:
+    for wx, wy in waypoints:
         best_key, best_d = None, None
         for ia, ib, _ in mst_edges:
             ax, ay = pad_grid[ia]
@@ -1148,10 +1333,20 @@ def assign_waypoints_to_mst_edges(waypoints, pad_grid, mst_edges):
     return buckets
 
 
-def _route_main_connection(router, obstacles, config, sources, targets, track_margin,
-                           pcb_data, net_id, print_prefix="",
-                           direction_labels=("forward", "backward"), single_direction=False,
-                           waypoints=None):
+def _route_main_connection(
+    router,
+    obstacles,
+    config,
+    sources,
+    targets,
+    track_margin,
+    pcb_data,
+    net_id,
+    print_prefix="",
+    direction_labels=("forward", "backward"),
+    single_direction=False,
+    waypoints=None,
+):
     """Route sources->targets, steering through the guide corridor (issue #7).
 
     A drop-in replacement for _probe_route_with_frontier with the SAME return
@@ -1166,17 +1361,26 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
     the direct sources->targets route. So a corridor can never make a connection
     fail that would otherwise route, and the worst it can do is be ignored.
     """
+
     def direct():
         return _probe_route_with_frontier(
-            router, obstacles, sources, targets, config,
-            print_prefix=print_prefix, direction_labels=direction_labels,
-            track_margin=track_margin, pcb_data=pcb_data, current_net_id=net_id,
-            single_direction=single_direction)
+            router,
+            obstacles,
+            sources,
+            targets,
+            config,
+            print_prefix=print_prefix,
+            direction_labels=direction_labels,
+            track_margin=track_margin,
+            pcb_data=pcb_data,
+            current_net_id=net_id,
+            single_direction=single_direction,
+        )
 
     # `waypoints` may be a per-segment bucket (multi-point MST edge); when not
     # given, fall back to the whole corridor (single-segment / 2-pad nets).
     if waypoints is None:
-        waypoints = getattr(config, 'corridor_waypoints', None)
+        waypoints = getattr(config, "corridor_waypoints", None)
     # Bus routing (single_direction) has its own neighbor attraction; leave it be.
     if not waypoints or single_direction or not sources or not targets:
         return direct()
@@ -1191,6 +1395,7 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
     # Orient waypoints to enter at the end nearest the sources.
     def d2(a, b):
         return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
     s0 = sources[0]
     wp = list(waypoints)
     if d2(s0, wp[0]) > d2(s0, wp[-1]):
@@ -1202,8 +1407,7 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
     # clearance halo blocks the current layer there, can force a needless via/detour.
     endpoint_cells = list(sources) + list(targets)
     skip_d = 2 * snap_margin
-    wp = [(wx, wy) for (wx, wy) in wp
-          if not any(abs(wx - c[0]) + abs(wy - c[1]) <= skip_d for c in endpoint_cells)]
+    wp = [(wx, wy) for (wx, wy) in wp if not any(abs(wx - c[0]) + abs(wy - c[1]) <= skip_d for c in endpoint_cells)]
     if not wp:
         return direct()
 
@@ -1223,14 +1427,13 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
             if _cell_margin_clear(obstacles, wgx, wgy, prefer_layer, snap_margin):
                 return [(wgx, wgy, prefer_layer)]
             return []
-        free = [(wgx, wgy, L) for L in range(num_layers)
-                if _cell_margin_clear(obstacles, wgx, wgy, L, snap_margin)]
+        free = [(wgx, wgy, L) for L in range(num_layers) if _cell_margin_clear(obstacles, wgx, wgy, L, snap_margin)]
         if free:
             return free
         nf = _nearest_free_cell(obstacles, wgx, wgy, num_layers, margin=snap_margin)
         return [nf] if nf is not None else []
 
-    spine: List[Tuple[int, int, int]] = []
+    spine: list[tuple[int, int, int]] = []
     total = 0
     current = list(sources)
     # checkpoints[i] = (len(spine), current_sources) after accepting i waypoints.
@@ -1242,7 +1445,7 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
         else:
             spine.extend(path)
 
-    for (wgx, wgy) in wp:
+    for wgx, wgy in wp:
         # The committed layer is the one all current sources share (a single cell,
         # or e.g. tap points all on the same track layer); None until committed
         # (a through-hole start spans both). _waypoint_cells keeps the route on the
@@ -1252,8 +1455,7 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
         tgts = _waypoint_cells(wgx, wgy, prefer_layer)
         if not tgts:
             continue
-        path, iters = _route_leg(router, obstacles, config, current, tgts,
-                                 track_margin, pcb_data, net_id)
+        path, iters = _route_leg(router, obstacles, config, current, tgts, track_margin, pcb_data, net_id)
         total += iters
         if path is None:
             continue  # waypoint unreachable from here -> drop it
@@ -1267,8 +1469,7 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
 
     # Reach the targets, backing off trailing waypoints if the approach is stranded.
     while True:
-        path, iters = _route_leg(router, obstacles, config, current, targets,
-                                 track_margin, pcb_data, net_id)
+        path, iters = _route_leg(router, obstacles, config, current, targets, track_margin, pcb_data, net_id)
         total += iters
         if path is not None:
             _extend(path)
@@ -1285,16 +1486,19 @@ def _route_main_connection(router, obstacles, config, sources, targets, track_ma
     kept = len(checkpoints) - 1
     dropped = len(wp) - kept
     if dropped > 0:
-        print(f"{print_prefix}Guide corridor: followed {kept}/{len(wp)} waypoints "
-              f"(dropped {dropped} that would have blocked this segment)")
+        print(
+            f"{print_prefix}Guide corridor: followed {kept}/{len(wp)} waypoints "
+            f"(dropped {dropped} that would have blocked this segment)"
+        )
     elif kept > 0:
         print(f"{print_prefix}Guide corridor: following {kept} waypoint(s)")
 
     return (spine, total, [], [], False, total, 0)
 
 
-def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
-                                  obstacles: GridObstacleMap, vis_callback) -> Optional[dict]:
+def route_net_with_visualization(
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, obstacles: GridObstacleMap, vis_callback
+) -> dict | None:
     """Route a single net with real-time visualization.
 
     Uses VisualRouter for incremental stepping with visualization callbacks.
@@ -1320,7 +1524,7 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
         return None
 
     if not sources or not targets:
-        print(f"  No valid source/target endpoints found")
+        print("  No valid source/target endpoints found")
         return None
 
     coord = GridCoord(config.grid_step)
@@ -1359,15 +1563,23 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
     prox_h_cost = config.get_proximity_heuristic_for_zones(src_in_stub, src_in_bga, tgt_in_stub, tgt_in_bga)
     if config.verbose:
         zones = []
-        if src_in_stub: zones.append("src:stub")
-        if src_in_bga: zones.append("src:bga")
-        if tgt_in_stub: zones.append("tgt:stub")
-        if tgt_in_bga: zones.append("tgt:bga")
+        if src_in_stub:
+            zones.append("src:stub")
+        if src_in_bga:
+            zones.append("src:bga")
+        if tgt_in_stub:
+            zones.append("tgt:stub")
+        if tgt_in_bga:
+            zones.append("tgt:bga")
         print(f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}]")
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
     # Determine direction order (always deterministic)
     if config.direction_order in ("backwards", "backward"):
@@ -1385,12 +1597,16 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
         first_label, second_label = "forward", "backward"
 
     # Create visual router
-    router = VisualRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                          turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                          vertical_attraction_radius=attraction_radius_grid,
-                          vertical_attraction_bonus=attraction_bonus,
-                          layer_costs=config.get_layer_costs(),
-                          proximity_heuristic_cost=prox_h_cost)
+    router = VisualRouter(
+        via_cost=config.via_cost * 1000,
+        h_weight=config.heuristic_weight,
+        turn_cost=config.turn_cost,
+        via_proximity_cost=int(config.via_proximity_cost),
+        vertical_attraction_radius=attraction_radius_grid,
+        vertical_attraction_bonus=attraction_bonus,
+        layer_costs=config.get_layer_costs(),
+        proximity_heuristic_cost=prox_h_cost,
+    )
 
     # Try first direction with visualization
     if config.verbose:
@@ -1427,12 +1643,16 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
         print(f"No route found after {total_iterations} iterations ({first_label}), trying {second_label}...")
 
         # Try second direction
-        router = VisualRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                          turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                          vertical_attraction_radius=attraction_radius_grid,
-                          vertical_attraction_bonus=attraction_bonus,
-                          layer_costs=config.get_layer_costs(),
-                          proximity_heuristic_cost=prox_h_cost)
+        router = VisualRouter(
+            via_cost=config.via_cost * 1000,
+            h_weight=config.heuristic_weight,
+            turn_cost=config.turn_cost,
+            via_proximity_cost=int(config.via_proximity_cost),
+            vertical_attraction_radius=attraction_radius_grid,
+            vertical_attraction_bonus=attraction_bonus,
+            layer_costs=config.get_layer_costs(),
+            proximity_heuristic_cost=prox_h_cost,
+        )
         router.init(second_sources, second_targets, config.max_iterations)
         direction_used = second_label
 
@@ -1458,17 +1678,19 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
 
     if path is None:
         print(f"No route found after {total_iterations} iterations (both directions)")
-        return {'failed': True, 'iterations': total_iterations, 'direction': 'both'}
+        return {"failed": True, "iterations": total_iterations, "direction": "both"}
 
     print(f"Route found in {total_iterations} iterations ({direction_used}), path length: {len(path)}")
 
     # Print debug stats if verbose
     if config.verbose:
         stats = router.get_stats()
-        print(f"    VisualRouter stats: expanded={stats.get('cells_expanded', 0)}, pushed={stats.get('cells_pushed', 0)}, duplicates={stats.get('duplicate_skips', 0)}, closed={stats.get('closed_size', 0)}")
+        print(
+            f"    VisualRouter stats: expanded={stats.get('cells_expanded', 0)}, pushed={stats.get('cells_pushed', 0)}, duplicates={stats.get('duplicate_skips', 0)}, closed={stats.get('closed_size', 0)}"
+        )
 
     # Swap sources/targets if we used second direction
-    reversed_path = (direction_used == second_label)
+    reversed_path = direction_used == second_label
     if reversed_path:
         sources, targets = targets, sources
 
@@ -1501,11 +1723,13 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
         orig_x, orig_y, orig_layer = start_original
         if abs(orig_x - first_grid_x) > 0.001 or abs(orig_y - first_grid_y) > 0.001:
             seg = Segment(
-                start_x=orig_x, start_y=orig_y,
-                end_x=first_grid_x, end_y=first_grid_y,
+                start_x=orig_x,
+                start_y=orig_y,
+                end_x=first_grid_x,
+                end_y=first_grid_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
@@ -1521,22 +1745,25 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
             # If so, skip creating a via - the pad provides the layer transition
             if (gx1, gy1) not in through_hole_positions:
                 via = Via(
-                    x=x1, y=y1,
+                    x=x1,
+                    y=y1,
                     size=config.via_size,
                     drill=config.via_drill,
                     layers=["F.Cu", "B.Cu"],  # Always through-hole
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_vias.append(via)
         else:
             if (x1, y1) != (x2, y2):
                 layer_name = layer_names[layer1]
                 seg = Segment(
-                    start_x=x1, start_y=y1,
-                    end_x=x2, end_y=y2,
+                    start_x=x1,
+                    start_y=y1,
+                    end_x=x2,
+                    end_y=y2,
                     width=config.get_net_track_width(net_id, layer_name),
                     layer=layer_name,
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 new_segments.append(seg)
 
@@ -1545,31 +1772,29 @@ def route_net_with_visualization(pcb_data: PCBData, net_id: int, config: GridRou
         orig_x, orig_y, orig_layer = end_original
         if abs(orig_x - last_grid_x) > 0.001 or abs(orig_y - last_grid_y) > 0.001:
             seg = Segment(
-                start_x=last_grid_x, start_y=last_grid_y,
-                end_x=orig_x, end_y=orig_y,
+                start_x=last_grid_x,
+                start_y=last_grid_y,
+                end_x=orig_x,
+                end_y=orig_y,
                 width=config.get_net_track_width(net_id, orig_layer),
                 layer=orig_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             new_segments.append(seg)
 
     return {
-        'new_segments': new_segments,
-        'new_vias': new_vias,
-        'iterations': total_iterations,
-        'path_length': len(path),
-        'path': path,
-        'direction': direction_used,
+        "new_segments": new_segments,
+        "new_vias": new_vias,
+        "iterations": total_iterations,
+        "path_length": len(path),
+        "path": path,
+        "direction": direction_used,
     }
 
 
 def route_multipoint_main(
-    pcb_data: PCBData,
-    net_id: int,
-    config: GridRouteConfig,
-    obstacles: 'GridObstacleMap',
-    pad_info: List[Tuple]
-) -> Optional[dict]:
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, obstacles: "GridObstacleMap", pad_info: list[tuple]
+) -> dict | None:
     """
     Route only the main (longest MST segment) connection of a multi-point net.
 
@@ -1622,9 +1847,7 @@ def route_multipoint_main(
         net_vias = [v for v in pcb_data.vias if v.net_id == net_id]
         pads_list = [info[5] for info in pad_info if len(info) > 5]
         if pads_list:
-            pad_components = get_zone_connected_pad_groups(
-                net_segments, net_vias, pads_list, net_zones, config.layers
-            )
+            pad_components = get_zone_connected_pad_groups(net_segments, net_vias, pads_list, net_zones, config.layers)
             # Group pads by component for quick lookup
             component_pads: dict = {}  # component_id -> list of pad indices
             for pad_idx, comp_id in pad_components.items():
@@ -1651,7 +1874,7 @@ def route_multipoint_main(
 
                 # Optimize: find shortest edge between pads in these two components
                 best_edge = None
-                best_dist = float('inf')
+                best_dist = float("inf")
                 for pa in component_pads.get(comp_a, [a]):
                     for pb in component_pads.get(comp_b, [b]):
                         px_a, py_a = pad_positions[pa]
@@ -1669,7 +1892,7 @@ def route_multipoint_main(
                 print(f"  Skipping {skipped} MST edge(s) already connected through plane")
 
     if not mst_edges:
-        print(f"  All pads already connected through plane - nothing to route")
+        print("  All pads already connected through plane - nothing to route")
         return None
 
     # Sort MST edges by length (longest first)
@@ -1681,7 +1904,8 @@ def route_multipoint_main(
     # main edge here and to the tap edges in route_multipoint_taps.
     pad_grid = [(info[0], info[1]) for info in pad_info]
     waypoint_buckets = assign_waypoints_to_mst_edges(
-        getattr(config, 'corridor_waypoints', None) or [], pad_grid, mst_edges)
+        getattr(config, "corridor_waypoints", None) or [], pad_grid, mst_edges
+    )
 
     # Route the longest MST edge first
     idx_a, idx_b, longest_len = mst_edges[0]
@@ -1697,13 +1921,13 @@ def route_multipoint_main(
     pad_a_obj = pad_a[5] if len(pad_a) > 5 else None
     pad_b_obj = pad_b[5] if len(pad_b) > 5 else None
 
-    if pad_a_obj and hasattr(pad_a_obj, 'layers') and '*.Cu' in pad_a_obj.layers:
+    if pad_a_obj and hasattr(pad_a_obj, "layers") and "*.Cu" in pad_a_obj.layers:
         # Through-hole pad - can connect on any copper layer
         sources = [(pad_a[0], pad_a[1], layer_idx) for layer_idx in range(len(layer_names))]
     else:
         sources = [(pad_a[0], pad_a[1], pad_a[2])]  # (gx, gy, layer_idx)
 
-    if pad_b_obj and hasattr(pad_b_obj, 'layers') and '*.Cu' in pad_b_obj.layers:
+    if pad_b_obj and hasattr(pad_b_obj, "layers") and "*.Cu" in pad_b_obj.layers:
         # Through-hole pad - can connect on any copper layer
         targets = [(pad_b[0], pad_b[1], layer_idx) for layer_idx in range(len(layer_names))]
     else:
@@ -1725,8 +1949,12 @@ def route_multipoint_main(
         prox_check_targets = targets  # Fallback to pad positions
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
     # Check which proximity zones the stub free ends are in for precise heuristic estimate
     src_in_stub = any(obstacles.get_stub_proximity_cost(gx, gy) > 0 for gx, gy, _ in prox_check_sources)
@@ -1736,21 +1964,29 @@ def route_multipoint_main(
     prox_h_cost = config.get_proximity_heuristic_for_zones(src_in_stub, src_in_bga, tgt_in_stub, tgt_in_bga)
     if config.verbose:
         zones = []
-        if src_in_stub: zones.append("src:stub")
-        if src_in_bga: zones.append("src:bga")
-        if tgt_in_stub: zones.append("tgt:stub")
-        if tgt_in_bga: zones.append("tgt:bga")
+        if src_in_stub:
+            zones.append("src:stub")
+        if src_in_bga:
+            zones.append("src:bga")
+        if tgt_in_stub:
+            zones.append("tgt:stub")
+        if tgt_in_bga:
+            zones.append("tgt:bga")
         print(f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}]")
 
     # Route farthest pair with probe routing (same as single-ended)
-    router = GridRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                        turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                        vertical_attraction_radius=attraction_radius_grid,
-                        vertical_attraction_bonus=attraction_bonus,
-                        layer_costs=config.get_layer_costs(),
-                        proximity_heuristic_cost=prox_h_cost,
-                        layer_direction_preferences=config.get_layer_direction_preferences(),
-                        direction_preference_cost=config.direction_preference_cost)
+    router = GridRouter(
+        via_cost=config.via_cost * 1000,
+        h_weight=config.heuristic_weight,
+        turn_cost=config.turn_cost,
+        via_proximity_cost=int(config.via_proximity_cost),
+        vertical_attraction_radius=attraction_radius_grid,
+        vertical_attraction_bonus=attraction_bonus,
+        layer_costs=config.get_layer_costs(),
+        proximity_heuristic_cost=prox_h_cost,
+        layer_direction_preferences=config.get_layer_direction_preferences(),
+        direction_preference_cost=config.direction_preference_cost,
+    )
 
     # Calculate track margin for wide power tracks
     # Use ceiling + 1 to account for grid quantization and diagonal track approaches
@@ -1762,21 +1998,31 @@ def route_multipoint_main(
 
     # Use probe routing helper, steered through this edge's bucket of corridor
     # waypoints (the tap edges follow their own buckets in route_multipoint_taps).
-    path, total_iterations, forward_blocked, backward_blocked, reversed_path, fwd_iters, bwd_iters = _route_main_connection(
-        router, obstacles, config, sources, targets, track_margin,
-        pcb_data, net_id, print_prefix="  ", direction_labels=("forward", "backward"),
-        waypoints=waypoint_buckets.get(frozenset((idx_a, idx_b)), [])
+    path, total_iterations, forward_blocked, backward_blocked, reversed_path, fwd_iters, bwd_iters = (
+        _route_main_connection(
+            router,
+            obstacles,
+            config,
+            sources,
+            targets,
+            track_margin,
+            pcb_data,
+            net_id,
+            print_prefix="  ",
+            direction_labels=("forward", "backward"),
+            waypoints=waypoint_buckets.get(frozenset((idx_a, idx_b)), []),
+        )
     )
 
     if path is None:
         print(f"  Failed to route farthest pair after {total_iterations} iterations")
         return {
-            'failed': True,
-            'iterations': total_iterations,
-            'blocked_cells_forward': forward_blocked,
-            'blocked_cells_backward': backward_blocked,
-            'iterations_forward': fwd_iters,
-            'iterations_backward': bwd_iters,
+            "failed": True,
+            "iterations": total_iterations,
+            "blocked_cells_forward": forward_blocked,
+            "blocked_cells_backward": backward_blocked,
+            "iterations_forward": fwd_iters,
+            "iterations_backward": bwd_iters,
         }
 
     # If path was found in reverse direction, swap pad_a/pad_b for segment generation
@@ -1789,47 +2035,48 @@ def route_multipoint_main(
 
     # Convert path to segments/vias
     segments, vias = _path_to_segments_vias(
-        path, coord, layer_names, net_id, config,
+        path,
+        coord,
+        layer_names,
+        net_id,
+        config,
         (pad_a[3], pad_a[4], layer_names[pad_a[2]]),  # start_original
         (pad_b[3], pad_b[4], layer_names[pad_b[2]]),  # end_original
-        through_hole_positions
+        through_hole_positions,
     )
 
     print(f"  Phase 1 routed in {total_iterations} iterations, {len(segments)} segments")
 
     return {
-        'new_segments': segments,
-        'new_vias': vias,
-        'iterations': total_iterations,
-        'path_length': len(path),
-        'path': path,
-        'is_multipoint': True,
-        'multipoint_pad_info': pad_info,
-        'routed_pad_indices': {idx_a, idx_b},
-        'pad_components': pad_components,  # Zone-connected component for each pad
+        "new_segments": segments,
+        "new_vias": vias,
+        "iterations": total_iterations,
+        "path_length": len(path),
+        "path": path,
+        "is_multipoint": True,
+        "multipoint_pad_info": pad_info,
+        "routed_pad_indices": {idx_a, idx_b},
+        "pad_components": pad_components,  # Zone-connected component for each pad
         # Store main pad positions for Phase 3 tap filtering
-        'main_pad_a': (pad_a[3], pad_a[4]),  # (orig_x, orig_y) of first main pad
-        'main_pad_b': (pad_b[3], pad_b[4]),  # (orig_x, orig_y) of second main pad
+        "main_pad_a": (pad_a[3], pad_a[4]),  # (orig_x, orig_y) of first main pad
+        "main_pad_b": (pad_b[3], pad_b[4]),  # (orig_x, orig_y) of second main pad
         # Store original segments for identifying meanders in Phase 3
-        'original_segments': segments,
+        "original_segments": segments,
         # Store MST edges for Phase 3 (sorted longest first)
-        'mst_edges': mst_edges,
+        "mst_edges": mst_edges,
         # Per-edge guide-corridor waypoint buckets (issue #7), for Phase 3 taps
-        'waypoint_buckets': waypoint_buckets,
+        "waypoint_buckets": waypoint_buckets,
         # Initial tap stats (Phase 1 connects 2 pads via 1 edge)
-        'tap_edges_routed': 1,
-        'tap_edges_failed': 0,
-        'tap_pads_connected': 2,
-        'tap_pads_total': len(pad_info),
+        "tap_edges_routed": 1,
+        "tap_edges_failed": 0,
+        "tap_pads_connected": 2,
+        "tap_pads_total": len(pad_info),
     }
 
 
 def get_all_segment_tap_points(
-    segments: List[Segment],
-    coord: GridCoord,
-    layer_names: List[str],
-    vias: List = None
-) -> List[Tuple[int, int, int, float, float]]:
+    segments: list[Segment], coord: GridCoord, layer_names: list[str], vias: list = None
+) -> list[tuple[int, int, int, float, float]]:
     """
     Get all grid points along existing segments and vias as potential tap sources.
 
@@ -1848,7 +2095,7 @@ def get_all_segment_tap_points(
         # Sample points along the segment at grid resolution
         dx = seg.end_x - seg.start_x
         dy = seg.end_y - seg.start_y
-        length = (dx*dx + dy*dy) ** 0.5
+        length = (dx * dx + dy * dy) ** 0.5
 
         if length < 0.001:
             # Point segment
@@ -1878,20 +2125,19 @@ def get_all_segment_tap_points(
                     tap_points[key] = (via.x, via.y)
 
     # Return sorted list for deterministic iteration
-    return sorted([(gx, gy, layer_idx, ox, oy)
-                   for (gx, gy, layer_idx), (ox, oy) in tap_points.items()])
+    return sorted([(gx, gy, layer_idx, ox, oy) for (gx, gy, layer_idx), (ox, oy) in tap_points.items()])
 
 
 def route_multipoint_taps(
     pcb_data: PCBData,
     net_id: int,
     config: GridRouteConfig,
-    obstacles: 'GridObstacleMap',
+    obstacles: "GridObstacleMap",
     main_result: dict,
     global_offset: int = 0,
     global_total: int = 0,
-    global_failed: int = 0
-) -> Optional[dict]:
+    global_failed: int = 0,
+) -> dict | None:
     """
     Route the remaining MST edges for a multi-point net.
 
@@ -1914,19 +2160,19 @@ def route_multipoint_taps(
         print("  GridRouter not available")
         return None
 
-    pad_info = main_result['multipoint_pad_info']
-    routed_indices = set(main_result['routed_pad_indices'])
-    mst_edges = main_result.get('mst_edges', [])
-    pad_components = main_result.get('pad_components', {i: i for i in range(len(pad_info))})
-    waypoint_buckets = main_result.get('waypoint_buckets', {})  # per-edge corridor waypoints
+    pad_info = main_result["multipoint_pad_info"]
+    routed_indices = set(main_result["routed_pad_indices"])
+    mst_edges = main_result.get("mst_edges", [])
+    pad_components = main_result.get("pad_components", {i: i for i in range(len(pad_info))})
+    waypoint_buckets = main_result.get("waypoint_buckets", {})  # per-edge corridor waypoints
 
     # Build set of "routed components" - components with at least one explicitly routed pad
     # Pads in zone-connected components are effectively routed if any pad in that component is routed
     routed_components = {pad_components.get(idx, idx) for idx in routed_indices}
 
     # Get the current segments (which may have meanders from length matching)
-    all_segments = list(main_result['new_segments'])
-    all_vias = list(main_result.get('new_vias', []))
+    all_segments = list(main_result["new_segments"])
+    all_vias = list(main_result.get("new_vias", []))
 
     coord = GridCoord(config.grid_step)
     layer_names = config.layers
@@ -1939,23 +2185,31 @@ def route_multipoint_taps(
     remaining_edges = mst_edges[1:] if len(mst_edges) > 1 else []
 
     if not remaining_edges:
-        print(f"  No remaining MST edges to route in Phase 3")
+        print("  No remaining MST edges to route in Phase 3")
         return main_result
 
     print(f"  Multi-point net Phase 3: routing {len(remaining_edges)} remaining MST edges (longest first)")
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
-    router = GridRouter(via_cost=config.via_cost * 1000, h_weight=config.heuristic_weight,
-                        turn_cost=config.turn_cost, via_proximity_cost=int(config.via_proximity_cost),
-                        vertical_attraction_radius=attraction_radius_grid,
-                        vertical_attraction_bonus=attraction_bonus,
-                        layer_costs=config.get_layer_costs(),
-                        proximity_heuristic_cost=0,  # Set per-route below
-                        layer_direction_preferences=config.get_layer_direction_preferences(),
-                        direction_preference_cost=config.direction_preference_cost)
+    router = GridRouter(
+        via_cost=config.via_cost * 1000,
+        h_weight=config.heuristic_weight,
+        turn_cost=config.turn_cost,
+        via_proximity_cost=int(config.via_proximity_cost),
+        vertical_attraction_radius=attraction_radius_grid,
+        vertical_attraction_bonus=attraction_bonus,
+        layer_costs=config.get_layer_costs(),
+        proximity_heuristic_cost=0,  # Set per-route below
+        layer_direction_preferences=config.get_layer_direction_preferences(),
+        direction_preference_cost=config.direction_preference_cost,
+    )
 
     # Calculate track margin for wide power tracks
     # Use ceiling + 1 to account for grid quantization and diagonal track approaches
@@ -2001,10 +2255,15 @@ def route_multipoint_taps(
 
         if edge_to_route is None:
             # Count effectively unrouted pads (not in routed_indices AND not in a routed component)
-            unrouted_pads = sum(1 for i in range(len(pad_info))
-                               if i not in routed_indices and pad_components.get(i, i) not in routed_components)
+            unrouted_pads = sum(
+                1
+                for i in range(len(pad_info))
+                if i not in routed_indices and pad_components.get(i, i) not in routed_components
+            )
             if unrouted_pads > 0:
-                print(f"  {YELLOW}Warning: {unrouted_pads} pad(s) not connected ({len(failed_edges)} MST edge(s) failed){RESET}")
+                print(
+                    f"  {YELLOW}Warning: {unrouted_pads} pad(s) not connected ({len(failed_edges)} MST edge(s) failed){RESET}"
+                )
             break
 
         src_idx, tgt_idx, edge_len = edge_to_route
@@ -2016,7 +2275,9 @@ def route_multipoint_taps(
         current_global = global_offset + edges_routed + len(failed_edges) + 1
         total_failed = global_failed + len(failed_edges)
         fail_str = f" ({total_failed} failed)" if total_failed > 0 else ""
-        print(f"    [{current_global}/{global_total}]{fail_str} Routing MST edge: pad {src_idx} -> pad {tgt_idx} (length={edge_len:.2f}mm) target=({tgt_pad[3]:.2f}, {tgt_pad[4]:.2f})")
+        print(
+            f"    [{current_global}/{global_total}]{fail_str} Routing MST edge: pad {src_idx} -> pad {tgt_idx} (length={edge_len:.2f}mm) target=({tgt_pad[3]:.2f}, {tgt_pad[4]:.2f})"
+        )
 
         # Get target pad coordinates
         tgt_x, tgt_y = tgt_pad[3], tgt_pad[4]
@@ -2035,14 +2296,15 @@ def route_multipoint_taps(
         # Build initial tap point map from segment/via tap points
         if all_tap_points:
             sources = [(gx, gy, layer_idx) for gx, gy, layer_idx, _, _ in all_tap_points]
-            tap_point_map = {(gx, gy, layer_idx): (ox, oy, layer_names[layer_idx])
-                            for gx, gy, layer_idx, ox, oy in all_tap_points}
+            tap_point_map = {
+                (gx, gy, layer_idx): (ox, oy, layer_names[layer_idx]) for gx, gy, layer_idx, ox, oy in all_tap_points
+            }
         else:
             sources = []
             tap_point_map = {}
 
         # Add source pad position as a valid source (on all layers for through-hole)
-        if hasattr(src_pad_obj, 'layers') and '*.Cu' in src_pad_obj.layers:
+        if hasattr(src_pad_obj, "layers") and "*.Cu" in src_pad_obj.layers:
             # Through-hole pad - can connect on any copper layer
             for layer_idx in range(len(layer_names)):
                 key = (src_gx, src_gy, layer_idx)
@@ -2057,13 +2319,13 @@ def route_multipoint_taps(
                 tap_point_map[key] = (src_x, src_y, layer_names[src_pad[2]])
 
         if not sources:
-            print(f"      ERROR: No sources available for routing")
+            print("      ERROR: No sources available for routing")
             continue
 
         # For through-hole pads, create targets on ALL layers (router can reach any layer)
         tgt_gx, tgt_gy = tgt_pad[0], tgt_pad[1]
         tgt_pad_obj = tgt_pad[5]
-        if hasattr(tgt_pad_obj, 'layers') and '*.Cu' in tgt_pad_obj.layers:
+        if hasattr(tgt_pad_obj, "layers") and "*.Cu" in tgt_pad_obj.layers:
             # Through-hole pad - can connect on any copper layer
             targets = [(tgt_gx, tgt_gy, layer_idx) for layer_idx in range(len(layer_names))]
         else:
@@ -2090,10 +2352,14 @@ def route_multipoint_taps(
         router.set_proximity_heuristic_cost(prox_h_cost)
         if config.verbose:
             zones = []
-            if src_in_stub: zones.append("src:stub")
-            if src_in_bga: zones.append("src:bga")
-            if tgt_in_stub: zones.append("tgt:stub")
-            if tgt_in_bga: zones.append("tgt:bga")
+            if src_in_stub:
+                zones.append("src:stub")
+            if src_in_bga:
+                zones.append("src:bga")
+            if tgt_in_stub:
+                zones.append("tgt:stub")
+            if tgt_in_bga:
+                zones.append("tgt:bga")
             print(f"      proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}]")
 
         # Route from ANY tap point to target - router finds shortest path
@@ -2101,9 +2367,17 @@ def route_multipoint_taps(
         tap_start_time = time.time()
 
         path, tap_iterations, forward_blocked, backward_blocked, reversed_tap_path, _, _ = _route_main_connection(
-            router, obstacles, config, sources, targets, track_margin,
-            pcb_data, net_id, print_prefix="      ", direction_labels=("forward", "backward"),
-            waypoints=waypoint_buckets.get(frozenset((src_idx, tgt_idx)), [])
+            router,
+            obstacles,
+            config,
+            sources,
+            targets,
+            track_margin,
+            pcb_data,
+            net_id,
+            print_prefix="      ",
+            direction_labels=("forward", "backward"),
+            waypoints=waypoint_buckets.get(frozenset((src_idx, tgt_idx)), []),
         )
 
         # If path was found in reverse direction, reverse it so it goes sources -> targets
@@ -2117,7 +2391,9 @@ def route_multipoint_taps(
         total_iterations += tap_iterations
 
         if path is None:
-            print(f"      {YELLOW}Failed to route MST edge after {tap_iterations} iterations ({tap_elapsed:.2f}s){RESET}")
+            print(
+                f"      {YELLOW}Failed to route MST edge after {tap_iterations} iterations ({tap_elapsed:.2f}s){RESET}"
+            )
             edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
             failed_edges.add(edge_key)
             # Store blocking info for potential rip-up analysis
@@ -2140,10 +2416,14 @@ def route_multipoint_taps(
         # Use the actual end layer from the path (router may reach through-hole pad on any layer)
         path_end_layer = layer_names[path[-1][2]]
         segments, vias = _path_to_segments_vias(
-            path, coord, layer_names, net_id, config,
+            path,
+            coord,
+            layer_names,
+            net_id,
+            config,
             (tap_x, tap_y, tap_layer),  # start_original (actual tap point used)
             (tgt_x, tgt_y, path_end_layer),  # end_original (target pad on actual reached layer)
-            through_hole_positions
+            through_hole_positions,
         )
         all_segments.extend(segments)
         all_vias.extend(vias)
@@ -2155,14 +2435,17 @@ def route_multipoint_taps(
         routed_indices.add(tgt_idx)
         tgt_component = pad_components.get(tgt_idx, tgt_idx)
         routed_components.add(tgt_component)
-        remaining_edges = [e for e in remaining_edges if not (
-            (e[0] == src_idx and e[1] == tgt_idx) or (e[0] == tgt_idx and e[1] == src_idx)
-        )]
+        remaining_edges = [
+            e
+            for e in remaining_edges
+            if not ((e[0] == src_idx and e[1] == tgt_idx) or (e[0] == tgt_idx and e[1] == src_idx))
+        ]
         edges_routed += 1
 
     # Count pads that are effectively connected (either explicitly routed or zone-connected to a routed pad)
-    pads_connected = sum(1 for i in range(len(pad_info))
-                         if i in routed_indices or pad_components.get(i, i) in routed_components)
+    pads_connected = sum(
+        1 for i in range(len(pad_info)) if i in routed_indices or pad_components.get(i, i) in routed_components
+    )
     pads_total = len(pad_info)
     pads_failed = pads_total - pads_connected
 
@@ -2172,45 +2455,49 @@ def route_multipoint_taps(
         if i not in routed_indices and pad_components.get(i, i) not in routed_components:
             pad = pad_info[i]
             pad_obj = pad[5] if len(pad) > 5 else None
-            failed_pads_info.append({
-                'pad_idx': i,
-                'x': pad[3],  # orig_x
-                'y': pad[4],  # orig_y
-                'component_ref': getattr(pad_obj, 'component_ref', '?') if pad_obj else '?',
-                'pad_number': getattr(pad_obj, 'pad_number', '?') if pad_obj else '?',
-            })
+            failed_pads_info.append(
+                {
+                    "pad_idx": i,
+                    "x": pad[3],  # orig_x
+                    "y": pad[4],  # orig_y
+                    "component_ref": getattr(pad_obj, "component_ref", "?") if pad_obj else "?",
+                    "pad_number": getattr(pad_obj, "pad_number", "?") if pad_obj else "?",
+                }
+            )
 
-    print(f"  Phase 3 routing complete: {edges_routed} edges, {len(all_segments)} total segments, {len(all_vias)} total vias")
+    print(
+        f"  Phase 3 routing complete: {edges_routed} edges, {len(all_segments)} total segments, {len(all_vias)} total vias"
+    )
 
     # Update result - preserve original fields, update segments/vias
     updated_result = dict(main_result)
-    updated_result['new_segments'] = all_segments
-    updated_result['new_vias'] = all_vias
-    updated_result['iterations'] = main_result['iterations'] + total_iterations
-    updated_result['routed_pad_indices'] = routed_indices
+    updated_result["new_segments"] = all_segments
+    updated_result["new_vias"] = all_vias
+    updated_result["iterations"] = main_result["iterations"] + total_iterations
+    updated_result["routed_pad_indices"] = routed_indices
     # Tap routing stats (add Phase 3 to Phase 1 counts)
-    updated_result['tap_edges_routed'] = main_result.get('tap_edges_routed', 0) + edges_routed
-    updated_result['tap_edges_failed'] = main_result.get('tap_edges_failed', 0) + len(failed_edges)
-    updated_result['tap_pads_connected'] = pads_connected
-    updated_result['tap_pads_total'] = pads_total
+    updated_result["tap_edges_routed"] = main_result.get("tap_edges_routed", 0) + edges_routed
+    updated_result["tap_edges_failed"] = main_result.get("tap_edges_failed", 0) + len(failed_edges)
+    updated_result["tap_pads_connected"] = pads_connected
+    updated_result["tap_pads_total"] = pads_total
     # Detailed info about unconnected pads (for summary)
-    updated_result['failed_pads_info'] = failed_pads_info
+    updated_result["failed_pads_info"] = failed_pads_info
     # Blocking info for failed edges (for rip-up analysis)
-    updated_result['failed_edge_blocking'] = failed_edge_blocking
+    updated_result["failed_edge_blocking"] = failed_edge_blocking
 
     return updated_result
 
 
 def _path_to_segments_vias(
-    path: List[Tuple[int, int, int]],
+    path: list[tuple[int, int, int]],
     coord: GridCoord,
-    layer_names: List[str],
+    layer_names: list[str],
     net_id: int,
     config: GridRouteConfig,
-    start_original: Tuple[float, float, str],
-    end_original: Tuple[float, float, str],
-    through_hole_positions: Set[Tuple[int, int]] = None
-) -> Tuple[List[Segment], List[Via]]:
+    start_original: tuple[float, float, str],
+    end_original: tuple[float, float, str],
+    through_hole_positions: set[tuple[int, int]] = None,
+) -> tuple[list[Segment], list[Via]]:
     """
     Convert a grid path to Segment and Via objects.
 
@@ -2250,11 +2537,13 @@ def _path_to_segments_vias(
         path_start_layer = layer_names[path_start[2]]
         if abs(orig_x - first_grid_x) > 0.001 or abs(orig_y - first_grid_y) > 0.001:
             seg = Segment(
-                start_x=orig_x, start_y=orig_y,
-                end_x=first_grid_x, end_y=first_grid_y,
+                start_x=orig_x,
+                start_y=orig_y,
+                end_x=first_grid_x,
+                end_y=first_grid_y,
                 width=config.get_net_track_width(net_id, path_start_layer),
                 layer=path_start_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             segments.append(seg)
 
@@ -2274,22 +2563,25 @@ def _path_to_segments_vias(
                 pass
             else:
                 via = Via(
-                    x=x1, y=y1,
+                    x=x1,
+                    y=y1,
                     size=config.via_size,
                     drill=config.via_drill,
                     layers=["F.Cu", "B.Cu"],  # Always through-hole
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 vias.append(via)
         else:
             if (x1, y1) != (x2, y2):
                 layer_name = layer_names[layer1]
                 seg = Segment(
-                    start_x=x1, start_y=y1,
-                    end_x=x2, end_y=y2,
+                    start_x=x1,
+                    start_y=y1,
+                    end_x=x2,
+                    end_y=y2,
                     width=config.get_net_track_width(net_id, layer_name),
                     layer=layer_name,
-                    net_id=net_id
+                    net_id=net_id,
                 )
                 segments.append(seg)
 
@@ -2301,11 +2593,13 @@ def _path_to_segments_vias(
         path_end_layer = layer_names[path_end[2]]
         if abs(orig_x - last_grid_x) > 0.001 or abs(orig_y - last_grid_y) > 0.001:
             seg = Segment(
-                start_x=last_grid_x, start_y=last_grid_y,
-                end_x=orig_x, end_y=orig_y,
+                start_x=last_grid_x,
+                start_y=last_grid_y,
+                end_x=orig_x,
+                end_y=orig_y,
                 width=config.get_net_track_width(net_id, path_end_layer),
                 layer=path_end_layer,
-                net_id=net_id
+                net_id=net_id,
             )
             segments.append(seg)
 

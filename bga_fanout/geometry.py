@@ -5,15 +5,13 @@ Functions for calculating 45-degree stubs, exit points, and jog endpoints.
 """
 
 import math
-from typing import List, Tuple, Optional
 
 from bga_fanout.types import BGAGrid, Channel
 
 
-def create_45_stub(pad_x: float, pad_y: float,
-                   channel: Channel,
-                   escape_dir: str,
-                   channel_offset: float = 0.0) -> Tuple[float, float]:
+def create_45_stub(
+    pad_x: float, pad_y: float, channel: Channel, escape_dir: str, channel_offset: float = 0.0
+) -> tuple[float, float]:
     """
     Create 45-degree stub from pad to channel.
 
@@ -30,12 +28,12 @@ def create_45_stub(pad_x: float, pad_y: float,
     Returns:
         End position of the 45° stub
     """
-    if channel.orientation == 'horizontal':
+    if channel.orientation == "horizontal":
         # Target Y includes the offset
         target_y = channel.position + channel_offset
         # For true 45°, dx = |dy|
         dy_to_target = target_y - pad_y
-        if escape_dir == 'right':
+        if escape_dir == "right":
             dx = abs(dy_to_target)
         else:
             dx = -abs(dy_to_target)
@@ -46,7 +44,7 @@ def create_45_stub(pad_x: float, pad_y: float,
         target_x = channel.position + channel_offset
         # For true 45°, dy = |dx|
         dx_to_target = target_x - pad_x
-        if escape_dir == 'down':
+        if escape_dir == "down":
             dy = abs(dx_to_target)
         else:
             dy = -abs(dx_to_target)
@@ -54,35 +52,39 @@ def create_45_stub(pad_x: float, pad_y: float,
         return (target_x, pad_y + dy)
 
 
-def calculate_exit_point(stub_end: Tuple[float, float],
-                         channel: Channel,
-                         escape_dir: str,
-                         grid: BGAGrid,
-                         margin: float = 0.5,
-                         channel_offset: float = 0.0) -> Tuple[float, float]:
+def calculate_exit_point(
+    stub_end: tuple[float, float],
+    channel: Channel,
+    escape_dir: str,
+    grid: BGAGrid,
+    margin: float = 0.5,
+    channel_offset: float = 0.0,
+) -> tuple[float, float]:
     """Calculate where the route exits the BGA boundary."""
-    if channel.orientation == 'horizontal':
+    if channel.orientation == "horizontal":
         exit_y = channel.position + channel_offset
-        if escape_dir == 'right':
+        if escape_dir == "right":
             return (grid.max_x + margin, exit_y)
         else:
             return (grid.min_x - margin, exit_y)
     else:
         exit_x = channel.position + channel_offset
-        if escape_dir == 'down':
+        if escape_dir == "down":
             return (exit_x, grid.max_y + margin)
         else:
             return (exit_x, grid.min_y - margin)
 
 
-def calculate_jog_end(exit_pos: Tuple[float, float],
-                      escape_dir: str,
-                      layer: str,
-                      layers: List[str],
-                      jog_length: float,
-                      is_diff_pair: bool = False,
-                      is_outside_track: bool = False,
-                      pair_spacing: float = 0.0) -> Tuple[Tuple[float, float], Optional[Tuple[float, float]]]:
+def calculate_jog_end(
+    exit_pos: tuple[float, float],
+    escape_dir: str,
+    layer: str,
+    layers: list[str],
+    jog_length: float,
+    is_diff_pair: bool = False,
+    is_outside_track: bool = False,
+    pair_spacing: float = 0.0,
+) -> tuple[tuple[float, float], tuple[float, float] | None]:
     """
     Calculate the end position of the 45° jog at the exit.
 
@@ -137,26 +139,26 @@ def calculate_jog_end(exit_pos: Tuple[float, float],
     # extension = pair_spacing * (sqrt(2) - 1) ≈ 0.414 * pair_spacing
     if is_diff_pair and is_outside_track:
         extension = pair_spacing * (math.sqrt(2) - 1)
-        if escape_dir == 'right':
+        if escape_dir == "right":
             extension_point = (ex + extension, ey)
             ex = ex + extension
-        elif escape_dir == 'left':
+        elif escape_dir == "left":
             extension_point = (ex - extension, ey)
             ex = ex - extension
-        elif escape_dir == 'down':
+        elif escape_dir == "down":
             extension_point = (ex, ey + extension)
             ey = ey + extension
         else:  # up
             extension_point = (ex, ey - extension)
             ey = ey - extension
 
-    if escape_dir == 'right':
+    if escape_dir == "right":
         # Walking right, left is up (-Y), right is down (+Y)
         jog_end = (ex + diag, ey + jog_direction * diag)
-    elif escape_dir == 'left':
+    elif escape_dir == "left":
         # Walking left, left is down (+Y), right is up (-Y)
         jog_end = (ex - diag, ey - jog_direction * diag)
-    elif escape_dir == 'down':
+    elif escape_dir == "down":
         # Walking down, left is right (+X), right is left (-X)
         jog_end = (ex - jog_direction * diag, ey + diag)
     else:  # up

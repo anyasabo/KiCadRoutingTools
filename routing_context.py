@@ -5,27 +5,29 @@ This module provides helper functions for common routing operations
 like building obstacle maps and recording route results.
 """
 
-from typing import List, Set, Dict, Optional, Tuple, TYPE_CHECKING
 import numpy as np
-from routing_config import GridCoord, GridRouteConfig
-from obstacle_map import (
-    add_net_stubs_as_obstacles, add_net_vias_as_obstacles, add_net_pads_as_obstacles,
-    add_same_net_via_clearance, add_same_net_pad_drill_via_clearance,
-    get_same_net_through_hole_positions
-)
-from obstacle_costs import (
-    add_stub_proximity_costs, merge_track_proximity_costs,
-    add_cross_layer_tracks, compute_track_proximity_for_net
-)
-from obstacle_cache import (
-    NetObstacleData, add_net_obstacles_from_cache, remove_net_obstacles_from_cache
-)
+
 from connectivity import get_stub_endpoints
 from net_queries import get_chip_pad_positions
+from obstacle_cache import NetObstacleData, add_net_obstacles_from_cache, remove_net_obstacles_from_cache
+from obstacle_costs import (
+    add_cross_layer_tracks,
+    add_stub_proximity_costs,
+    compute_track_proximity_for_net,
+    merge_track_proximity_costs,
+)
+from obstacle_map import (
+    add_net_pads_as_obstacles,
+    add_net_stubs_as_obstacles,
+    add_net_vias_as_obstacles,
+    add_same_net_pad_drill_via_clearance,
+    add_same_net_via_clearance,
+)
 from pcb_modification import add_route_to_pcb_data
+from routing_config import GridCoord, GridRouteConfig
 
 
-def _add_free_via_positions(obstacles, pcb_data, net_ids: List[int], config):
+def _add_free_via_positions(obstacles, pcb_data, net_ids: list[int], config):
     """Add through-hole pads as free via positions (zero-cost layer change).
 
     Args:
@@ -45,9 +47,12 @@ def _add_free_via_positions(obstacles, pcb_data, net_ids: List[int], config):
         obstacles.add_free_vias_batch(free_via_positions)
 
 
-def merge_ripped_route_costs(obstacles, ripped_route_layer_costs: Dict[int, np.ndarray],
-                              ripped_route_via_positions: Dict[int, List[Tuple[int, int]]],
-                              config: GridRouteConfig):
+def merge_ripped_route_costs(
+    obstacles,
+    ripped_route_layer_costs: dict[int, np.ndarray],
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]],
+    config: GridRouteConfig,
+):
     """Merge ripped route avoidance costs into the obstacle map.
 
     When a net is ripped up, we want to apply soft penalties to its former corridor
@@ -87,19 +92,19 @@ def build_diff_pair_obstacles(
     diff_pair_base_obstacles,
     pcb_data,
     config,
-    routed_net_ids: List[int],
-    remaining_net_ids: List[int],
-    all_unrouted_net_ids: List[int],
+    routed_net_ids: list[int],
+    remaining_net_ids: list[int],
+    all_unrouted_net_ids: list[int],
     p_net_id: int,
     n_net_id: int,
-    gnd_net_id: Optional[int],
-    track_proximity_cache: Dict,
-    layer_map: Dict,
+    gnd_net_id: int | None,
+    track_proximity_cache: dict,
+    layer_map: dict,
     extra_clearance: float,
     add_own_stubs_func=None,
-    net_obstacles_cache: Optional[Dict[int, NetObstacleData]] = None,
-    ripped_route_layer_costs: Dict[int, np.ndarray] = None,
-    ripped_route_via_positions: Dict[int, List[Tuple[int, int]]] = None
+    net_obstacles_cache: dict[int, NetObstacleData] | None = None,
+    ripped_route_layer_costs: dict[int, np.ndarray] = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
 ):
     """
     Build complete obstacle map for diff pair routing.
@@ -139,8 +144,7 @@ def build_diff_pair_obstacles(
         add_net_vias_as_obstacles(obstacles, pcb_data, gnd_net_id, config, extra_clearance)
 
     # Add other unrouted nets as obstacles (can use cache since they haven't changed)
-    other_unrouted = [nid for nid in remaining_net_ids
-                     if nid != p_net_id and nid != n_net_id]
+    other_unrouted = [nid for nid in remaining_net_ids if nid != p_net_id and nid != n_net_id]
     for other_net_id in other_unrouted:
         if net_obstacles_cache and other_net_id in net_obstacles_cache:
             add_net_obstacles_from_cache(obstacles, net_obstacles_cache[other_net_id])
@@ -150,14 +154,16 @@ def build_diff_pair_obstacles(
             add_net_pads_as_obstacles(obstacles, pcb_data, other_net_id, config, extra_clearance)
 
     # Add stub proximity costs (includes chip pads as pseudo-stubs)
-    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids
-                               if nid != p_net_id and nid != n_net_id
-                               and nid not in routed_net_ids]
+    stub_proximity_net_ids = [
+        nid for nid in all_unrouted_net_ids if nid != p_net_id and nid != n_net_id and nid not in routed_net_ids
+    ]
     unrouted_stubs = get_stub_endpoints(pcb_data, stub_proximity_net_ids)
     chip_pads = get_chip_pad_positions(pcb_data, stub_proximity_net_ids)
     all_stubs = unrouted_stubs + chip_pads
     if config.verbose:
-        print(f"    stub proximity: {len(stub_proximity_net_ids)} nets, {len(unrouted_stubs)} stubs, {len(chip_pads)} chip pads")
+        print(
+            f"    stub proximity: {len(stub_proximity_net_ids)} nets, {len(unrouted_stubs)} stubs, {len(chip_pads)} chip pads"
+        )
     if all_stubs:
         add_stub_proximity_costs(obstacles, all_stubs, config)
 
@@ -166,14 +172,10 @@ def build_diff_pair_obstacles(
 
     # Add ripped route avoidance costs
     if ripped_route_layer_costs is not None or ripped_route_via_positions is not None:
-        merge_ripped_route_costs(obstacles,
-                                  ripped_route_layer_costs or {},
-                                  ripped_route_via_positions or {},
-                                  config)
+        merge_ripped_route_costs(obstacles, ripped_route_layer_costs or {}, ripped_route_via_positions or {}, config)
 
     # Add cross-layer track data
-    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map,
-                           exclude_net_ids={p_net_id, n_net_id})
+    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map, exclude_net_ids={p_net_id, n_net_id})
 
     # Add same-net via clearance
     add_same_net_via_clearance(obstacles, pcb_data, p_net_id, config)
@@ -197,17 +199,17 @@ def build_single_ended_obstacles(
     base_obstacles,
     pcb_data,
     config,
-    routed_net_ids: List[int],
-    remaining_net_ids: List[int],
-    all_unrouted_net_ids: List[int],
+    routed_net_ids: list[int],
+    remaining_net_ids: list[int],
+    all_unrouted_net_ids: list[int],
     net_id: int,
-    gnd_net_id: Optional[int],
-    track_proximity_cache: Dict,
-    layer_map: Dict,
+    gnd_net_id: int | None,
+    track_proximity_cache: dict,
+    layer_map: dict,
     diagonal_margin: float = 0.25,
-    net_obstacles_cache: Optional[Dict[int, NetObstacleData]] = None,
-    ripped_route_layer_costs: Dict[int, np.ndarray] = None,
-    ripped_route_via_positions: Dict[int, List[Tuple[int, int]]] = None
+    net_obstacles_cache: dict[int, NetObstacleData] | None = None,
+    ripped_route_layer_costs: dict[int, np.ndarray] = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
 ):
     """
     Build complete obstacle map for single-ended routing.
@@ -255,8 +257,7 @@ def build_single_ended_obstacles(
             add_net_pads_as_obstacles(obstacles, pcb_data, other_net_id, config)
 
     # Add stub proximity costs (includes chip pads as pseudo-stubs)
-    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids
-                               if nid != net_id and nid not in routed_net_ids]
+    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids if nid != net_id and nid not in routed_net_ids]
     unrouted_stubs = get_stub_endpoints(pcb_data, stub_proximity_net_ids)
     chip_pads = get_chip_pad_positions(pcb_data, stub_proximity_net_ids)
     all_stubs = unrouted_stubs + chip_pads
@@ -268,14 +269,10 @@ def build_single_ended_obstacles(
 
     # Add ripped route avoidance costs
     if ripped_route_layer_costs is not None or ripped_route_via_positions is not None:
-        merge_ripped_route_costs(obstacles,
-                                  ripped_route_layer_costs or {},
-                                  ripped_route_via_positions or {},
-                                  config)
+        merge_ripped_route_costs(obstacles, ripped_route_layer_costs or {}, ripped_route_via_positions or {}, config)
 
     # Add cross-layer track data
-    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map,
-                           exclude_net_ids={net_id})
+    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map, exclude_net_ids={net_id})
 
     # Add same-net via clearance
     add_same_net_via_clearance(obstacles, pcb_data, net_id, config)
@@ -294,11 +291,11 @@ def build_incremental_obstacles(
     pcb_data,
     config,
     net_id: int,
-    all_unrouted_net_ids: List[int],
-    routed_net_ids: List[int],
-    track_proximity_cache: Dict,
-    layer_map: Dict,
-    net_obstacles_cache: Dict[int, NetObstacleData]
+    all_unrouted_net_ids: list[int],
+    routed_net_ids: list[int],
+    track_proximity_cache: dict,
+    layer_map: dict,
+    net_obstacles_cache: dict[int, NetObstacleData],
 ):
     """
     Build obstacle map for single-ended routing using incremental approach.
@@ -332,8 +329,7 @@ def build_incremental_obstacles(
         remove_net_obstacles_from_cache(obstacles, net_obstacles_cache[net_id])
 
     # Add stub proximity costs (includes chip pads as pseudo-stubs)
-    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids
-                               if nid != net_id and nid not in routed_net_ids]
+    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids if nid != net_id and nid not in routed_net_ids]
     unrouted_stubs = get_stub_endpoints(pcb_data, stub_proximity_net_ids)
     chip_pads = get_chip_pad_positions(pcb_data, stub_proximity_net_ids)
     all_stubs = unrouted_stubs + chip_pads
@@ -344,8 +340,7 @@ def build_incremental_obstacles(
     merge_track_proximity_costs(obstacles, track_proximity_cache)
 
     # Add cross-layer track data
-    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map,
-                           exclude_net_ids={net_id})
+    add_cross_layer_tracks(obstacles, pcb_data, config, layer_map, exclude_net_ids={net_id})
 
     # Add same-net via clearance
     add_same_net_via_clearance(obstacles, pcb_data, net_id, config)
@@ -364,14 +359,14 @@ def prepare_obstacles_inplace(
     pcb_data,
     config,
     net_id: int,
-    all_unrouted_net_ids: List[int],
-    routed_net_ids: List[int],
-    track_proximity_cache: Dict,
-    layer_map: Dict,
-    net_obstacles_cache: Dict[int, NetObstacleData],
-    ripped_route_layer_costs: Dict[int, np.ndarray] = None,
-    ripped_route_via_positions: Dict[int, List[Tuple[int, int]]] = None
-) -> Tuple[List[Tuple[float, float]], List[Tuple[int, int]]]:
+    all_unrouted_net_ids: list[int],
+    routed_net_ids: list[int],
+    track_proximity_cache: dict,
+    layer_map: dict,
+    net_obstacles_cache: dict[int, NetObstacleData],
+    ripped_route_layer_costs: dict[int, np.ndarray] = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
+) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Prepare working_obstacles IN-PLACE for routing a single-ended net.
 
@@ -408,8 +403,7 @@ def prepare_obstacles_inplace(
         remove_net_obstacles_from_cache(working_obstacles, net_obstacles_cache[net_id])
 
     # Add stub proximity costs (includes chip pads as pseudo-stubs)
-    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids
-                               if nid != net_id and nid not in routed_net_ids]
+    stub_proximity_net_ids = [nid for nid in all_unrouted_net_ids if nid != net_id and nid not in routed_net_ids]
     unrouted_stubs = get_stub_endpoints(pcb_data, stub_proximity_net_ids)
     chip_pads = get_chip_pad_positions(pcb_data, stub_proximity_net_ids)
     all_stubs = unrouted_stubs + chip_pads
@@ -421,14 +415,12 @@ def prepare_obstacles_inplace(
 
     # Add ripped route avoidance costs (soft penalty for routing through ripped corridors)
     if ripped_route_layer_costs is not None or ripped_route_via_positions is not None:
-        merge_ripped_route_costs(working_obstacles,
-                                  ripped_route_layer_costs or {},
-                                  ripped_route_via_positions or {},
-                                  config)
+        merge_ripped_route_costs(
+            working_obstacles, ripped_route_layer_costs or {}, ripped_route_via_positions or {}, config
+        )
 
     # Add cross-layer track data
-    add_cross_layer_tracks(working_obstacles, pcb_data, config, layer_map,
-                           exclude_net_ids={net_id})
+    add_cross_layer_tracks(working_obstacles, pcb_data, config, layer_map, exclude_net_ids={net_id})
 
     # Add same-net via clearance and track which cells were added
     coord = GridCoord(config.grid_step)
@@ -442,7 +434,7 @@ def prepare_obstacles_inplace(
         gx, gy = coord.to_grid(via.x, via.y)
         for ex in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
             for ey in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
-                if ex*ex + ey*ey <= via_via_expansion_grid * via_via_expansion_grid:
+                if ex * ex + ey * ey <= via_via_expansion_grid * via_via_expansion_grid:
                     same_net_via_cells.append((gx + ex, gy + ey))
 
     # Pad drill hole clearance
@@ -457,7 +449,7 @@ def prepare_obstacles_inplace(
                 gx, gy = coord.to_grid(pad.global_x, pad.global_y)
                 for ex in range(-expand, expand + 1):
                     for ey in range(-expand, expand + 1):
-                        if ex*ex + ey*ey <= expand * expand:
+                        if ex * ex + ey * ey <= expand * expand:
                             # Skip the pad center - allow layer transitions at through-holes
                             if ex == 0 and ey == 0:
                                 continue
@@ -477,10 +469,7 @@ def prepare_obstacles_inplace(
 
 
 def restore_obstacles_inplace(
-    working_obstacles,
-    net_id: int,
-    net_obstacles_cache: Dict[int, NetObstacleData],
-    same_net_via_cells: np.ndarray
+    working_obstacles, net_id: int, net_obstacles_cache: dict[int, NetObstacleData], same_net_via_cells: np.ndarray
 ):
     """
     Restore working_obstacles after routing attempt.
@@ -512,17 +501,17 @@ def restore_obstacles_inplace(
 
 def record_diff_pair_success(
     pcb_data,
-    result: Dict,
+    result: dict,
     pair,
     pair_name: str,
     config,
-    remaining_net_ids: List[int],
-    routed_net_ids: List[int],
-    routed_net_paths: Dict,
-    routed_results: Dict,
-    diff_pair_by_net_id: Dict,
-    track_proximity_cache: Dict,
-    layer_map: Dict
+    remaining_net_ids: list[int],
+    routed_net_ids: list[int],
+    routed_net_paths: dict,
+    routed_results: dict,
+    diff_pair_by_net_id: dict,
+    track_proximity_cache: dict,
+    layer_map: dict,
 ):
     """
     Record a successful diff pair route.
@@ -552,16 +541,14 @@ def record_diff_pair_success(
     routed_net_ids.append(pair.n_net_id)
 
     # Compute and cache track proximity costs
-    track_proximity_cache[pair.p_net_id] = compute_track_proximity_for_net(
-        pcb_data, pair.p_net_id, config, layer_map)
-    track_proximity_cache[pair.n_net_id] = compute_track_proximity_for_net(
-        pcb_data, pair.n_net_id, config, layer_map)
+    track_proximity_cache[pair.p_net_id] = compute_track_proximity_for_net(pcb_data, pair.p_net_id, config, layer_map)
+    track_proximity_cache[pair.n_net_id] = compute_track_proximity_for_net(pcb_data, pair.n_net_id, config, layer_map)
 
     # Track paths for blocking analysis
-    if result.get('p_path'):
-        routed_net_paths[pair.p_net_id] = result['p_path']
-    if result.get('n_path'):
-        routed_net_paths[pair.n_net_id] = result['n_path']
+    if result.get("p_path"):
+        routed_net_paths[pair.p_net_id] = result["p_path"]
+    if result.get("n_path"):
+        routed_net_paths[pair.n_net_id] = result["n_path"]
 
     # Track result for rip-up
     routed_results[pair.p_net_id] = result
@@ -574,15 +561,15 @@ def record_diff_pair_success(
 
 def record_single_ended_success(
     pcb_data,
-    result: Dict,
+    result: dict,
     net_id: int,
     config,
-    remaining_net_ids: List[int],
-    routed_net_ids: List[int],
-    routed_net_paths: Dict,
-    routed_results: Dict,
-    track_proximity_cache: Dict,
-    layer_map: Dict
+    remaining_net_ids: list[int],
+    routed_net_ids: list[int],
+    routed_net_paths: dict,
+    routed_results: dict,
+    track_proximity_cache: dict,
+    layer_map: dict,
 ):
     """
     Record a successful single-ended route.
@@ -610,26 +597,25 @@ def record_single_ended_success(
     routed_results[net_id] = result
 
     # Track path for blocking analysis
-    if result.get('path'):
-        routed_net_paths[net_id] = result['path']
+    if result.get("path"):
+        routed_net_paths[net_id] = result["path"]
 
     # Compute and cache track proximity costs
-    track_proximity_cache[net_id] = compute_track_proximity_for_net(
-        pcb_data, net_id, config, layer_map)
+    track_proximity_cache[net_id] = compute_track_proximity_for_net(pcb_data, net_id, config, layer_map)
 
 
 def restore_ripped_net(
     pcb_data,
     ripped_saved,
-    ripped_ids: List[int],
+    ripped_ids: list[int],
     was_in_results: bool,
-    routed_net_ids: List[int],
-    remaining_net_ids: List[int],
-    routed_results: Dict,
-    results: List[Dict],
+    routed_net_ids: list[int],
+    remaining_net_ids: list[int],
+    routed_results: dict,
+    results: list[dict],
     config,
-    track_proximity_cache: Optional[Dict] = None,
-    layer_map: Optional[Dict] = None
+    track_proximity_cache: dict | None = None,
+    layer_map: dict | None = None,
 ):
     """
     Restore a previously ripped net back to routed state.
@@ -665,5 +651,4 @@ def restore_ripped_net(
     # Restore track proximity cache
     if track_proximity_cache is not None and layer_map is not None:
         for rid in ripped_ids:
-            track_proximity_cache[rid] = compute_track_proximity_for_net(
-                pcb_data, rid, config, layer_map)
+            track_proximity_cache[rid] = compute_track_proximity_for_net(pcb_data, rid, config, layer_map)

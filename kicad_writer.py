@@ -4,10 +4,9 @@ KiCad PCB Writer - Writes routing results to .kicad_pcb files.
 
 import re
 import uuid
-from typing import List, Dict, Tuple, Optional
 
 from kicad_parser import Pad
-from routing_utils import pos_key, POSITION_DECIMALS
+from routing_utils import POSITION_DECIMALS, pos_key
 
 
 def move_copper_text_to_silkscreen(content: str) -> str:
@@ -32,7 +31,7 @@ def move_copper_text_to_silkscreen(content: str) -> str:
 
     while True:
         # Find next gr_text
-        start = content.find('(gr_text', i)
+        start = content.find("(gr_text", i)
         if start == -1:
             break
 
@@ -40,9 +39,9 @@ def move_copper_text_to_silkscreen(content: str) -> str:
         depth = 0
         end = start
         for j in range(start, len(content)):
-            if content[j] == '(':
+            if content[j] == "(":
                 depth += 1
-            elif content[j] == ')':
+            elif content[j] == ")":
                 depth -= 1
                 if depth == 0:
                     end = j + 1
@@ -55,7 +54,7 @@ def move_copper_text_to_silkscreen(content: str) -> str:
         layer_match = re.search(r'\(layer\s+"(F\.Cu|B\.Cu)"\)', block)
         if layer_match:
             layer = layer_match.group(1)
-            new_layer = 'F.SilkS' if layer == 'F.Cu' else 'B.SilkS'
+            new_layer = "F.SilkS" if layer == "F.Cu" else "B.SilkS"
             new_block = block.replace(f'(layer "{layer}")', f'(layer "{new_layer}")')
 
             # Add content before this block, then the modified block
@@ -72,18 +71,18 @@ def move_copper_text_to_silkscreen(content: str) -> str:
     if count > 0:
         print(f"  Moved {count} text element(s) from copper layers to silkscreen")
 
-    return ''.join(result_parts)
+    return "".join(result_parts)
 
 
-def generate_segment_sexpr(start: Tuple[float, float], end: Tuple[float, float],
-                           width: float, layer: str, net_id: int,
-                           net_name: str = None) -> str:
+def generate_segment_sexpr(
+    start: tuple[float, float], end: tuple[float, float], width: float, layer: str, net_id: int, net_name: str = None
+) -> str:
     """Generate KiCad S-expression for a track segment.
 
     Args:
         net_name: If provided, output KiCad 10 format (net "name") instead of (net id).
     """
-    net_str = f'(net "{net_name}")' if net_name is not None else f'(net {net_id})'
+    net_str = f'(net "{net_name}")' if net_name is not None else f"(net {net_id})"
     return f'''	(segment
 		(start {start[0]:.6f} {start[1]:.6f})
 		(end {end[0]:.6f} {end[1]:.6f})
@@ -94,8 +93,7 @@ def generate_segment_sexpr(start: Tuple[float, float], end: Tuple[float, float],
 	)'''
 
 
-def generate_gr_line_sexpr(start: Tuple[float, float], end: Tuple[float, float],
-                           width: float, layer: str) -> str:
+def generate_gr_line_sexpr(start: tuple[float, float], end: tuple[float, float], width: float, layer: str) -> str:
     """Generate KiCad S-expression for a graphic line (for non-copper layers)."""
     return f'''	(gr_line
 		(start {start[0]:.6f} {start[1]:.6f})
@@ -109,9 +107,16 @@ def generate_gr_line_sexpr(start: Tuple[float, float], end: Tuple[float, float],
 	)'''
 
 
-def generate_via_sexpr(x: float, y: float, size: float, drill: float,
-                       layers: List[str], net_id: int, free: bool = False,
-                       net_name: str = None) -> str:
+def generate_via_sexpr(
+    x: float,
+    y: float,
+    size: float,
+    drill: float,
+    layers: list[str],
+    net_id: int,
+    free: bool = False,
+    net_name: str = None,
+) -> str:
     """Generate KiCad S-expression for a via.
 
     Args:
@@ -120,7 +125,7 @@ def generate_via_sexpr(x: float, y: float, size: float, drill: float,
     """
     layers_str = '" "'.join(layers)
     free_str = "\n\t\t(free yes)" if free else ""
-    net_str = f'(net "{net_name}")' if net_name is not None else f'(net {net_id})'
+    net_str = f'(net "{net_name}")' if net_name is not None else f"(net {net_id})"
     # KiCad 10 adds structured tenting/covering/plugging fields after layers
     if net_name is not None:
         tenting_str = "\n\t\t(tenting (front yes) (back yes))"
@@ -136,8 +141,7 @@ def generate_via_sexpr(x: float, y: float, size: float, drill: float,
 	)'''
 
 
-def generate_gr_text_sexpr(text: str, x: float, y: float, layer: str,
-                           size: float = 0.5, angle: float = 0) -> str:
+def generate_gr_text_sexpr(text: str, x: float, y: float, layer: str, size: float = 0.5, angle: float = 0) -> str:
     """Generate KiCad S-expression for a graphic text label."""
     return f'''	(gr_text "{text}"
 		(at {x:.6f} {y:.6f} {angle})
@@ -156,13 +160,13 @@ def generate_zone_sexpr(
     net_id: int,
     net_name: str,
     layer: str,
-    polygon_points: List[Tuple[float, float]],
+    polygon_points: list[tuple[float, float]],
     clearance: float = 0.2,
     min_thickness: float = 0.1,
     thermal_gap: float = 0.2,
     thermal_bridge_width: float = 0.2,
     direct_connect: bool = True,
-    use_net_name: bool = False
+    use_net_name: bool = False,
 ) -> str:
     """Generate KiCad S-expression for a filled copper zone.
 
@@ -189,13 +193,13 @@ def generate_zone_sexpr(
 
     # Connect pads mode: "yes" for direct solid connection, omit for thermal relief
     if direct_connect:
-        connect_pads_str = f'''(connect_pads yes
+        connect_pads_str = f"""(connect_pads yes
 			(clearance {clearance})
-		)'''
+		)"""
     else:
-        connect_pads_str = f'''(connect_pads
+        connect_pads_str = f"""(connect_pads
 			(clearance {clearance})
-		)'''
+		)"""
 
     # KiCad 10: (net "name"), no (net_name ...) line; KiCad 9: (net id) + (net_name "name")
     if use_net_name:
@@ -205,18 +209,18 @@ def generate_zone_sexpr(
 
     # KiCad 10 removes (filled_areas_thickness no) and adds (island_removal_mode 0) in fill
     if use_net_name:
-        fill_block = f'''(fill yes
+        fill_block = f"""(fill yes
 			(thermal_gap {thermal_gap})
 			(thermal_bridge_width {thermal_bridge_width})
 			(island_removal_mode 0)
-		)'''
-        extra_zone_props = ''
+		)"""
+        extra_zone_props = ""
     else:
-        fill_block = f'''(fill yes
+        fill_block = f"""(fill yes
 			(thermal_gap {thermal_gap})
 			(thermal_bridge_width {thermal_bridge_width})
-		)'''
-        extra_zone_props = '\n\t\t(filled_areas_thickness no)'
+		)"""
+        extra_zone_props = "\n\t\t(filled_areas_thickness no)"
 
     return f'''	(zone
 		{net_lines}
@@ -234,8 +238,9 @@ def generate_zone_sexpr(
 	)'''
 
 
-def add_tracks_to_pcb(input_path: str, output_path: str, tracks: List[Dict],
-                      net_id_to_name: Dict[int, str] = None) -> bool:
+def add_tracks_to_pcb(
+    input_path: str, output_path: str, tracks: list[dict], net_id_to_name: dict[int, str] = None
+) -> bool:
     """
     Add track segments to a PCB file.
 
@@ -248,7 +253,7 @@ def add_tracks_to_pcb(input_path: str, output_path: str, tracks: List[Dict],
     Returns:
         True if successful
     """
-    with open(input_path, 'r', encoding='utf-8') as f:
+    with open(input_path, encoding="utf-8") as f:
         content = f.read()
 
     # Move text from copper layers to silkscreen (prevents routing interference)
@@ -257,46 +262,45 @@ def add_tracks_to_pcb(input_path: str, output_path: str, tracks: List[Dict],
     # Generate segment S-expressions
     segments = []
     for track in tracks:
-        track_net_name = net_id_to_name.get(track['net_id']) if net_id_to_name else None
+        track_net_name = net_id_to_name.get(track["net_id"]) if net_id_to_name else None
         seg = generate_segment_sexpr(
-            track['start'],
-            track['end'],
-            track['width'],
-            track['layer'],
-            track['net_id'],
-            net_name=track_net_name
+            track["start"], track["end"], track["width"], track["layer"], track["net_id"], net_name=track_net_name
         )
         segments.append(seg)
 
-    routing_text = '\n'.join(segments)
+    routing_text = "\n".join(segments)
 
     if not routing_text.strip():
         print("Warning: No routing elements to add")
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(content)
         return True
 
     # Find the last closing parenthesis
-    last_paren = content.rfind(')')
+    last_paren = content.rfind(")")
 
     if last_paren == -1:
         print("Error: Could not find closing parenthesis in PCB file")
         return False
 
     # Insert routing before the final closing paren
-    new_content = content[:last_paren] + '\n' + routing_text + '\n' + content[last_paren:]
+    new_content = content[:last_paren] + "\n" + routing_text + "\n" + content[last_paren:]
 
     # Write output file
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
     return True
 
 
-def add_tracks_and_vias_to_pcb(input_path: str, output_path: str,
-                               tracks: List[Dict], vias: List[Dict] = None,
-                               remove_vias: List[Dict] = None,
-                               net_id_to_name: Dict[int, str] = None) -> bool:
+def add_tracks_and_vias_to_pcb(
+    input_path: str,
+    output_path: str,
+    tracks: list[dict],
+    vias: list[dict] = None,
+    remove_vias: list[dict] = None,
+    net_id_to_name: dict[int, str] = None,
+) -> bool:
     """
     Add track segments and vias to a PCB file, optionally removing existing vias.
 
@@ -310,7 +314,7 @@ def add_tracks_and_vias_to_pcb(input_path: str, output_path: str,
     Returns:
         True if successful
     """
-    with open(input_path, 'r', encoding='utf-8') as f:
+    with open(input_path, encoding="utf-8") as f:
         content = f.read()
 
     # Move text from copper layers to silkscreen (prevents routing interference)
@@ -319,14 +323,15 @@ def add_tracks_and_vias_to_pcb(input_path: str, output_path: str,
     # Remove existing vias if specified
     if remove_vias:
         import re
+
         removed_count = 0
         for via_to_remove in remove_vias:
-            x, y = via_to_remove['x'], via_to_remove['y']
+            x, y = via_to_remove["x"], via_to_remove["y"]
             # Match via at this position
             # KiCad format: (via\n\t\t(at X Y)\n\t\t(size ...)\n\t\t(drill ...)\n\t\t(layers ...)\n\t\t(net ...)\n\t\t(uuid ...)\n\t)
             # Build pattern that matches the multi-line via block
-            x_str = f"{x:.6f}".rstrip('0').rstrip('.')
-            y_str = f"{y:.6f}".rstrip('0').rstrip('.')
+            x_str = f"{x:.6f}".rstrip("0").rstrip(".")
+            y_str = f"{y:.6f}".rstrip("0").rstrip(".")
 
             # Also try integer format if coordinates are whole numbers
             x_patterns = [re.escape(x_str)]
@@ -341,8 +346,8 @@ def add_tracks_and_vias_to_pcb(input_path: str, output_path: str,
                 for y_pat in y_patterns:
                     # Match entire via block from opening to closing parenthesis
                     # Use non-greedy match for content between (at ...) and final )
-                    pattern = rf'\t\(via\s*\n\s*\(at\s+{x_pat}\s+{y_pat}\)[\s\S]*?\n\t\)'
-                    new_content = re.sub(pattern, '', content)
+                    pattern = rf"\t\(via\s*\n\s*\(at\s+{x_pat}\s+{y_pat}\)[\s\S]*?\n\t\)"
+                    new_content = re.sub(pattern, "", content)
                     if new_content != content:
                         content = new_content
                         removed_count += 1
@@ -357,59 +362,54 @@ def add_tracks_and_vias_to_pcb(input_path: str, output_path: str,
 
     # Generate segment S-expressions
     for track in tracks:
-        track_net_name = net_id_to_name.get(track['net_id']) if net_id_to_name else None
+        track_net_name = net_id_to_name.get(track["net_id"]) if net_id_to_name else None
         seg = generate_segment_sexpr(
-            track['start'],
-            track['end'],
-            track['width'],
-            track['layer'],
-            track['net_id'],
-            net_name=track_net_name
+            track["start"], track["end"], track["width"], track["layer"], track["net_id"], net_name=track_net_name
         )
         elements.append(seg)
 
     # Generate via S-expressions
     if vias:
         for via in vias:
-            via_net_name = net_id_to_name.get(via['net_id']) if net_id_to_name else None
+            via_net_name = net_id_to_name.get(via["net_id"]) if net_id_to_name else None
             v = generate_via_sexpr(
-                via['x'],
-                via['y'],
-                via['size'],
-                via['drill'],
-                via['layers'],
-                via['net_id'],
-                via.get('free', False),
-                net_name=via_net_name
+                via["x"],
+                via["y"],
+                via["size"],
+                via["drill"],
+                via["layers"],
+                via["net_id"],
+                via.get("free", False),
+                net_name=via_net_name,
             )
             elements.append(v)
 
-    routing_text = '\n'.join(elements)
+    routing_text = "\n".join(elements)
 
     if not routing_text.strip():
         print("Warning: No routing elements to add")
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(content)
         return True
 
     # Find the last closing parenthesis
-    last_paren = content.rfind(')')
+    last_paren = content.rfind(")")
 
     if last_paren == -1:
         print("Error: Could not find closing parenthesis in PCB file")
         return False
 
     # Insert routing before the final closing paren
-    new_content = content[:last_paren] + '\n' + routing_text + '\n' + content[last_paren:]
+    new_content = content[:last_paren] + "\n" + routing_text + "\n" + content[last_paren:]
 
     # Write output file
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(new_content)
 
     return True
 
 
-def modify_segment_layers(content: str, segment_mods: List[Dict]) -> Tuple[str, int]:
+def modify_segment_layers(content: str, segment_mods: list[dict]) -> tuple[str, int]:
     """
     Modify the layer of existing segments in the KiCad PCB content.
 
@@ -436,11 +436,11 @@ def modify_segment_layers(content: str, segment_mods: List[Dict]) -> Tuple[str, 
     # Secondary lookup by coordinates only (for fallback when net_id doesn't match due to swaps)
     mod_lookup_by_coords = {}
     for mod in segment_mods:
-        start_key = coord_key(mod['start'][0], mod['start'][1])
-        end_key = coord_key(mod['end'][0], mod['end'][1])
-        key = (start_key, end_key, mod['net_id'])
+        start_key = coord_key(mod["start"][0], mod["start"][1])
+        end_key = coord_key(mod["end"][0], mod["end"][1])
+        key = (start_key, end_key, mod["net_id"])
         # Also store reverse order since segment endpoints can be swapped
-        key_rev = (end_key, start_key, mod['net_id'])
+        key_rev = (end_key, start_key, mod["net_id"])
         mod_lookup[key] = mod
         mod_lookup[key_rev] = mod
         # Coordinate-only lookup (list to handle multiple mods at same coords)
@@ -457,13 +457,13 @@ def modify_segment_layers(content: str, segment_mods: List[Dict]) -> Tuple[str, 
 
     # Pattern to match segment blocks - handle both KiCad 9 (net <id>) and KiCad 10 (net "name")
     segment_pattern = re.compile(
-        r'(\(segment\s*\n?\s*'
-        r'\(start\s+([\d.-]+)\s+([\d.-]+)\)\s*\n?\s*'
-        r'\(end\s+([\d.-]+)\s+([\d.-]+)\)\s*\n?\s*'
-        r'\(width\s+[\d.]+\)\s*\n?\s*'
+        r"(\(segment\s*\n?\s*"
+        r"\(start\s+([\d.-]+)\s+([\d.-]+)\)\s*\n?\s*"
+        r"\(end\s+([\d.-]+)\s+([\d.-]+)\)\s*\n?\s*"
+        r"\(width\s+[\d.]+\)\s*\n?\s*"
         r'\(layer\s+")([^"]+)("\)\s*\n?\s*'
         r'\(net\s+(?:(\d+)|"[^"]*")\))',
-        re.MULTILINE
+        re.MULTILINE,
     )
 
     def replace_layer(match):
@@ -491,12 +491,12 @@ def modify_segment_layers(content: str, segment_mods: List[Dict]) -> Tuple[str, 
         elif coord_only_key in mod_lookup_by_coords:
             mods_at_coords = mod_lookup_by_coords[coord_only_key]
             # Check if current layer matches any old_layer in the chain
-            if any(m.get('old_layer') == layer for m in mods_at_coords):
+            if any(m.get("old_layer") == layer for m in mods_at_coords):
                 # Use the last mod (final target layer for chained swaps)
                 mod = mods_at_coords[-1]
 
         if mod:
-            new_layer = mod['new_layer']
+            new_layer = mod["new_layer"]
             if layer != new_layer:
                 count += 1
                 # Replace the layer in the match
@@ -507,11 +507,15 @@ def modify_segment_layers(content: str, segment_mods: List[Dict]) -> Tuple[str, 
     return result, count
 
 
-def swap_segment_nets_at_positions(content: str, positions: set,
-                                   old_net_id: int, new_net_id: int,
-                                   layer: str = None,
-                                   old_net_name: str = None,
-                                   new_net_name: str = None) -> Tuple[str, int]:
+def swap_segment_nets_at_positions(
+    content: str,
+    positions: set,
+    old_net_id: int,
+    new_net_id: int,
+    layer: str = None,
+    old_net_name: str = None,
+    new_net_name: str = None,
+) -> tuple[str, int]:
     """
     Swap net IDs of segments that have endpoints at the given positions.
 
@@ -562,18 +566,22 @@ def swap_segment_nets_at_positions(content: str, positions: set,
                 if use_names:
                     return match.group(0).replace(f'(net "{old_net_name}")', f'(net "{new_net_name}")')
                 else:
-                    return match.group(0).replace(f'(net {old_net_id})', f'(net {new_net_id})')
+                    return match.group(0).replace(f"(net {old_net_id})", f"(net {new_net_id})")
         return match.group(0)
 
     result = re.sub(segment_pattern, replace_net, content, flags=re.DOTALL)
     return result, count
 
 
-def swap_via_nets_at_positions(content: str, positions: set,
-                               old_net_id: int, new_net_id: int,
-                               tolerance: float = 0.02,
-                               old_net_name: str = None,
-                               new_net_name: str = None) -> Tuple[str, int]:
+def swap_via_nets_at_positions(
+    content: str,
+    positions: set,
+    old_net_id: int,
+    new_net_id: int,
+    tolerance: float = 0.02,
+    old_net_name: str = None,
+    new_net_name: str = None,
+) -> tuple[str, int]:
     """
     Swap net IDs of vias that are at the given positions.
 
@@ -592,7 +600,7 @@ def swap_via_nets_at_positions(content: str, positions: set,
     if use_names:
         via_pattern = r'\(via\s+\(at\s+([\d.-]+)\s+([\d.-]+)\).*?\(net\s+"([^"]*)"\)'
     else:
-        via_pattern = r'\(via\s+\(at\s+([\d.-]+)\s+([\d.-]+)\).*?\(net\s+(\d+)\)'
+        via_pattern = r"\(via\s+\(at\s+([\d.-]+)\s+([\d.-]+)\).*?\(net\s+(\d+)\)"
 
     count = 0
 
@@ -619,22 +627,24 @@ def swap_via_nets_at_positions(content: str, positions: set,
             if use_names:
                 return match.group(0).replace(f'(net "{old_net_name}")', f'(net "{new_net_name}")')
             else:
-                return match.group(0).replace(f'(net {old_net_id})', f'(net {new_net_id})')
+                return match.group(0).replace(f"(net {old_net_id})", f"(net {new_net_id})")
         return match.group(0)
 
     result = re.sub(via_pattern, replace_net, content, flags=re.DOTALL)
     return result, count
 
 
-def add_teardrops_to_pads(content: str,
-                          best_length_ratio: float = 0.5,
-                          max_length: float = 1.0,
-                          best_width_ratio: float = 1.0,
-                          max_width: float = 2.0,
-                          curved_edges: bool = False,
-                          filter_ratio: float = 0.9,
-                          allow_two_segments: bool = True,
-                          prefer_zone_connections: bool = True) -> tuple[str, int]:
+def add_teardrops_to_pads(
+    content: str,
+    best_length_ratio: float = 0.5,
+    max_length: float = 1.0,
+    best_width_ratio: float = 1.0,
+    max_width: float = 2.0,
+    curved_edges: bool = False,
+    filter_ratio: float = 0.9,
+    allow_two_segments: bool = True,
+    prefer_zone_connections: bool = True,
+) -> tuple[str, int]:
     """
     Add teardrop settings to all pads that don't already have them.
 
@@ -658,7 +668,7 @@ def add_teardrops_to_pads(content: str,
     two_seg_str = "yes" if allow_two_segments else "no"
     zone_str = "yes" if prefer_zone_connections else "no"
 
-    teardrop_block = f'''(teardrops
+    teardrop_block = f"""(teardrops
 				(best_length_ratio {best_length_ratio})
 				(max_length {max_length})
 				(best_width_ratio {best_width_ratio})
@@ -669,7 +679,7 @@ def add_teardrops_to_pads(content: str,
 				(allow_two_segments {two_seg_str})
 				(prefer_zone_connections {zone_str})
 			)
-			'''
+			"""
 
     count = 0
     result_parts = []
@@ -678,7 +688,7 @@ def add_teardrops_to_pads(content: str,
 
     while True:
         # Find next pad definition
-        pad_start = content.find('(pad ', i)
+        pad_start = content.find("(pad ", i)
         if pad_start == -1:
             break
 
@@ -686,9 +696,9 @@ def add_teardrops_to_pads(content: str,
         depth = 0
         pad_end = pad_start
         for j in range(pad_start, len(content)):
-            if content[j] == '(':
+            if content[j] == "(":
                 depth += 1
-            elif content[j] == ')':
+            elif content[j] == ")":
                 depth -= 1
                 if depth == 0:
                     pad_end = j + 1
@@ -697,9 +707,9 @@ def add_teardrops_to_pads(content: str,
         pad_block = content[pad_start:pad_end]
 
         # Check if this pad already has teardrops
-        if '(teardrops' not in pad_block:
+        if "(teardrops" not in pad_block:
             # Find the (uuid line to insert before it
-            uuid_pos = pad_block.find('(uuid ')
+            uuid_pos = pad_block.find("(uuid ")
             if uuid_pos != -1:
                 # Insert teardrop block before uuid
                 new_pad_block = pad_block[:uuid_pos] + teardrop_block + pad_block[uuid_pos:]
@@ -713,7 +723,7 @@ def add_teardrops_to_pads(content: str,
     # Add remaining content
     result_parts.append(content[last_end:])
 
-    return ''.join(result_parts), count
+    return "".join(result_parts), count
 
 
 def swap_pad_nets_in_content(content: str, pad1: Pad, pad2: Pad) -> str:
@@ -722,7 +732,8 @@ def swap_pad_nets_in_content(content: str, pad1: Pad, pad2: Pad) -> str:
 
     Finds each pad by its component reference and pad number, then swaps their (net ...) declarations.
     """
-    def find_pad_net_in_footprint(content: str, component_ref: str, pad_number: str) -> Optional[Tuple[int, int, str]]:
+
+    def find_pad_net_in_footprint(content: str, component_ref: str, pad_number: str) -> tuple[int, int, str] | None:
         """Find the (net id "name") part of a pad and return (start, end, match_text)."""
         fp_start_pattern = r'\(footprint\s+"[^"]*"'
 
@@ -732,9 +743,9 @@ def swap_pad_nets_in_content(content: str, pad1: Pad, pad2: Pad) -> str:
             depth = 0
             fp_end = fp_start
             for i, char in enumerate(content[fp_start:], fp_start):
-                if char == '(':
+                if char == "(":
                     depth += 1
-                elif char == ')':
+                elif char == ")":
                     depth -= 1
                     if depth == 0:
                         fp_end = i + 1
@@ -755,9 +766,9 @@ def swap_pad_nets_in_content(content: str, pad1: Pad, pad2: Pad) -> str:
                 depth = 0
                 pad_end_rel = pad_start_rel
                 for i, char in enumerate(fp_text[pad_start_rel:], pad_start_rel):
-                    if char == '(':
+                    if char == "(":
                         depth += 1
-                    elif char == ')':
+                    elif char == ")":
                         depth -= 1
                         if depth == 0:
                             pad_end_rel = i + 1
@@ -783,7 +794,7 @@ def swap_pad_nets_in_content(content: str, pad1: Pad, pad2: Pad) -> str:
     result2 = find_pad_net_in_footprint(content, pad2.component_ref, pad2.pad_number)
 
     if not result1 or not result2:
-        print(f"  WARNING: Could not find pad(s) to swap nets")
+        print("  WARNING: Could not find pad(s) to swap nets")
         if not result1:
             print(f"    Missing: {pad1.component_ref} pad {pad1.pad_number}")
         if not result2:

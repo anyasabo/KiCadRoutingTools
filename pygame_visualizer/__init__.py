@@ -8,14 +8,19 @@ Usage:
     python route.py input.kicad_pcb output.kicad_pcb "Net-*" --visualize
 """
 
-from .visualizer import RoutingVisualizer
-from .config import VisualizerConfig, LayerColors
-from .callback import VisualizationCallback, NullVisualizationCallback, VisualizationData
+from .callback import NullVisualizationCallback, VisualizationCallback, VisualizationData
+from .config import LayerColors, VisualizerConfig
 from .pygame_callback import PyGameVisualizationCallback, create_pygame_callback
+from .visualizer import RoutingVisualizer
 
 __all__ = [
-    'RoutingVisualizer', 'VisualizerConfig', 'LayerColors',
-    'VisualizationCallback', 'NullVisualizationCallback', 'VisualizationData',
-    'PyGameVisualizationCallback', 'create_pygame_callback',
+    "RoutingVisualizer",
+    "VisualizerConfig",
+    "LayerColors",
+    "VisualizationCallback",
+    "NullVisualizationCallback",
+    "VisualizationData",
+    "PyGameVisualizationCallback",
+    "create_pygame_callback",
 ]
-__version__ = '2.0.0'
+__version__ = "2.0.0"

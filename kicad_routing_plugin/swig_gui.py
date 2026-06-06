@@ -7,9 +7,10 @@ Provides a wx-based dialog for routing configuration.
 import os
 import re
 import sys
-import time
-import wx
 import threading
+import time
+
+import wx
 
 # Add parent directory to path
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +20,7 @@ if ROOT_DIR not in sys.path:
 
 import routing_defaults as defaults
 from kicad_parser import POSITION_DECIMALS
+
 from .fanout_gui import NetSelectionPanel
 from .gui_utils import StdoutRedirector
 from .settings_persistence import get_dialog_settings, restore_dialog_settings
@@ -31,13 +33,14 @@ def _build_layer_mappings():
         tuple: (name_to_id dict, id_to_name dict)
     """
     import pcbnew
-    name_to_id = {'F.Cu': pcbnew.F_Cu, 'B.Cu': pcbnew.B_Cu}
-    id_to_name = {pcbnew.F_Cu: 'F.Cu', pcbnew.B_Cu: 'B.Cu'}
+
+    name_to_id = {"F.Cu": pcbnew.F_Cu, "B.Cu": pcbnew.B_Cu}
+    id_to_name = {pcbnew.F_Cu: "F.Cu", pcbnew.B_Cu: "B.Cu"}
     for i in range(1, 31):
-        layer_id = getattr(pcbnew, f'In{i}_Cu', None)
+        layer_id = getattr(pcbnew, f"In{i}_Cu", None)
         if layer_id is not None:
-            name_to_id[f'In{i}.Cu'] = layer_id
-            id_to_name[layer_id] = f'In{i}.Cu'
+            name_to_id[f"In{i}.Cu"] = layer_id
+            id_to_name[layer_id] = f"In{i}.Cu"
     return name_to_id, id_to_name
 
 
@@ -54,6 +57,7 @@ def _get_netclass_parameters(class_name):
     """
     try:
         import pcbnew
+
         board = pcbnew.GetBoard()
         if board is None:
             return None
@@ -73,17 +77,17 @@ def _get_netclass_parameters(class_name):
         nm_to_mm = 1e-6
 
         result = {
-            'track_width': netclass.GetTrackWidth() * nm_to_mm,
-            'clearance': netclass.GetClearance() * nm_to_mm,
-            'via_size': netclass.GetViaDiameter() * nm_to_mm,
-            'via_drill': netclass.GetViaDrill() * nm_to_mm,
+            "track_width": netclass.GetTrackWidth() * nm_to_mm,
+            "clearance": netclass.GetClearance() * nm_to_mm,
+            "via_size": netclass.GetViaDiameter() * nm_to_mm,
+            "via_drill": netclass.GetViaDrill() * nm_to_mm,
         }
 
         # Add differential pair parameters if available
-        if hasattr(netclass, 'GetDiffPairWidth'):
-            result['diff_pair_width'] = netclass.GetDiffPairWidth() * nm_to_mm
-        if hasattr(netclass, 'GetDiffPairGap'):
-            result['diff_pair_gap'] = netclass.GetDiffPairGap() * nm_to_mm
+        if hasattr(netclass, "GetDiffPairWidth"):
+            result["diff_pair_width"] = netclass.GetDiffPairWidth() * nm_to_mm
+        if hasattr(netclass, "GetDiffPairGap"):
+            result["diff_pair_gap"] = netclass.GetDiffPairGap() * nm_to_mm
 
         return result
     except Exception:
@@ -102,6 +106,7 @@ def _get_board_minimum_constraints():
     """
     try:
         import pcbnew
+
         board = pcbnew.GetBoard()
         if board is None:
             return None
@@ -110,19 +115,19 @@ def _get_board_minimum_constraints():
         nm_to_mm = 1e-6
 
         result = {
-            'min_track_width': ds.m_TrackMinWidth * nm_to_mm,
-            'min_clearance': ds.m_MinClearance * nm_to_mm,
-            'min_via_size': ds.m_ViasMinSize * nm_to_mm,
-            'min_via_drill': ds.m_MinThroughDrill * nm_to_mm,
+            "min_track_width": ds.m_TrackMinWidth * nm_to_mm,
+            "min_clearance": ds.m_MinClearance * nm_to_mm,
+            "min_via_size": ds.m_ViasMinSize * nm_to_mm,
+            "min_via_drill": ds.m_MinThroughDrill * nm_to_mm,
         }
 
         # Try to get hole-to-hole clearance (may not be available in all versions)
-        if hasattr(ds, 'm_HoleToHoleMin'):
-            result['min_hole_to_hole'] = ds.m_HoleToHoleMin * nm_to_mm
+        if hasattr(ds, "m_HoleToHoleMin"):
+            result["min_hole_to_hole"] = ds.m_HoleToHoleMin * nm_to_mm
 
         # Try to get copper-to-edge clearance
-        if hasattr(ds, 'm_CopperEdgeClearance'):
-            result['min_copper_edge_clearance'] = ds.m_CopperEdgeClearance * nm_to_mm
+        if hasattr(ds, "m_CopperEdgeClearance"):
+            result["min_copper_edge_clearance"] = ds.m_CopperEdgeClearance * nm_to_mm
 
         return result
     except Exception:
@@ -132,27 +137,23 @@ def _get_board_minimum_constraints():
 class RoutingDialog(wx.Dialog):
     """Main dialog for configuring and running the router."""
 
-    def __init__(self, parent, pcb_data, board_filename, saved_settings=None,
-                 preselected_nets=None):
+    def __init__(self, parent, pcb_data, board_filename, saved_settings=None, preselected_nets=None):
         super().__init__(
-            parent,
-            title="KiCad Routing Tools",
-            size=(800, 800),
-            style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER
+            parent, title="KiCad Routing Tools", size=(800, 800), style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER
         )
 
         # Get saved transparency or use default
         self._initial_transparency = 240
-        if saved_settings and 'window_transparency' in saved_settings:
-            self._initial_transparency = saved_settings['window_transparency']
+        if saved_settings and "window_transparency" in saved_settings:
+            self._initial_transparency = saved_settings["window_transparency"]
 
         # Set window transparency (0=fully transparent, 255=opaque)
         self.SetTransparent(self._initial_transparency)
 
         # Configure tooltip timing (in milliseconds)
-        wx.ToolTip.SetDelay(250)       # Delay before showing
-        wx.ToolTip.SetAutoPop(10000)   # How long tooltip stays visible
-        wx.ToolTip.SetReshow(50)       # Delay when moving between controls
+        wx.ToolTip.SetDelay(250)  # Delay before showing
+        wx.ToolTip.SetAutoPop(10000)  # How long tooltip stays visible
+        wx.ToolTip.SetReshow(50)  # Delay when moving between controls
 
         self.pcb_data = pcb_data
         self.board_filename = board_filename
@@ -189,6 +190,7 @@ class RoutingDialog(wx.Dialog):
 
         try:
             import pcbnew
+
             from kicad_parser import Segment, Via
 
             board = pcbnew.GetBoard()
@@ -203,7 +205,7 @@ class RoutingDialog(wx.Dialog):
             _, id_to_name = _build_layer_mappings()
 
             def get_layer_name(layer_id):
-                return id_to_name.get(layer_id, 'F.Cu')
+                return id_to_name.get(layer_id, "F.Cu")
 
             # Collect all segments from board
             new_segments = []
@@ -247,8 +249,8 @@ class RoutingDialog(wx.Dialog):
             # until the GUI reopens.
             try:
                 from kicad_parser import _extract_zones_from_pcbnew
-                self.pcb_data.zones = _extract_zones_from_pcbnew(
-                    board, pcbnew.ToMM, get_layer_name)
+
+                self.pcb_data.zones = _extract_zones_from_pcbnew(board, pcbnew.ToMM, get_layer_name)
             except Exception as e:
                 print(f"Warning: Error syncing zones from board: {e}")
         except Exception as e:
@@ -305,21 +307,24 @@ class RoutingDialog(wx.Dialog):
     def _create_about_tab(self):
         """Create the About tab."""
         from .about_tab import AboutTab
+
         return AboutTab(
             self.notebook,
             on_reset_settings=self._reset_all_settings,
             on_transparency_changed=self._on_transparency_changed,
             initial_transparency=self._initial_transparency,
-            on_validate_pcb_data=self._validate_pcb_data
+            on_validate_pcb_data=self._validate_pcb_data,
         )
 
     def _validate_pcb_data(self):
         """Compare pcbnew-extracted PCBData against file-parsed PCBData."""
-        from kicad_parser import parse_kicad_pcb, compare_pcb_data
+        from kicad_parser import compare_pcb_data, parse_kicad_pcb
 
         if not self.board_filename:
-            self._append_log("Validation: Board has no filename (not saved yet). "
-                             "Save the board first to enable file-based validation.\n")
+            self._append_log(
+                "Validation: Board has no filename (not saved yet). "
+                "Save the board first to enable file-based validation.\n"
+            )
             return
 
         self._append_log("=== PCB Data Validation ===\n")
@@ -363,7 +368,8 @@ class RoutingDialog(wx.Dialog):
         net_sizer = wx.StaticBoxSizer(net_box, wx.VERTICAL)
 
         self.net_panel = NetSelectionPanel(
-            panel, self.pcb_data,
+            panel,
+            self.pcb_data,
             instructions="Select nets to route...",
             hide_label="Hide connected",
             hide_tooltip="Hide nets that are already fully connected",
@@ -372,7 +378,7 @@ class RoutingDialog(wx.Dialog):
             show_component_dropdown=True,
             min_pads_for_dropdown=3,
             show_hide_differential=True,
-            hide_differential_default=False
+            hide_differential_default=False,
         )
         self.net_panel.set_selection_changed_callback(self._update_status_bar)
         self.net_panel.set_tabbed_view_changed_callback(self._on_tabbed_view_changed)
@@ -432,25 +438,30 @@ class RoutingDialog(wx.Dialog):
         """Add basic parameter controls to grid."""
         # Map control names to DRC minimum keys
         self._drc_min_keys = {
-            'track_width': 'min_track_width',
-            'clearance': 'min_clearance',
-            'via_size': 'min_via_size',
-            'via_drill': 'min_via_drill',
-            'hole_to_hole_clearance': 'min_hole_to_hole',
-            'board_edge_clearance': 'min_copper_edge_clearance',
+            "track_width": "min_track_width",
+            "clearance": "min_clearance",
+            "via_size": "min_via_size",
+            "via_drill": "min_via_drill",
+            "hole_to_hole_clearance": "min_hole_to_hole",
+            "board_edge_clearance": "min_copper_edge_clearance",
         }
         params = [
-            ('track_width', 'Track Width (mm):', defaults.TRACK_WIDTH, "Width of routed traces"),
-            ('clearance', 'Clearance (mm):', defaults.CLEARANCE, "Minimum spacing between traces and other copper"),
-            ('via_size', 'Via Size (mm):', defaults.VIA_SIZE, "Outer diameter of vias"),
-            ('via_drill', 'Via Drill (mm):', defaults.VIA_DRILL, "Drill hole diameter for vias"),
-            ('hole_to_hole_clearance', 'Hole Clearance (mm):', defaults.HOLE_TO_HOLE_CLEARANCE, "Minimum spacing between via/pad drill holes"),
+            ("track_width", "Track Width (mm):", defaults.TRACK_WIDTH, "Width of routed traces"),
+            ("clearance", "Clearance (mm):", defaults.CLEARANCE, "Minimum spacing between traces and other copper"),
+            ("via_size", "Via Size (mm):", defaults.VIA_SIZE, "Outer diameter of vias"),
+            ("via_drill", "Via Drill (mm):", defaults.VIA_DRILL, "Drill hole diameter for vias"),
+            (
+                "hole_to_hole_clearance",
+                "Hole Clearance (mm):",
+                defaults.HOLE_TO_HOLE_CLEARANCE,
+                "Minimum spacing between via/pad drill holes",
+            ),
         ]
         for name, label, default, tooltip in params:
             r = defaults.PARAM_RANGES[name]
             grid.Add(wx.StaticText(parent, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
-            ctrl = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=default, inc=r['inc'])
-            ctrl.SetDigits(r['digits'])
+            ctrl = wx.SpinCtrlDouble(parent, min=r["min"], max=r["max"], initial=default, inc=r["inc"])
+            ctrl.SetDigits(r["digits"])
             ctrl.SetToolTip(tooltip)
             ctrl.Bind(wx.EVT_SPINCTRLDOUBLE, lambda evt, n=name: self._on_drc_param_changed(evt, n))
             setattr(self, name, ctrl)
@@ -463,10 +474,14 @@ class RoutingDialog(wx.Dialog):
         self.edge_clearance_check.SetValue(False)
         self.edge_clearance_check.SetToolTip("Enable custom edge clearance (unchecked = use track clearance)")
         self.edge_clearance_check.Bind(wx.EVT_CHECKBOX, self._on_edge_clearance_check)
-        r = defaults.PARAM_RANGES['board_edge_clearance']
-        self.board_edge_clearance = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=defaults.CLEARANCE, inc=r['inc'])
-        self.board_edge_clearance.SetDigits(r['digits'])
-        self.board_edge_clearance.Bind(wx.EVT_SPINCTRLDOUBLE, lambda evt: self._on_drc_param_changed(evt, 'board_edge_clearance'))
+        r = defaults.PARAM_RANGES["board_edge_clearance"]
+        self.board_edge_clearance = wx.SpinCtrlDouble(
+            parent, min=r["min"], max=r["max"], initial=defaults.CLEARANCE, inc=r["inc"]
+        )
+        self.board_edge_clearance.SetDigits(r["digits"])
+        self.board_edge_clearance.Bind(
+            wx.EVT_SPINCTRLDOUBLE, lambda evt: self._on_drc_param_changed(evt, "board_edge_clearance")
+        )
         self.board_edge_clearance.SetToolTip("When disabled, tracks use the Clearance value for board edge spacing")
         self.board_edge_clearance.Enable(False)
         edge_sizer.Add(self.edge_clearance_check, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
@@ -474,24 +489,24 @@ class RoutingDialog(wx.Dialog):
         grid.Add(edge_sizer, 0, wx.EXPAND)
 
         # Grid step
-        r = defaults.PARAM_RANGES['grid_step']
+        r = defaults.PARAM_RANGES["grid_step"]
         grid.Add(wx.StaticText(parent, label="Grid Step (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.grid_step = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=defaults.GRID_STEP, inc=r['inc'])
-        self.grid_step.SetDigits(r['digits'])
+        self.grid_step = wx.SpinCtrlDouble(parent, min=r["min"], max=r["max"], initial=defaults.GRID_STEP, inc=r["inc"])
+        self.grid_step.SetDigits(r["digits"])
         self.grid_step.SetToolTip("Routing grid resolution (smaller = finer routing, slower)")
         grid.Add(self.grid_step, 0, wx.EXPAND)
 
         # Via cost (integer)
-        r = defaults.PARAM_RANGES['via_cost']
+        r = defaults.PARAM_RANGES["via_cost"]
         grid.Add(wx.StaticText(parent, label="Via Cost:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.via_cost = wx.SpinCtrl(parent, min=r['min'], max=r['max'], initial=defaults.VIA_COST)
+        self.via_cost = wx.SpinCtrl(parent, min=r["min"], max=r["max"], initial=defaults.VIA_COST)
         self.via_cost.SetToolTip("Cost penalty for adding vias (higher = fewer layer changes)")
         grid.Add(self.via_cost, 0, wx.EXPAND)
 
         # Max rip-up count
-        r = defaults.PARAM_RANGES['max_ripup']
+        r = defaults.PARAM_RANGES["max_ripup"]
         grid.Add(wx.StaticText(parent, label="Max Rip-up:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.max_ripup = wx.SpinCtrl(parent, min=r['min'], max=r['max'], initial=defaults.MAX_RIPUP)
+        self.max_ripup = wx.SpinCtrl(parent, min=r["min"], max=r["max"], initial=defaults.MAX_RIPUP)
         self.max_ripup.SetToolTip("Maximum number of nets to rip up and reroute when blocked")
         grid.Add(self.max_ripup, 0, wx.EXPAND)
 
@@ -502,7 +517,7 @@ class RoutingDialog(wx.Dialog):
 
     def _on_drc_param_changed(self, event, ctrl_name):
         """Validate parameter change against DRC minimums."""
-        if not (hasattr(self, 'obey_drc_check') and self.obey_drc_check.GetValue()):
+        if not (hasattr(self, "obey_drc_check") and self.obey_drc_check.GetValue()):
             event.Skip()
             return
 
@@ -526,12 +541,11 @@ class RoutingDialog(wx.Dialog):
 
         if current < minimum:
             # Show warning and revert to minimum
-            label = ctrl_name.replace('_', ' ').title()
+            label = ctrl_name.replace("_", " ").title()
             wx.MessageBox(
-                f"{label} cannot be less than {minimum:.3f} mm\n"
-                f"(Board minimum from Design Rules)",
+                f"{label} cannot be less than {minimum:.3f} mm\n(Board minimum from Design Rules)",
                 "Design Rule Constraint",
-                wx.OK | wx.ICON_WARNING
+                wx.OK | wx.ICON_WARNING,
             )
             ctrl.SetValue(minimum)
         else:
@@ -543,7 +557,7 @@ class RoutingDialog(wx.Dialog):
         Called when dialog opens, before values are displayed to user.
         Silently adjusts values to meet board minimums.
         """
-        if not (hasattr(self, 'obey_drc_check') and self.obey_drc_check.GetValue()):
+        if not (hasattr(self, "obey_drc_check") and self.obey_drc_check.GetValue()):
             return
 
         minimums = _get_board_minimum_constraints()
@@ -552,12 +566,12 @@ class RoutingDialog(wx.Dialog):
 
         # Map control names to minimum keys
         checks = [
-            ('track_width', 'min_track_width'),
-            ('clearance', 'min_clearance'),
-            ('via_size', 'min_via_size'),
-            ('via_drill', 'min_via_drill'),
-            ('hole_to_hole_clearance', 'min_hole_to_hole'),
-            ('board_edge_clearance', 'min_copper_edge_clearance'),
+            ("track_width", "min_track_width"),
+            ("clearance", "min_clearance"),
+            ("via_size", "min_via_size"),
+            ("via_drill", "min_via_drill"),
+            ("hole_to_hole_clearance", "min_hole_to_hole"),
+            ("board_edge_clearance", "min_copper_edge_clearance"),
         ]
 
         for ctrl_name, min_key in checks:
@@ -576,65 +590,149 @@ class RoutingDialog(wx.Dialog):
         self.impedance_check = wx.CheckBox(parent, label="")
         self.impedance_check.SetValue(False)
         self.impedance_check.SetToolTip("Use impedance-based track width (overrides Track Width)")
-        r = defaults.PARAM_RANGES['impedance']
-        self.impedance_value = wx.SpinCtrl(parent, min=r['min'], max=r['max'], initial=defaults.IMPEDANCE_DEFAULT)
+        r = defaults.PARAM_RANGES["impedance"]
+        self.impedance_value = wx.SpinCtrl(parent, min=r["min"], max=r["max"], initial=defaults.IMPEDANCE_DEFAULT)
         self.impedance_value.SetToolTip("Target impedance in ohms")
         impedance_sizer.Add(self.impedance_check, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         impedance_sizer.Add(self.impedance_value, 1, wx.EXPAND)
-        impedance_sizer.Add(wx.StaticText(parent, label="\u03A9"), 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 3)
+        impedance_sizer.Add(wx.StaticText(parent, label="\u03a9"), 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 3)
         grid.Add(impedance_sizer, 0, wx.EXPAND)
 
         # Integer parameters
         int_params = [
-            ('max_iterations', 'Max Iterations:', defaults.MAX_ITERATIONS, "Maximum A* iterations per net before giving up"),
-            ('max_probe_iterations', 'Probe Iterations:', defaults.MAX_PROBE_ITERATIONS, "Iterations for quick probe routing attempts"),
-            ('turn_cost', 'Turn Cost:', defaults.TURN_COST, "Penalty for 90-degree turns (encourages straighter routes)"),
-            ('direction_preference_cost', 'Dir. Pref. Cost:', defaults.DIRECTION_PREFERENCE_COST, "Penalty for routing against layer's preferred direction"),
+            (
+                "max_iterations",
+                "Max Iterations:",
+                defaults.MAX_ITERATIONS,
+                "Maximum A* iterations per net before giving up",
+            ),
+            (
+                "max_probe_iterations",
+                "Probe Iterations:",
+                defaults.MAX_PROBE_ITERATIONS,
+                "Iterations for quick probe routing attempts",
+            ),
+            (
+                "turn_cost",
+                "Turn Cost:",
+                defaults.TURN_COST,
+                "Penalty for 90-degree turns (encourages straighter routes)",
+            ),
+            (
+                "direction_preference_cost",
+                "Dir. Pref. Cost:",
+                defaults.DIRECTION_PREFERENCE_COST,
+                "Penalty for routing against layer's preferred direction",
+            ),
         ]
         for name, label, default, tooltip in int_params:
             r = defaults.PARAM_RANGES[name]
             grid.Add(wx.StaticText(parent, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
-            ctrl = wx.SpinCtrl(parent, min=r['min'], max=r['max'], initial=default)
+            ctrl = wx.SpinCtrl(parent, min=r["min"], max=r["max"], initial=default)
             ctrl.SetToolTip(tooltip)
             setattr(self, name, ctrl)
             grid.Add(ctrl, 0, wx.EXPAND)
 
         # Heuristic weight
-        r = defaults.PARAM_RANGES['heuristic_weight']
+        r = defaults.PARAM_RANGES["heuristic_weight"]
         grid.Add(wx.StaticText(parent, label="Heuristic Weight:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.heuristic_weight = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=defaults.HEURISTIC_WEIGHT, inc=r['inc'])
-        self.heuristic_weight.SetDigits(r['digits'])
+        self.heuristic_weight = wx.SpinCtrlDouble(
+            parent, min=r["min"], max=r["max"], initial=defaults.HEURISTIC_WEIGHT, inc=r["inc"]
+        )
+        self.heuristic_weight.SetDigits(r["digits"])
         self.heuristic_weight.SetToolTip("A* heuristic weight (higher = faster but less optimal routes)")
         grid.Add(self.heuristic_weight, 0, wx.EXPAND)
 
         # Proximity heuristic factor
-        r = defaults.PARAM_RANGES['proximity_heuristic_factor']
+        r = defaults.PARAM_RANGES["proximity_heuristic_factor"]
         grid.Add(wx.StaticText(parent, label="Prox. Heuristic Factor:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.proximity_heuristic_factor = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=defaults.PROXIMITY_HEURISTIC_FACTOR, inc=r['inc'])
-        self.proximity_heuristic_factor.SetDigits(r['digits'])
+        self.proximity_heuristic_factor = wx.SpinCtrlDouble(
+            parent, min=r["min"], max=r["max"], initial=defaults.PROXIMITY_HEURISTIC_FACTOR, inc=r["inc"]
+        )
+        self.proximity_heuristic_factor.SetDigits(r["digits"])
         self.proximity_heuristic_factor.SetToolTip("Factor for proximity-aware A* heuristic (0 = disabled)")
         grid.Add(self.proximity_heuristic_factor, 0, wx.EXPAND)
 
         # Float parameters
         float_params = [
-            ('bga_proximity_radius', 'BGA Proximity (mm):', defaults.BGA_PROXIMITY_RADIUS, "Radius around BGA pads to apply extra cost"),
-            ('bga_proximity_cost', 'BGA Prox. Cost:', defaults.BGA_PROXIMITY_COST, "Cost multiplier for routing near BGA pads"),
-            ('stub_proximity_radius', 'Stub Proximity (mm):', defaults.STUB_PROXIMITY_RADIUS, "Radius around stubs to apply extra cost"),
-            ('stub_proximity_cost', 'Stub Prox. Cost:', defaults.STUB_PROXIMITY_COST, "Cost for routing near stubs of other nets"),
-            ('via_proximity_cost', 'Via Prox. Multiplier:', defaults.VIA_PROXIMITY_COST, "Cost multiplier for placing vias near other vias"),
-            ('track_proximity_distance', 'Track Prox. (mm):', defaults.TRACK_PROXIMITY_DISTANCE, "Distance to detect parallel tracks for bunching avoidance"),
-            ('track_proximity_cost', 'Track Prox. Cost:', defaults.TRACK_PROXIMITY_COST, "Cost for routing parallel to existing tracks"),
-            ('vertical_attraction_radius', 'Vert. Attract (mm):', defaults.VERTICAL_ATTRACTION_RADIUS, "Radius for attracting route toward target vertically"),
-            ('vertical_attraction_cost', 'Vert. Attract Cost:', defaults.VERTICAL_ATTRACTION_COST, "Bonus for moving toward target's vertical position"),
-            ('ripped_route_avoidance_radius', 'Rip Avoid (mm):', defaults.RIPPED_ROUTE_AVOIDANCE_RADIUS, "Radius to avoid area where previous route failed"),
-            ('ripped_route_avoidance_cost', 'Rip Avoid Cost:', defaults.RIPPED_ROUTE_AVOIDANCE_COST, "Cost for routing through previously ripped area"),
-            ('routing_clearance_margin', 'Clearance Margin:', defaults.ROUTING_CLEARANCE_MARGIN, "Extra clearance margin multiplier for safety"),
+            (
+                "bga_proximity_radius",
+                "BGA Proximity (mm):",
+                defaults.BGA_PROXIMITY_RADIUS,
+                "Radius around BGA pads to apply extra cost",
+            ),
+            (
+                "bga_proximity_cost",
+                "BGA Prox. Cost:",
+                defaults.BGA_PROXIMITY_COST,
+                "Cost multiplier for routing near BGA pads",
+            ),
+            (
+                "stub_proximity_radius",
+                "Stub Proximity (mm):",
+                defaults.STUB_PROXIMITY_RADIUS,
+                "Radius around stubs to apply extra cost",
+            ),
+            (
+                "stub_proximity_cost",
+                "Stub Prox. Cost:",
+                defaults.STUB_PROXIMITY_COST,
+                "Cost for routing near stubs of other nets",
+            ),
+            (
+                "via_proximity_cost",
+                "Via Prox. Multiplier:",
+                defaults.VIA_PROXIMITY_COST,
+                "Cost multiplier for placing vias near other vias",
+            ),
+            (
+                "track_proximity_distance",
+                "Track Prox. (mm):",
+                defaults.TRACK_PROXIMITY_DISTANCE,
+                "Distance to detect parallel tracks for bunching avoidance",
+            ),
+            (
+                "track_proximity_cost",
+                "Track Prox. Cost:",
+                defaults.TRACK_PROXIMITY_COST,
+                "Cost for routing parallel to existing tracks",
+            ),
+            (
+                "vertical_attraction_radius",
+                "Vert. Attract (mm):",
+                defaults.VERTICAL_ATTRACTION_RADIUS,
+                "Radius for attracting route toward target vertically",
+            ),
+            (
+                "vertical_attraction_cost",
+                "Vert. Attract Cost:",
+                defaults.VERTICAL_ATTRACTION_COST,
+                "Bonus for moving toward target's vertical position",
+            ),
+            (
+                "ripped_route_avoidance_radius",
+                "Rip Avoid (mm):",
+                defaults.RIPPED_ROUTE_AVOIDANCE_RADIUS,
+                "Radius to avoid area where previous route failed",
+            ),
+            (
+                "ripped_route_avoidance_cost",
+                "Rip Avoid Cost:",
+                defaults.RIPPED_ROUTE_AVOIDANCE_COST,
+                "Cost for routing through previously ripped area",
+            ),
+            (
+                "routing_clearance_margin",
+                "Clearance Margin:",
+                defaults.ROUTING_CLEARANCE_MARGIN,
+                "Extra clearance margin multiplier for safety",
+            ),
         ]
         for name, label, default, tooltip in float_params:
             r = defaults.PARAM_RANGES[name]
             grid.Add(wx.StaticText(parent, label=label), 0, wx.ALIGN_CENTER_VERTICAL)
-            ctrl = wx.SpinCtrlDouble(parent, min=r['min'], max=r['max'], initial=default, inc=r['inc'])
-            ctrl.SetDigits(r['digits'])
+            ctrl = wx.SpinCtrlDouble(parent, min=r["min"], max=r["max"], initial=default, inc=r["inc"])
+            ctrl.SetDigits(r["digits"])
             ctrl.SetToolTip(tooltip)
             setattr(self, name, ctrl)
             grid.Add(ctrl, 0, wx.EXPAND)
@@ -643,7 +741,9 @@ class RoutingDialog(wx.Dialog):
         grid.Add(wx.StaticText(parent, label="Ordering Strategy:"), 0, wx.ALIGN_CENTER_VERTICAL)
         self.ordering_strategy = wx.Choice(parent, choices=["mps", "inside_out", "original"])
         self.ordering_strategy.SetSelection(0)
-        self.ordering_strategy.SetToolTip("Net ordering strategy: mps (minimum planar subset), inside_out, or original order")
+        self.ordering_strategy.SetToolTip(
+            "Net ordering strategy: mps (minimum planar subset), inside_out, or original order"
+        )
         grid.Add(self.ordering_strategy, 0, wx.EXPAND)
 
         # Direction dropdown
@@ -705,7 +805,8 @@ class RoutingDialog(wx.Dialog):
         self.guide_corridor_check.SetValue(defaults.GUIDE_CORRIDOR_ENABLED)
         self.guide_corridor_check.SetToolTip(
             "Route the selected nets so they follow a polyline you draw on a User layer "
-            "(waypoints), avoiding obstacles. Multiple nets pack alongside without overlapping.")
+            "(waypoints), avoiding obstacles. Multiple nets pack alongside without overlapping."
+        )
         options_inner.Add(self.guide_corridor_check, 0, wx.ALL, 3)
 
         gc_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -714,9 +815,13 @@ class RoutingDialog(wx.Dialog):
         self.guide_corridor_layer_ctrl.SetToolTip("User layer the guide polyline is drawn on (e.g., User.1)")
         gc_sizer.Add(self.guide_corridor_layer_ctrl, 0, wx.RIGHT, 8)
         gc_sizer.Add(wx.StaticText(options_scroll, label="Spacing(mm):"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        self.guide_corridor_spacing_ctrl = wx.TextCtrl(options_scroll, value=str(defaults.GUIDE_CORRIDOR_SPACING), size=(45, -1))
-        self.guide_corridor_spacing_ctrl.SetToolTip("Max mm between waypoints. 0 = only the drawn segment endpoints; "
-                                                    ">0 subdivides long segments to follow curves more tightly.")
+        self.guide_corridor_spacing_ctrl = wx.TextCtrl(
+            options_scroll, value=str(defaults.GUIDE_CORRIDOR_SPACING), size=(45, -1)
+        )
+        self.guide_corridor_spacing_ctrl.SetToolTip(
+            "Max mm between waypoints. 0 = only the drawn segment endpoints; "
+            ">0 subdivides long segments to follow curves more tightly."
+        )
         gc_sizer.Add(self.guide_corridor_spacing_ctrl, 0)
         options_inner.Add(gc_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
@@ -724,7 +829,8 @@ class RoutingDialog(wx.Dialog):
         self.clear_guide_layer_check.SetValue(False)
         self.clear_guide_layer_check.SetToolTip(
             "After a successful route, delete the guide graphics from the guide layer so you "
-            "can draw new ones. Only acts when 'Follow User-layer guide path' is enabled.")
+            "can draw new ones. Only acts when 'Follow User-layer guide path' is enabled."
+        )
         options_inner.Add(self.clear_guide_layer_check, 0, wx.ALL, 3)
 
         # Keepout zone: keep tracks out of a user-drawn polygon (issue #27)
@@ -732,7 +838,8 @@ class RoutingDialog(wx.Dialog):
         self.keepout_check.SetValue(defaults.KEEPOUT_ENABLED)
         self.keepout_check.SetToolTip(
             "Keep routed tracks out of any closed polygons you draw on a User layer. "
-            "Applies to all nets being routed this run. Don't draw them over pads you need to route.")
+            "Applies to all nets being routed this run. Don't draw them over pads you need to route."
+        )
         options_inner.Add(self.keepout_check, 0, wx.ALL, 3)
 
         ko_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -746,7 +853,8 @@ class RoutingDialog(wx.Dialog):
         self.clear_keepout_layer_check.SetValue(False)
         self.clear_keepout_layer_check.SetToolTip(
             "After a successful route, delete the keepout polygons from the keepout layer so you "
-            "can draw new ones. Only acts when 'Keep out of User-layer polygon(s)' is enabled.")
+            "can draw new ones. Only acts when 'Keep out of User-layer polygon(s)' is enabled."
+        )
         options_inner.Add(self.clear_keepout_layer_check, 0, wx.ALL, 3)
 
         # Power nets
@@ -759,7 +867,9 @@ class RoutingDialog(wx.Dialog):
 
         # Power net widths
         widths_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        widths_sizer.Add(wx.StaticText(options_scroll, label="Power Widths:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        widths_sizer.Add(
+            wx.StaticText(options_scroll, label="Power Widths:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
         self.power_widths_ctrl = wx.TextCtrl(options_scroll)
         self.power_widths_ctrl.SetToolTip("Track widths in mm for each power-net pattern (space-separated)")
         widths_sizer.Add(self.power_widths_ctrl, 1, wx.EXPAND)
@@ -769,7 +879,9 @@ class RoutingDialog(wx.Dialog):
         bga_sizer = wx.BoxSizer(wx.HORIZONTAL)
         bga_sizer.Add(wx.StaticText(options_scroll, label="No BGA Zones:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         self.no_bga_zones_ctrl = wx.TextCtrl(options_scroll, value="ALL")
-        self.no_bga_zones_ctrl.SetToolTip("Disable BGA exclusion zones: component refs (e.g., U1 U3), ALL, or leave empty to exclude none")
+        self.no_bga_zones_ctrl.SetToolTip(
+            "Disable BGA exclusion zones: component refs (e.g., U1 U3), ALL, or leave empty to exclude none"
+        )
         bga_sizer.Add(self.no_bga_zones_ctrl, 1, wx.EXPAND)
         options_inner.Add(bga_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
@@ -782,7 +894,9 @@ class RoutingDialog(wx.Dialog):
         for layer in self.pcb_data.board_info.copper_layers:
             default_costs.append("1.0" if layer == "F.Cu" else "3.0")
         self.layer_costs_ctrl.SetValue(" ".join(default_costs))
-        self.layer_costs_ctrl.SetToolTip("Per-layer cost multipliers (order: " + " ".join(self.pcb_data.board_info.copper_layers) + ")")
+        self.layer_costs_ctrl.SetToolTip(
+            "Per-layer cost multipliers (order: " + " ".join(self.pcb_data.board_info.copper_layers) + ")"
+        )
         layer_sizer.Add(self.layer_costs_ctrl, 1, wx.EXPAND)
         options_inner.Add(layer_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
@@ -827,39 +941,47 @@ class RoutingDialog(wx.Dialog):
         options_inner.Add(self.bus_enabled, 0, wx.ALL, 3)
 
         bus_detect_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        bus_detect_sizer.Add(wx.StaticText(options_scroll, label="Detection radius:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['bus_detection_radius']
-        self.bus_detection_radius = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                       initial=defaults.BUS_DETECTION_RADIUS, inc=r['inc'])
-        self.bus_detection_radius.SetDigits(r['digits'])
+        bus_detect_sizer.Add(
+            wx.StaticText(options_scroll, label="Detection radius:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["bus_detection_radius"]
+        self.bus_detection_radius = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.BUS_DETECTION_RADIUS, inc=r["inc"]
+        )
+        self.bus_detection_radius.SetDigits(r["digits"])
         self.bus_detection_radius.SetToolTip("Max endpoint distance to form bus group (mm)")
         bus_detect_sizer.Add(self.bus_detection_radius, 1, wx.EXPAND)
         options_inner.Add(bus_detect_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
         bus_attract_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        bus_attract_sizer.Add(wx.StaticText(options_scroll, label="Attraction radius:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['bus_attraction_radius']
-        self.bus_attraction_radius = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                        initial=defaults.BUS_ATTRACTION_RADIUS, inc=r['inc'])
-        self.bus_attraction_radius.SetDigits(r['digits'])
+        bus_attract_sizer.Add(
+            wx.StaticText(options_scroll, label="Attraction radius:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["bus_attraction_radius"]
+        self.bus_attraction_radius = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.BUS_ATTRACTION_RADIUS, inc=r["inc"]
+        )
+        self.bus_attraction_radius.SetDigits(r["digits"])
         self.bus_attraction_radius.SetToolTip("Attraction radius from neighbor track (mm)")
         bus_attract_sizer.Add(self.bus_attraction_radius, 1, wx.EXPAND)
         options_inner.Add(bus_attract_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
         bus_bonus_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        bus_bonus_sizer.Add(wx.StaticText(options_scroll, label="Attraction bonus:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['bus_attraction_bonus']
-        self.bus_attraction_bonus = wx.SpinCtrl(options_scroll, min=r['min'], max=r['max'],
-                                                 initial=defaults.BUS_ATTRACTION_BONUS)
+        bus_bonus_sizer.Add(
+            wx.StaticText(options_scroll, label="Attraction bonus:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["bus_attraction_bonus"]
+        self.bus_attraction_bonus = wx.SpinCtrl(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.BUS_ATTRACTION_BONUS
+        )
         self.bus_attraction_bonus.SetToolTip("Cost bonus for staying parallel to neighbor track")
         bus_bonus_sizer.Add(self.bus_attraction_bonus, 1, wx.EXPAND)
         options_inner.Add(bus_bonus_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
         bus_min_sizer = wx.BoxSizer(wx.HORIZONTAL)
         bus_min_sizer.Add(wx.StaticText(options_scroll, label="Min nets:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['bus_min_nets']
-        self.bus_min_nets = wx.SpinCtrl(options_scroll, min=r['min'], max=r['max'],
-                                         initial=defaults.BUS_MIN_NETS)
+        r = defaults.PARAM_RANGES["bus_min_nets"]
+        self.bus_min_nets = wx.SpinCtrl(options_scroll, min=r["min"], max=r["max"], initial=defaults.BUS_MIN_NETS)
         self.bus_min_nets.SetToolTip("Minimum number of nets to form a bus group")
         bus_min_sizer.Add(self.bus_min_nets, 1, wx.EXPAND)
         options_inner.Add(bus_min_sizer, 0, wx.EXPAND | wx.ALL, 3)
@@ -877,11 +999,14 @@ class RoutingDialog(wx.Dialog):
 
         # Crossing penalty
         crossing_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        crossing_sizer.Add(wx.StaticText(options_scroll, label="Crossing Penalty:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['crossing_penalty']
-        self.crossing_penalty = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                   initial=defaults.CROSSING_PENALTY, inc=r['inc'])
-        self.crossing_penalty.SetDigits(r['digits'])
+        crossing_sizer.Add(
+            wx.StaticText(options_scroll, label="Crossing Penalty:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["crossing_penalty"]
+        self.crossing_penalty = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.CROSSING_PENALTY, inc=r["inc"]
+        )
+        self.crossing_penalty.SetDigits(r["digits"])
         self.crossing_penalty.SetToolTip("Penalty for crossing assignments in target swap optimization")
         crossing_sizer.Add(self.crossing_penalty, 1, wx.EXPAND)
         options_inner.Add(crossing_sizer, 0, wx.EXPAND | wx.ALL, 3)
@@ -896,23 +1021,31 @@ class RoutingDialog(wx.Dialog):
         group_sizer = wx.BoxSizer(wx.HORIZONTAL)
         group_sizer.Add(wx.StaticText(options_scroll, label="Groups:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         self.length_match_groups_ctrl = wx.TextCtrl(options_scroll)
-        self.length_match_groups_ctrl.SetToolTip("Net patterns to length-match (comma-separated groups, e.g., 'DATA*,ADDR*')")
+        self.length_match_groups_ctrl.SetToolTip(
+            "Net patterns to length-match (comma-separated groups, e.g., 'DATA*,ADDR*')"
+        )
         group_sizer.Add(self.length_match_groups_ctrl, 1, wx.EXPAND)
         options_inner.Add(group_sizer, 0, wx.EXPAND | wx.ALL, 3)
 
         length_params_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        length_params_sizer.Add(wx.StaticText(options_scroll, label="Tolerance:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['length_match_tolerance']
-        self.length_match_tolerance = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                        initial=defaults.LENGTH_MATCH_TOLERANCE, inc=r['inc'])
-        self.length_match_tolerance.SetDigits(r['digits'])
+        length_params_sizer.Add(
+            wx.StaticText(options_scroll, label="Tolerance:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["length_match_tolerance"]
+        self.length_match_tolerance = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.LENGTH_MATCH_TOLERANCE, inc=r["inc"]
+        )
+        self.length_match_tolerance.SetDigits(r["digits"])
         self.length_match_tolerance.SetToolTip("Acceptable length difference in mm for matched nets")
         length_params_sizer.Add(self.length_match_tolerance, 0, wx.RIGHT, 10)
-        length_params_sizer.Add(wx.StaticText(options_scroll, label="Amplitude:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['meander_amplitude']
-        self.meander_amplitude = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                   initial=defaults.MEANDER_AMPLITUDE, inc=r['inc'])
-        self.meander_amplitude.SetDigits(r['digits'])
+        length_params_sizer.Add(
+            wx.StaticText(options_scroll, label="Amplitude:"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["meander_amplitude"]
+        self.meander_amplitude = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.MEANDER_AMPLITUDE, inc=r["inc"]
+        )
+        self.meander_amplitude.SetDigits(r["digits"])
         self.meander_amplitude.SetToolTip("Height of meander waves for length matching")
         length_params_sizer.Add(self.meander_amplitude, 0)
         options_inner.Add(length_params_sizer, 0, wx.EXPAND | wx.ALL, 3)
@@ -923,11 +1056,14 @@ class RoutingDialog(wx.Dialog):
         self.time_matching_check.SetValue(False)
         self.time_matching_check.SetToolTip("Match propagation time instead of length (accounts for layer dielectric)")
         time_match_sizer.Add(self.time_matching_check, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 10)
-        time_match_sizer.Add(wx.StaticText(options_scroll, label="Time tol (ps):"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        r = defaults.PARAM_RANGES['time_match_tolerance']
-        self.time_match_tolerance = wx.SpinCtrlDouble(options_scroll, min=r['min'], max=r['max'],
-                                                      initial=defaults.TIME_MATCH_TOLERANCE, inc=r['inc'])
-        self.time_match_tolerance.SetDigits(r['digits'])
+        time_match_sizer.Add(
+            wx.StaticText(options_scroll, label="Time tol (ps):"), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5
+        )
+        r = defaults.PARAM_RANGES["time_match_tolerance"]
+        self.time_match_tolerance = wx.SpinCtrlDouble(
+            options_scroll, min=r["min"], max=r["max"], initial=defaults.TIME_MATCH_TOLERANCE, inc=r["inc"]
+        )
+        self.time_match_tolerance.SetDigits(r["digits"])
         self.time_match_tolerance.SetToolTip("Acceptable time variance in picoseconds")
         time_match_sizer.Add(self.time_match_tolerance, 0)
         options_inner.Add(time_match_sizer, 0, wx.EXPAND | wx.ALL, 3)
@@ -1000,7 +1136,7 @@ class RoutingDialog(wx.Dialog):
             self._cancel_requested = True
             self.status_text.SetLabel("Cancelling...")
             # Also notify the differential tab if it has a routing operation running
-            if hasattr(self, 'differential_tab'):
+            if hasattr(self, "differential_tab"):
                 self.differential_tab.request_cancel()
         else:
             # Not routing - close the modal dialog
@@ -1014,7 +1150,7 @@ class RoutingDialog(wx.Dialog):
         # Log output text control
         self.log_text = wx.TextCtrl(
             log_panel,
-            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2 | wx.HSCROLL | wx.VSCROLL | wx.ALWAYS_SHOW_SB
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2 | wx.HSCROLL | wx.VSCROLL | wx.ALWAYS_SHOW_SB,
         )
         font = wx.Font(10, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         self.log_text.SetFont(font)
@@ -1035,12 +1171,12 @@ class RoutingDialog(wx.Dialog):
 
         def get_shared_params():
             return {
-                'track_width': self.track_width.GetValue(),
-                'clearance': self.clearance.GetValue(),
-                'via_size': self.via_size.GetValue(),
-                'via_drill': self.via_drill.GetValue(),
-                'layers': self._get_selected_layers(),
-                'diff_pair_gap': self.differential_tab.diff_pair_gap.GetValue(),
+                "track_width": self.track_width.GetValue(),
+                "clearance": self.clearance.GetValue(),
+                "via_size": self.via_size.GetValue(),
+                "via_drill": self.via_drill.GetValue(),
+                "layers": self._get_selected_layers(),
+                "diff_pair_gap": self.differential_tab.diff_pair_gap.GetValue(),
             }
 
         return FanoutTab(
@@ -1049,7 +1185,7 @@ class RoutingDialog(wx.Dialog):
             self.board_filename,
             get_shared_params=get_shared_params,
             on_fanout_complete=self._on_tab_operation_complete,
-            get_connectivity_check=self._get_connectivity_check_fn
+            get_connectivity_check=self._get_connectivity_check_fn,
         )
 
     def _create_planes_tab(self):
@@ -1057,17 +1193,21 @@ class RoutingDialog(wx.Dialog):
         from .planes_gui import PlanesTab
 
         def get_shared_params():
-            edge_clearance = self.board_edge_clearance.GetValue() if self.edge_clearance_check.GetValue() else self.clearance.GetValue()
+            edge_clearance = (
+                self.board_edge_clearance.GetValue()
+                if self.edge_clearance_check.GetValue()
+                else self.clearance.GetValue()
+            )
             return {
-                'track_width': self.track_width.GetValue(),
-                'clearance': self.clearance.GetValue(),
-                'via_size': self.via_size.GetValue(),
-                'via_drill': self.via_drill.GetValue(),
-                'grid_step': self.grid_step.GetValue(),
-                'hole_to_hole_clearance': self.hole_to_hole_clearance.GetValue(),
-                'max_iterations': int(self.max_iterations.GetValue()),
-                'max_ripup': int(self.max_ripup.GetValue()),
-                'board_edge_clearance': edge_clearance,
+                "track_width": self.track_width.GetValue(),
+                "clearance": self.clearance.GetValue(),
+                "via_size": self.via_size.GetValue(),
+                "via_drill": self.via_drill.GetValue(),
+                "grid_step": self.grid_step.GetValue(),
+                "hole_to_hole_clearance": self.hole_to_hole_clearance.GetValue(),
+                "max_iterations": int(self.max_iterations.GetValue()),
+                "max_ripup": int(self.max_ripup.GetValue()),
+                "board_edge_clearance": edge_clearance,
             }
 
         return PlanesTab(
@@ -1078,7 +1218,7 @@ class RoutingDialog(wx.Dialog):
             on_planes_complete=self._on_tab_operation_complete,
             get_connectivity_check=self._get_connectivity_check_fn,
             append_log=self._append_log,
-            sync_pcb_data_callback=self._sync_pcb_data_from_board
+            sync_pcb_data_callback=self._sync_pcb_data_from_board,
         )
 
     def _create_differential_tab(self):
@@ -1087,33 +1227,33 @@ class RoutingDialog(wx.Dialog):
 
         def get_shared_params():
             return {
-                'track_width': self.track_width.GetValue(),
-                'clearance': self.clearance.GetValue(),
-                'via_size': self.via_size.GetValue(),
-                'via_drill': self.via_drill.GetValue(),
+                "track_width": self.track_width.GetValue(),
+                "clearance": self.clearance.GetValue(),
+                "via_size": self.via_size.GetValue(),
+                "via_drill": self.via_drill.GetValue(),
             }
 
         def get_routing_config():
             """Get full routing configuration from the main dialog."""
             return {
-                'layers': self._get_selected_layers(),
-                'track_width': self.track_width.GetValue(),
-                'clearance': self.clearance.GetValue(),
-                'via_size': self.via_size.GetValue(),
-                'via_drill': self.via_drill.GetValue(),
-                'grid_step': self.grid_step.GetValue(),
-                'via_cost': self.via_cost.GetValue(),
-                'max_iterations': self.max_iterations.GetValue(),
-                'max_probe_iterations': self.max_probe_iterations.GetValue(),
-                'heuristic_weight': self.heuristic_weight.GetValue(),
-                'proximity_heuristic_factor': self.proximity_heuristic_factor.GetValue(),
-                'turn_cost': self.turn_cost.GetValue(),
-                'direction_preference_cost': self.direction_preference_cost.GetValue(),
-                'max_ripup': self.max_ripup.GetValue(),
-                'ordering_strategy': self.ordering_strategy.GetString(self.ordering_strategy.GetSelection()),
-                'debug_lines': self.debug_lines_check.GetValue(),
-                'verbose': self.verbose_check.GetValue(),
-                'enable_layer_switch': self.enable_layer_switch.GetValue(),
+                "layers": self._get_selected_layers(),
+                "track_width": self.track_width.GetValue(),
+                "clearance": self.clearance.GetValue(),
+                "via_size": self.via_size.GetValue(),
+                "via_drill": self.via_drill.GetValue(),
+                "grid_step": self.grid_step.GetValue(),
+                "via_cost": self.via_cost.GetValue(),
+                "max_iterations": self.max_iterations.GetValue(),
+                "max_probe_iterations": self.max_probe_iterations.GetValue(),
+                "heuristic_weight": self.heuristic_weight.GetValue(),
+                "proximity_heuristic_factor": self.proximity_heuristic_factor.GetValue(),
+                "turn_cost": self.turn_cost.GetValue(),
+                "direction_preference_cost": self.direction_preference_cost.GetValue(),
+                "max_ripup": self.max_ripup.GetValue(),
+                "ordering_strategy": self.ordering_strategy.GetString(self.ordering_strategy.GetSelection()),
+                "debug_lines": self.debug_lines_check.GetValue(),
+                "verbose": self.verbose_check.GetValue(),
+                "enable_layer_switch": self.enable_layer_switch.GetValue(),
             }
 
         def sync_pcb_data():
@@ -1129,7 +1269,7 @@ class RoutingDialog(wx.Dialog):
             get_connectivity_check=self._get_connectivity_check_fn,
             get_routing_config=get_routing_config,
             append_log=self._append_log,
-            sync_pcb_data_callback=sync_pcb_data
+            sync_pcb_data_callback=sync_pcb_data,
         )
         return self.differential_tab
 
@@ -1159,14 +1299,15 @@ class RoutingDialog(wx.Dialog):
 
         # Use shared NetSelectionPanel
         self.swappable_net_panel = NetSelectionPanel(
-            panel, self.pcb_data,
+            panel,
+            self.pcb_data,
             instructions="Select nets that can swap targets ...",
             hide_label="Hide connected",
             hide_tooltip="Hide nets that are already fully connected",
             show_hide_checkbox=True,
             show_component_filter=True,
             show_component_dropdown=True,
-            min_pads_for_dropdown=3
+            min_pads_for_dropdown=3,
         )
         swap_sizer.Add(self.swappable_net_panel, 1, wx.EXPAND | wx.ALL, 5)
 
@@ -1210,7 +1351,6 @@ class RoutingDialog(wx.Dialog):
         param_box_sizer.Add(param_scroll, 1, wx.EXPAND)
         return param_box_sizer
 
-
     def _on_edge_clearance_check(self, event):
         """Handle edge clearance checkbox change."""
         self.board_edge_clearance.Enable(self.edge_clearance_check.GetValue())
@@ -1236,9 +1376,12 @@ class RoutingDialog(wx.Dialog):
     def _on_browse_schematic_dir(self, event):
         """Browse for schematic directory."""
         default_path = self.schematic_dir_ctrl.GetValue() or os.path.dirname(self.board_filename)
-        dlg = wx.DirDialog(self, "Select Schematic Directory",
-                           defaultPath=default_path,
-                           style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+        dlg = wx.DirDialog(
+            self,
+            "Select Schematic Directory",
+            defaultPath=default_path,
+            style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST,
+        )
         if dlg.ShowModal() == wx.ID_OK:
             self.schematic_dir_ctrl.SetValue(dlg.GetPath())
         dlg.Destroy()
@@ -1254,7 +1397,7 @@ class RoutingDialog(wx.Dialog):
             return None
         # Split by comma to get separate groups, each group has space-separated patterns
         groups = []
-        for group_text in text.split(','):
+        for group_text in text.split(","):
             patterns = group_text.strip().split()
             if patterns:
                 groups.append(patterns)
@@ -1271,7 +1414,7 @@ class RoutingDialog(wx.Dialog):
             if not name:
                 continue
             # Skip unconnected nets
-            if name.lower().startswith('unconnected-'):
+            if name.lower().startswith("unconnected-"):
                 continue
             # Skip nets with fewer than 2 pads
             if len(net.pads) < 2:
@@ -1288,6 +1431,7 @@ class RoutingDialog(wx.Dialog):
 
     def _deferred_init(self):
         """Run after dialog is shown: sync board and check connectivity."""
+
         # Set up connectivity check function on the net panel
         # This function returns True if a net should be hidden (i.e., is connected)
         def is_connected(net_id):
@@ -1350,10 +1494,10 @@ class RoutingDialog(wx.Dialog):
         # Save current selections from all net panels BEFORE any refresh
         # Use _checked_nets directly to preserve restored settings (don't sync from visible items)
         saved_selections = {
-            'net_panel': set(self.net_panel._checked_nets),
-            'swappable_net_panel': set(self.swappable_net_panel._checked_nets),
-            'fanout_tab': set(self.fanout_tab.net_panel._checked_nets),
-            'planes_tab': set(self.planes_tab.net_panel._checked_nets),
+            "net_panel": set(self.net_panel._checked_nets),
+            "swappable_net_panel": set(self.swappable_net_panel._checked_nets),
+            "fanout_tab": set(self.fanout_tab.net_panel._checked_nets),
+            "planes_tab": set(self.planes_tab.net_panel._checked_nets),
         }
         # DiffPairSelectionPanel uses _checked_pairs, not _checked_nets
         saved_diff_pairs = set(self.differential_tab.pair_panel._checked_pairs)
@@ -1371,10 +1515,10 @@ class RoutingDialog(wx.Dialog):
         self._check_connectivity_with_progress()
 
         # Restore selections to each panel before refreshing
-        self.net_panel._checked_nets = saved_selections['net_panel']
-        self.swappable_net_panel._checked_nets = saved_selections['swappable_net_panel']
-        self.fanout_tab.net_panel._checked_nets = saved_selections['fanout_tab']
-        self.planes_tab.net_panel._checked_nets = saved_selections['planes_tab']
+        self.net_panel._checked_nets = saved_selections["net_panel"]
+        self.swappable_net_panel._checked_nets = saved_selections["swappable_net_panel"]
+        self.fanout_tab.net_panel._checked_nets = saved_selections["fanout_tab"]
+        self.planes_tab.net_panel._checked_nets = saved_selections["planes_tab"]
         self.differential_tab.pair_panel._checked_pairs = saved_diff_pairs
 
         # Refresh all net panels (skip syncing from visible to preserve restored selections)
@@ -1405,22 +1549,19 @@ class RoutingDialog(wx.Dialog):
             if len(net_segments) == 0 and len(net_zones) == 0:
                 return False
 
-            result = check_net_connectivity(
-                net_id, net_segments, net_vias, net_pads, net_zones,
-                tolerance=0.02
-            )
+            result = check_net_connectivity(net_id, net_segments, net_vias, net_pads, net_zones, tolerance=0.02)
 
-            return result['connected']
-        except Exception as e:
+            return result["connected"]
+        except Exception:
             import traceback
+
             traceback.print_exc()
             return False
 
     def _check_connectivity_with_progress(self):
         """Check connectivity for all nets with progress display."""
         # Check which nets need connectivity check (not in cache)
-        uncached_nets = [(name, net_id) for name, net_id in self.all_nets
-                         if net_id not in self._connectivity_cache]
+        uncached_nets = [(name, net_id) for name, net_id in self.all_nets if net_id not in self._connectivity_cache]
 
         if uncached_nets:
             self.progress_bar.SetRange(len(uncached_nets))
@@ -1474,12 +1615,14 @@ class RoutingDialog(wx.Dialog):
 
         Used as callback by Fanout, Planes, and Differential tabs.
         """
+
         def is_connected(net_id):
             if net_id in self._connectivity_cache:
                 return self._connectivity_cache[net_id]
             is_conn = self._is_net_connected(net_id)
             self._connectivity_cache[net_id] = is_conn
             return is_conn
+
         return is_connected
 
     def _on_tab_operation_complete(self, affected_nets=None):
@@ -1668,14 +1811,14 @@ class RoutingDialog(wx.Dialog):
         """
         # ANSI color code mapping
         ansi_colors = {
-            '\033[91m': wx.Colour(220, 50, 50),    # RED
-            '\033[92m': wx.Colour(50, 180, 50),    # GREEN
-            '\033[93m': wx.Colour(200, 180, 50),   # YELLOW
-            '\033[0m': None,                        # RESET
+            "\033[91m": wx.Colour(220, 50, 50),  # RED
+            "\033[92m": wx.Colour(50, 180, 50),  # GREEN
+            "\033[93m": wx.Colour(200, 180, 50),  # YELLOW
+            "\033[0m": None,  # RESET
         }
 
         # Pattern to match ANSI escape codes
-        ansi_pattern = re.compile(r'\033\[\d+m')
+        ansi_pattern = re.compile(r"\033\[\d+m")
 
         # Split text by ANSI codes while keeping track of positions
         parts = ansi_pattern.split(text)
@@ -1710,20 +1853,12 @@ class RoutingDialog(wx.Dialog):
         """
         selected_nets = self._get_selected_nets()
         if not selected_nets:
-            wx.MessageBox(
-                "Please select at least one net to route.",
-                "No Nets Selected",
-                wx.OK | wx.ICON_WARNING
-            )
+            wx.MessageBox("Please select at least one net to route.", "No Nets Selected", wx.OK | wx.ICON_WARNING)
             return None, None
 
         selected_layers = self._get_selected_layers()
         if not selected_layers:
-            wx.MessageBox(
-                "Please select at least one layer.",
-                "No Layers Selected",
-                wx.OK | wx.ICON_WARNING
-            )
+            wx.MessageBox("Please select at least one layer.", "No Layers Selected", wx.OK | wx.ICON_WARNING)
             return None, None
 
         return selected_nets, selected_layers
@@ -1747,121 +1882,127 @@ class RoutingDialog(wx.Dialog):
             dict: Configuration for the router
         """
         config = {
-            'nets': selected_nets,
-            'layers': selected_layers,
+            "nets": selected_nets,
+            "layers": selected_layers,
             # Basic parameters
-            'track_width': self.track_width.GetValue(),
-            'clearance': self.clearance.GetValue(),
-            'via_size': self.via_size.GetValue(),
-            'via_drill': self.via_drill.GetValue(),
-            'grid_step': self.grid_step.GetValue(),
-            'via_cost': self.via_cost.GetValue(),
-            'move_copper_text': self.move_text_check.GetValue(),
-            'debug_lines': self.debug_lines_check.GetValue(),
+            "track_width": self.track_width.GetValue(),
+            "clearance": self.clearance.GetValue(),
+            "via_size": self.via_size.GetValue(),
+            "via_drill": self.via_drill.GetValue(),
+            "grid_step": self.grid_step.GetValue(),
+            "via_cost": self.via_cost.GetValue(),
+            "move_copper_text": self.move_text_check.GetValue(),
+            "debug_lines": self.debug_lines_check.GetValue(),
             # Impedance routing
-            'impedance': self.impedance_value.GetValue() if self.impedance_check.GetValue() else None,
+            "impedance": self.impedance_value.GetValue() if self.impedance_check.GetValue() else None,
             # Advanced parameters
-            'max_iterations': self.max_iterations.GetValue(),
-            'max_probe_iterations': self.max_probe_iterations.GetValue(),
-            'heuristic_weight': self.heuristic_weight.GetValue(),
-            'proximity_heuristic_factor': self.proximity_heuristic_factor.GetValue(),
-            'turn_cost': self.turn_cost.GetValue(),
-            'direction_preference_cost': self.direction_preference_cost.GetValue(),
-            'max_ripup': self.max_ripup.GetValue(),
-            'ordering_strategy': self.ordering_strategy.GetString(self.ordering_strategy.GetSelection()),
-            'stub_proximity_radius': self.stub_proximity_radius.GetValue(),
-            'stub_proximity_cost': self.stub_proximity_cost.GetValue(),
-            'via_proximity_cost': self.via_proximity_cost.GetValue(),
-            'track_proximity_distance': self.track_proximity_distance.GetValue(),
-            'track_proximity_cost': self.track_proximity_cost.GetValue(),
-            'bga_proximity_radius': self.bga_proximity_radius.GetValue(),
-            'bga_proximity_cost': self.bga_proximity_cost.GetValue(),
-            'vertical_attraction_radius': self.vertical_attraction_radius.GetValue(),
-            'vertical_attraction_cost': self.vertical_attraction_cost.GetValue(),
-            'ripped_route_avoidance_radius': self.ripped_route_avoidance_radius.GetValue(),
-            'ripped_route_avoidance_cost': self.ripped_route_avoidance_cost.GetValue(),
-            'crossing_penalty': self.crossing_penalty.GetValue(),
-            'routing_clearance_margin': self.routing_clearance_margin.GetValue(),
-            'hole_to_hole_clearance': self.hole_to_hole_clearance.GetValue(),
-            'board_edge_clearance': self.board_edge_clearance.GetValue() if self.edge_clearance_check.GetValue() else 0.0,
-            'enable_layer_switch': self.enable_layer_switch.GetValue(),
+            "max_iterations": self.max_iterations.GetValue(),
+            "max_probe_iterations": self.max_probe_iterations.GetValue(),
+            "heuristic_weight": self.heuristic_weight.GetValue(),
+            "proximity_heuristic_factor": self.proximity_heuristic_factor.GetValue(),
+            "turn_cost": self.turn_cost.GetValue(),
+            "direction_preference_cost": self.direction_preference_cost.GetValue(),
+            "max_ripup": self.max_ripup.GetValue(),
+            "ordering_strategy": self.ordering_strategy.GetString(self.ordering_strategy.GetSelection()),
+            "stub_proximity_radius": self.stub_proximity_radius.GetValue(),
+            "stub_proximity_cost": self.stub_proximity_cost.GetValue(),
+            "via_proximity_cost": self.via_proximity_cost.GetValue(),
+            "track_proximity_distance": self.track_proximity_distance.GetValue(),
+            "track_proximity_cost": self.track_proximity_cost.GetValue(),
+            "bga_proximity_radius": self.bga_proximity_radius.GetValue(),
+            "bga_proximity_cost": self.bga_proximity_cost.GetValue(),
+            "vertical_attraction_radius": self.vertical_attraction_radius.GetValue(),
+            "vertical_attraction_cost": self.vertical_attraction_cost.GetValue(),
+            "ripped_route_avoidance_radius": self.ripped_route_avoidance_radius.GetValue(),
+            "ripped_route_avoidance_cost": self.ripped_route_avoidance_cost.GetValue(),
+            "crossing_penalty": self.crossing_penalty.GetValue(),
+            "routing_clearance_margin": self.routing_clearance_margin.GetValue(),
+            "hole_to_hole_clearance": self.hole_to_hole_clearance.GetValue(),
+            "board_edge_clearance": self.board_edge_clearance.GetValue()
+            if self.edge_clearance_check.GetValue()
+            else 0.0,
+            "enable_layer_switch": self.enable_layer_switch.GetValue(),
             # Direction
-            'direction': ['forward', 'backward'][self.direction_choice.GetSelection() - 1] if self.direction_choice.GetSelection() > 0 else None,
+            "direction": ["forward", "backward"][self.direction_choice.GetSelection() - 1]
+            if self.direction_choice.GetSelection() > 0
+            else None,
             # Options
-            'add_teardrops': self.add_teardrops_check.GetValue(),
+            "add_teardrops": self.add_teardrops_check.GetValue(),
             # Guide corridor (issue #7)
-            'guide_corridor_enabled': self.guide_corridor_check.GetValue(),
-            'guide_corridor_layer': self.guide_corridor_layer_ctrl.GetValue().strip() or defaults.GUIDE_CORRIDOR_LAYER,
-            'guide_corridor_spacing': self._safe_float(self.guide_corridor_spacing_ctrl.GetValue(), defaults.GUIDE_CORRIDOR_SPACING),
+            "guide_corridor_enabled": self.guide_corridor_check.GetValue(),
+            "guide_corridor_layer": self.guide_corridor_layer_ctrl.GetValue().strip() or defaults.GUIDE_CORRIDOR_LAYER,
+            "guide_corridor_spacing": self._safe_float(
+                self.guide_corridor_spacing_ctrl.GetValue(), defaults.GUIDE_CORRIDOR_SPACING
+            ),
             # Keepout zone (issue #27)
-            'keepout_enabled': self.keepout_check.GetValue(),
-            'keepout_layer': self.keepout_layer_ctrl.GetValue().strip() or defaults.KEEPOUT_LAYER,
+            "keepout_enabled": self.keepout_check.GetValue(),
+            "keepout_layer": self.keepout_layer_ctrl.GetValue().strip() or defaults.KEEPOUT_LAYER,
             # Clear User-layer graphics after a successful route (plugin-only)
-            'clear_guide_layer': self.clear_guide_layer_check.GetValue(),
-            'clear_keepout_layer': self.clear_keepout_layer_check.GetValue(),
-            'verbose': self.verbose_check.GetValue(),
-            'skip_routing': self.skip_routing_check.GetValue(),
-            'debug_memory': self.debug_memory_check.GetValue(),
-            'stats': self.stats_check.GetValue(),
+            "clear_guide_layer": self.clear_guide_layer_check.GetValue(),
+            "clear_keepout_layer": self.clear_keepout_layer_check.GetValue(),
+            "verbose": self.verbose_check.GetValue(),
+            "skip_routing": self.skip_routing_check.GetValue(),
+            "debug_memory": self.debug_memory_check.GetValue(),
+            "stats": self.stats_check.GetValue(),
             # MPS options
-            'mps_reverse_rounds': self.mps_reverse_rounds.GetValue(),
-            'mps_layer_swap': self.mps_layer_swap.GetValue(),
-            'mps_segment_intersection': self.mps_segment_intersection.GetValue(),
+            "mps_reverse_rounds": self.mps_reverse_rounds.GetValue(),
+            "mps_layer_swap": self.mps_layer_swap.GetValue(),
+            "mps_segment_intersection": self.mps_segment_intersection.GetValue(),
             # Bus routing options
-            'bus_enabled': self.bus_enabled.GetValue(),
-            'bus_detection_radius': self.bus_detection_radius.GetValue(),
-            'bus_attraction_radius': self.bus_attraction_radius.GetValue(),
-            'bus_attraction_bonus': self.bus_attraction_bonus.GetValue(),
-            'bus_min_nets': self.bus_min_nets.GetValue(),
+            "bus_enabled": self.bus_enabled.GetValue(),
+            "bus_detection_radius": self.bus_detection_radius.GetValue(),
+            "bus_attraction_radius": self.bus_attraction_radius.GetValue(),
+            "bus_attraction_bonus": self.bus_attraction_bonus.GetValue(),
+            "bus_min_nets": self.bus_min_nets.GetValue(),
             # Crossing/swap options
-            'no_crossing_layer_check': self.no_crossing_layer_check.GetValue(),
-            'can_swap_to_top_layer': self.can_swap_to_top.GetValue(),
+            "no_crossing_layer_check": self.no_crossing_layer_check.GetValue(),
+            "can_swap_to_top_layer": self.can_swap_to_top.GetValue(),
             # Swappable nets
-            'swappable_nets': self._get_swappable_nets() or None,
-            'schematic_dir': self.schematic_dir_ctrl.GetValue() if self.update_schematic_check.GetValue() else None,
+            "swappable_nets": self._get_swappable_nets() or None,
+            "schematic_dir": self.schematic_dir_ctrl.GetValue() if self.update_schematic_check.GetValue() else None,
             # Length matching
-            'length_match_groups': self._parse_length_match_groups(),
-            'length_match_tolerance': self.length_match_tolerance.GetValue(),
-            'meander_amplitude': self.meander_amplitude.GetValue(),
+            "length_match_groups": self._parse_length_match_groups(),
+            "length_match_tolerance": self.length_match_tolerance.GetValue(),
+            "meander_amplitude": self.meander_amplitude.GetValue(),
             # Time matching
-            'time_matching': self.time_matching_check.GetValue(),
-            'time_match_tolerance': self.time_match_tolerance.GetValue(),
+            "time_matching": self.time_matching_check.GetValue(),
+            "time_match_tolerance": self.time_match_tolerance.GetValue(),
         }
 
         # Parse power nets and widths
         power_nets_text = self.power_nets_ctrl.GetValue().strip()
         power_widths_text = self.power_widths_ctrl.GetValue().strip()
         if power_nets_text:
-            config['power_nets'] = power_nets_text.split()
+            config["power_nets"] = power_nets_text.split()
             if power_widths_text:
                 try:
-                    config['power_nets_widths'] = [float(w) for w in power_widths_text.split()]
+                    config["power_nets_widths"] = [float(w) for w in power_widths_text.split()]
                 except ValueError:
-                    config['power_nets_widths'] = []
+                    config["power_nets_widths"] = []
             else:
-                config['power_nets_widths'] = []
+                config["power_nets_widths"] = []
         else:
-            config['power_nets'] = []
-            config['power_nets_widths'] = []
+            config["power_nets"] = []
+            config["power_nets_widths"] = []
 
         # Parse no BGA zones
         no_bga_text = self.no_bga_zones_ctrl.GetValue().strip()
-        if no_bga_text.upper() == 'ALL':
-            config['no_bga_zones'] = []  # Empty list means disable all
+        if no_bga_text.upper() == "ALL":
+            config["no_bga_zones"] = []  # Empty list means disable all
         elif no_bga_text:
-            config['no_bga_zones'] = no_bga_text.split()
+            config["no_bga_zones"] = no_bga_text.split()
         else:
-            config['no_bga_zones'] = None  # None means use BGA zones
+            config["no_bga_zones"] = None  # None means use BGA zones
 
         # Parse layer costs
         layer_costs_text = self.layer_costs_ctrl.GetValue().strip()
         if layer_costs_text:
             try:
-                config['layer_costs'] = [float(c) for c in layer_costs_text.split()]
+                config["layer_costs"] = [float(c) for c in layer_costs_text.split()]
             except ValueError:
-                config['layer_costs'] = []
+                config["layer_costs"] = []
         else:
-            config['layer_costs'] = []
+            config["layer_costs"] = []
 
         # If using net class definitions, build per-class parameter mapping
         if self.use_netclass_check.GetValue():
@@ -1874,16 +2015,16 @@ class RoutingDialog(wx.Dialog):
                 else:
                     # Fallback to current control values
                     class_params[class_name] = {
-                        'track_width': config['track_width'],
-                        'clearance': config['clearance'],
-                        'via_size': config['via_size'],
-                        'via_drill': config['via_drill'],
+                        "track_width": config["track_width"],
+                        "clearance": config["clearance"],
+                        "via_size": config["via_size"],
+                        "via_drill": config["via_drill"],
                     }
-            config['use_netclass_params'] = True
-            config['nets_by_class'] = nets_by_class
-            config['class_params'] = class_params
+            config["use_netclass_params"] = True
+            config["nets_by_class"] = nets_by_class
+            config["class_params"] = class_params
         else:
-            config['use_netclass_params'] = False
+            config["use_netclass_params"] = False
 
         return config
 
@@ -1901,17 +2042,17 @@ class RoutingDialog(wx.Dialog):
 
             if params:
                 # Populate the controls with net class values
-                self.track_width.SetValue(params['track_width'])
-                self.clearance.SetValue(params['clearance'])
-                self.via_size.SetValue(params['via_size'])
-                self.via_drill.SetValue(params['via_drill'])
+                self.track_width.SetValue(params["track_width"])
+                self.clearance.SetValue(params["clearance"])
+                self.via_size.SetValue(params["via_size"])
+                self.via_drill.SetValue(params["via_drill"])
 
             # Disable the controls
             for ctrl in netclass_controls:
                 ctrl.Disable()
 
             # Connect to net panel's notebook tab changes if in tabbed mode
-            if hasattr(self.net_panel, '_netclass_notebook') and self.net_panel._netclass_notebook:
+            if hasattr(self.net_panel, "_netclass_notebook") and self.net_panel._netclass_notebook:
                 self.net_panel._netclass_notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_netclass_tab_changed)
         else:
             # Enable the controls
@@ -1919,7 +2060,7 @@ class RoutingDialog(wx.Dialog):
                 ctrl.Enable()
 
             # Unbind tab change handler
-            if hasattr(self.net_panel, '_netclass_notebook') and self.net_panel._netclass_notebook:
+            if hasattr(self.net_panel, "_netclass_notebook") and self.net_panel._netclass_notebook:
                 self.net_panel._netclass_notebook.Unbind(wx.EVT_NOTEBOOK_PAGE_CHANGED)
 
     def _on_tabbed_view_changed(self, notebook):
@@ -1935,11 +2076,11 @@ class RoutingDialog(wx.Dialog):
             class_name = self._get_selected_netclass_name()
             params = self._get_netclass_params(class_name)
             if params:
-                self.track_width.SetValue(params['track_width'])
-                self.clearance.SetValue(params['clearance'])
-                self.via_size.SetValue(params['via_size'])
-                self.via_drill.SetValue(params['via_drill'])
-        elif notebook is None and hasattr(self, '_last_notebook') and self._last_notebook:
+                self.track_width.SetValue(params["track_width"])
+                self.clearance.SetValue(params["clearance"])
+                self.via_size.SetValue(params["via_size"])
+                self.via_drill.SetValue(params["via_drill"])
+        elif notebook is None and hasattr(self, "_last_notebook") and self._last_notebook:
             # Tabbed view was destroyed - unbind from old notebook
             try:
                 self._last_notebook.Unbind(wx.EVT_NOTEBOOK_PAGE_CHANGED)
@@ -1960,21 +2101,23 @@ class RoutingDialog(wx.Dialog):
         params = self._get_netclass_params(class_name)
 
         if params:
-            self.track_width.SetValue(params['track_width'])
-            self.clearance.SetValue(params['clearance'])
-            self.via_size.SetValue(params['via_size'])
-            self.via_drill.SetValue(params['via_drill'])
+            self.track_width.SetValue(params["track_width"])
+            self.clearance.SetValue(params["clearance"])
+            self.via_size.SetValue(params["via_size"])
+            self.via_drill.SetValue(params["via_drill"])
 
     def _get_selected_netclass_name(self):
         """Get the currently selected net class name from the net panel."""
-        if (hasattr(self.net_panel, '_separate_by_netclass') and
-            self.net_panel._separate_by_netclass and
-            self.net_panel._netclass_notebook):
+        if (
+            hasattr(self.net_panel, "_separate_by_netclass")
+            and self.net_panel._separate_by_netclass
+            and self.net_panel._netclass_notebook
+        ):
             # Get the selected tab's class name
             current_tab = self.net_panel._netclass_notebook.GetSelection()
             if current_tab >= 0 and current_tab < len(self.net_panel._netclass_names):
                 return self.net_panel._netclass_names[current_tab]
-        return 'Default'
+        return "Default"
 
     def _get_netclass_params(self, class_name):
         """Get parameters for a net class."""
@@ -1990,18 +2133,18 @@ class RoutingDialog(wx.Dialog):
             dict: {class_name: [net_names]} mapping
         """
         # Use the net_to_class mapping from the net panel if available
-        if (hasattr(self.net_panel, '_net_to_class') and
-            self.net_panel._net_to_class):
+        if hasattr(self.net_panel, "_net_to_class") and self.net_panel._net_to_class:
             net_to_class = self.net_panel._net_to_class
         else:
             # Build mapping from pcbnew
             from .fanout_gui import _get_net_classes_from_board
+
             net_to_class, _ = _get_net_classes_from_board()
 
         # Group nets by class
         groups = {}
         for net_name in net_names:
-            class_name = net_to_class.get(net_name, 'Default')
+            class_name = net_to_class.get(net_name, "Default")
             if class_name not in groups:
                 groups[class_name] = []
             groups[class_name].append(net_name)
@@ -2016,10 +2159,10 @@ class RoutingDialog(wx.Dialog):
         (so the caller should abort routing); False otherwise.
         """
         # Suggested net -> layer mappings to offer.
-        suggestions = [('GND', 'B.Cu'), ('VCC', 'F.Cu')]
+        suggestions = [("GND", "B.Cu"), ("VCC", "F.Cu")]
 
         def normalize(name):
-            return name.lstrip('/').upper() if name else ''
+            return name.lstrip("/").upper() if name else ""
 
         # Map normalized -> actual selected name (so we add the assignment using
         # the exact net name as it appears in the PCB).
@@ -2027,7 +2170,7 @@ class RoutingDialog(wx.Dialog):
 
         # Existing zones in the loaded PCB - skip suggesting these.
         existing_zone_keys = set()
-        for z in getattr(self.pcb_data, 'zones', []) or []:
+        for z in getattr(self.pcb_data, "zones", []) or []:
             existing_zone_keys.add((normalize(z.net_name), z.layer))
 
         to_offer = []  # list of (actual_net_name, layer)
@@ -2073,8 +2216,10 @@ class RoutingDialog(wx.Dialog):
                 break
         if planes_idx is None:
             wx.MessageBox(
-                "Couldn't find the Planes tab.", "Error",
-                wx.OK | wx.ICON_ERROR, parent=self,
+                "Couldn't find the Planes tab.",
+                "Error",
+                wx.OK | wx.ICON_ERROR,
+                parent=self,
             )
             return False
 
@@ -2114,11 +2259,7 @@ class RoutingDialog(wx.Dialog):
         config = self._build_routing_config(selected_nets, selected_layers)
 
         # Run routing in a thread
-        self._routing_thread = threading.Thread(
-            target=self._run_routing,
-            args=(config,),
-            daemon=True
-        )
+        self._routing_thread = threading.Thread(target=self._run_routing, args=(config,), daemon=True)
         self._routing_thread.start()
 
         # Poll for completion
@@ -2139,15 +2280,15 @@ class RoutingDialog(wx.Dialog):
                 try:
                     import numpy
                 except ImportError:
-                    missing.append('numpy')
+                    missing.append("numpy")
                 try:
                     import scipy
                 except ImportError:
-                    missing.append('scipy')
+                    missing.append("scipy")
                 try:
                     from shapely.geometry import Polygon
                 except ImportError:
-                    missing.append('shapely')
+                    missing.append("shapely")
 
                 if missing:
                     msg = f"Missing Python dependencies: {', '.join(missing)}\n\n"
@@ -2172,56 +2313,60 @@ class RoutingDialog(wx.Dialog):
             net_name_to_id = {net.name: net.net_id for net in self.pcb_data.nets.values()}
             try:
                 from .fanout_gui import _get_net_classes_from_board
+
                 all_net_to_class, all_class_names = _get_net_classes_from_board()
                 # Cache class clearances
                 class_clearance_cache = {}
                 for cname in all_class_names:
                     params = self._get_netclass_params(cname)
                     if params:
-                        class_clearance_cache[cname] = params.get('clearance', config['clearance'])
+                        class_clearance_cache[cname] = params.get("clearance", config["clearance"])
                     else:
-                        class_clearance_cache[cname] = config['clearance']
+                        class_clearance_cache[cname] = config["clearance"]
                 # Build net_clearances for ALL nets
                 for net_name, net_id in net_name_to_id.items():
-                    cname = all_net_to_class.get(net_name, 'Default')
-                    net_clearances[net_id] = class_clearance_cache.get(cname, config['clearance'])
+                    cname = all_net_to_class.get(net_name, "Default")
+                    net_clearances[net_id] = class_clearance_cache.get(cname, config["clearance"])
             except Exception as e:
                 print(f"Warning: Could not get net class clearances: {e}")
                 # Fall back to using config clearance for all nets
 
             # Refresh user-layer guide polylines from the live board so a path
             # drawn this session is used without saving the file first (issue #7).
-            if config.get('guide_corridor_enabled'):
-                guide_layer = config.get('guide_corridor_layer', 'User.1')
+            if config.get("guide_corridor_enabled"):
+                guide_layer = config.get("guide_corridor_layer", "User.1")
                 try:
                     import pcbnew
+
                     from kicad_parser import extract_guide_paths_from_board
+
                     board = pcbnew.GetBoard()
                     if board is not None:
                         self.pcb_data.guide_paths = extract_guide_paths_from_board(board, guide_layer)
-                        print(f"Guide corridor: found {len(self.pcb_data.guide_paths)} "
-                              f"polyline(s) on {guide_layer}")
+                        print(f"Guide corridor: found {len(self.pcb_data.guide_paths)} polyline(s) on {guide_layer}")
                         if not self.pcb_data.guide_paths:
-                            print(f"  (No graphic lines found on {guide_layer} - "
-                                  f"draw a line there to guide routing.)")
+                            print(f"  (No graphic lines found on {guide_layer} - draw a line there to guide routing.)")
                 except Exception as e:
                     print(f"Warning: could not read guide paths from board: {e}")
 
             # Refresh user-layer keepout polygons from the live board so a zone
             # drawn this session is used without saving the file first (issue #27).
-            if config.get('keepout_enabled'):
-                keepout_layer = config.get('keepout_layer', 'User.2')
+            if config.get("keepout_enabled"):
+                keepout_layer = config.get("keepout_layer", "User.2")
                 try:
                     import pcbnew
+
                     from kicad_parser import extract_keepout_zones_from_board
+
                     board = pcbnew.GetBoard()
                     if board is not None:
                         self.pcb_data.keepout_zones = extract_keepout_zones_from_board(board, keepout_layer)
-                        print(f"Keepout: found {len(self.pcb_data.keepout_zones)} "
-                              f"polygon(s) on {keepout_layer}")
+                        print(f"Keepout: found {len(self.pcb_data.keepout_zones)} polygon(s) on {keepout_layer}")
                         if not self.pcb_data.keepout_zones:
-                            print(f"  (No closed polygon found on {keepout_layer} - "
-                                  f"draw a polygon there to keep tracks out.)")
+                            print(
+                                f"  (No closed polygon found on {keepout_layer} - "
+                                f"draw a polygon there to keep tracks out.)"
+                            )
                 except Exception as e:
                     print(f"Warning: could not read keepout zones from board: {e}")
 
@@ -2231,71 +2376,71 @@ class RoutingDialog(wx.Dialog):
                     input_file=self.board_filename,
                     output_file="",  # Not used when return_results=True
                     net_names=net_names,
-                    layers=config['layers'],
+                    layers=config["layers"],
                     track_width=track_width,
                     clearance=clearance,
                     via_size=via_size,
                     via_drill=via_drill,
-                    grid_step=config['grid_step'],
-                    via_cost=config['via_cost'],
-                    impedance=config.get('impedance'),
-                    max_iterations=config['max_iterations'],
-                    max_probe_iterations=config.get('max_probe_iterations', 5000),
-                    heuristic_weight=config['heuristic_weight'],
-                    proximity_heuristic_factor=config.get('proximity_heuristic_factor', 0.02),
-                    turn_cost=config['turn_cost'],
-                    direction_preference_cost=config.get('direction_preference_cost', 50),
-                    max_rip_up_count=config['max_ripup'],
-                    ordering_strategy=config['ordering_strategy'],
-                    direction_order=config.get('direction'),
-                    stub_proximity_radius=config['stub_proximity_radius'],
-                    stub_proximity_cost=config['stub_proximity_cost'],
-                    via_proximity_cost=config['via_proximity_cost'],
-                    track_proximity_distance=config['track_proximity_distance'],
-                    track_proximity_cost=config['track_proximity_cost'],
-                    bga_proximity_radius=config.get('bga_proximity_radius', 7.0),
-                    bga_proximity_cost=config.get('bga_proximity_cost', 0.2),
-                    vertical_attraction_radius=config.get('vertical_attraction_radius', 1.0),
-                    vertical_attraction_cost=config.get('vertical_attraction_cost', 0.0),
-                    ripped_route_avoidance_radius=config.get('ripped_route_avoidance_radius', 1.0),
-                    ripped_route_avoidance_cost=config.get('ripped_route_avoidance_cost', 0.1),
-                    crossing_penalty=config.get('crossing_penalty', 1000.0),
-                    routing_clearance_margin=config['routing_clearance_margin'],
-                    hole_to_hole_clearance=config['hole_to_hole_clearance'],
-                    board_edge_clearance=config['board_edge_clearance'],
-                    enable_layer_switch=config['enable_layer_switch'],
-                    crossing_layer_check=not config.get('no_crossing_layer_check', False),
-                    can_swap_to_top_layer=config.get('can_swap_to_top_layer', False),
-                    swappable_net_patterns=config.get('swappable_nets'),
-                    schematic_dir=config.get('schematic_dir'),
-                    mps_reverse_rounds=config.get('mps_reverse_rounds', False),
-                    mps_layer_swap=config.get('mps_layer_swap', False),
-                    mps_segment_intersection=config.get('mps_segment_intersection', False),
-                    bus_enabled=config.get('bus_enabled', False),
-                    bus_detection_radius=config.get('bus_detection_radius', 5.0),
-                    bus_attraction_radius=config.get('bus_attraction_radius', 5.0),
-                    bus_attraction_bonus=config.get('bus_attraction_bonus', 5000),
-                    bus_min_nets=config.get('bus_min_nets', 2),
-                    guide_corridor_enabled=config.get('guide_corridor_enabled', False),
-                    guide_corridor_layer=config.get('guide_corridor_layer', 'User.1'),
-                    guide_corridor_spacing=config.get('guide_corridor_spacing', 0.0),
-                    keepout_enabled=config.get('keepout_enabled', False),
-                    keepout_layer=config.get('keepout_layer', 'User.2'),
-                    power_nets=config.get('power_nets', []),
-                    power_nets_widths=config.get('power_nets_widths', []),
-                    disable_bga_zones=config.get('no_bga_zones'),
-                    layer_costs=config.get('layer_costs', []),
-                    length_match_groups=config.get('length_match_groups'),
-                    length_match_tolerance=config.get('length_match_tolerance', 0.1),
-                    meander_amplitude=config.get('meander_amplitude', 1.0),
-                    time_matching=config.get('time_matching', False),
-                    time_match_tolerance=config.get('time_match_tolerance', 1.0),
-                    add_teardrops=config.get('add_teardrops', False),
-                    verbose=config.get('verbose', False),
-                    skip_routing=config.get('skip_routing', False),
-                    debug_memory=config.get('debug_memory', False),
-                    collect_stats=config.get('stats', False),
-                    debug_lines=config['debug_lines'],
+                    grid_step=config["grid_step"],
+                    via_cost=config["via_cost"],
+                    impedance=config.get("impedance"),
+                    max_iterations=config["max_iterations"],
+                    max_probe_iterations=config.get("max_probe_iterations", 5000),
+                    heuristic_weight=config["heuristic_weight"],
+                    proximity_heuristic_factor=config.get("proximity_heuristic_factor", 0.02),
+                    turn_cost=config["turn_cost"],
+                    direction_preference_cost=config.get("direction_preference_cost", 50),
+                    max_rip_up_count=config["max_ripup"],
+                    ordering_strategy=config["ordering_strategy"],
+                    direction_order=config.get("direction"),
+                    stub_proximity_radius=config["stub_proximity_radius"],
+                    stub_proximity_cost=config["stub_proximity_cost"],
+                    via_proximity_cost=config["via_proximity_cost"],
+                    track_proximity_distance=config["track_proximity_distance"],
+                    track_proximity_cost=config["track_proximity_cost"],
+                    bga_proximity_radius=config.get("bga_proximity_radius", 7.0),
+                    bga_proximity_cost=config.get("bga_proximity_cost", 0.2),
+                    vertical_attraction_radius=config.get("vertical_attraction_radius", 1.0),
+                    vertical_attraction_cost=config.get("vertical_attraction_cost", 0.0),
+                    ripped_route_avoidance_radius=config.get("ripped_route_avoidance_radius", 1.0),
+                    ripped_route_avoidance_cost=config.get("ripped_route_avoidance_cost", 0.1),
+                    crossing_penalty=config.get("crossing_penalty", 1000.0),
+                    routing_clearance_margin=config["routing_clearance_margin"],
+                    hole_to_hole_clearance=config["hole_to_hole_clearance"],
+                    board_edge_clearance=config["board_edge_clearance"],
+                    enable_layer_switch=config["enable_layer_switch"],
+                    crossing_layer_check=not config.get("no_crossing_layer_check", False),
+                    can_swap_to_top_layer=config.get("can_swap_to_top_layer", False),
+                    swappable_net_patterns=config.get("swappable_nets"),
+                    schematic_dir=config.get("schematic_dir"),
+                    mps_reverse_rounds=config.get("mps_reverse_rounds", False),
+                    mps_layer_swap=config.get("mps_layer_swap", False),
+                    mps_segment_intersection=config.get("mps_segment_intersection", False),
+                    bus_enabled=config.get("bus_enabled", False),
+                    bus_detection_radius=config.get("bus_detection_radius", 5.0),
+                    bus_attraction_radius=config.get("bus_attraction_radius", 5.0),
+                    bus_attraction_bonus=config.get("bus_attraction_bonus", 5000),
+                    bus_min_nets=config.get("bus_min_nets", 2),
+                    guide_corridor_enabled=config.get("guide_corridor_enabled", False),
+                    guide_corridor_layer=config.get("guide_corridor_layer", "User.1"),
+                    guide_corridor_spacing=config.get("guide_corridor_spacing", 0.0),
+                    keepout_enabled=config.get("keepout_enabled", False),
+                    keepout_layer=config.get("keepout_layer", "User.2"),
+                    power_nets=config.get("power_nets", []),
+                    power_nets_widths=config.get("power_nets_widths", []),
+                    disable_bga_zones=config.get("no_bga_zones"),
+                    layer_costs=config.get("layer_costs", []),
+                    length_match_groups=config.get("length_match_groups"),
+                    length_match_tolerance=config.get("length_match_tolerance", 0.1),
+                    meander_amplitude=config.get("meander_amplitude", 1.0),
+                    time_matching=config.get("time_matching", False),
+                    time_match_tolerance=config.get("time_match_tolerance", 1.0),
+                    add_teardrops=config.get("add_teardrops", False),
+                    verbose=config.get("verbose", False),
+                    skip_routing=config.get("skip_routing", False),
+                    debug_memory=config.get("debug_memory", False),
+                    collect_stats=config.get("stats", False),
+                    debug_lines=config["debug_lines"],
                     cancel_check=check_cancel,
                     progress_callback=on_progress,
                     return_results=True,
@@ -2304,28 +2449,35 @@ class RoutingDialog(wx.Dialog):
                 )
 
             # Check if using per-netclass parameters
-            if config.get('use_netclass_params') and config.get('nets_by_class'):
+            if config.get("use_netclass_params") and config.get("nets_by_class"):
                 # Route each net class group with its own parameters
                 total_successful = 0
                 total_failed = 0
-                all_results = {'results': [], 'all_swap_vias': [], 'exclusion_zone_lines': [], 'boundary_debug_labels': []}
+                all_results = {
+                    "results": [],
+                    "all_swap_vias": [],
+                    "exclusion_zone_lines": [],
+                    "boundary_debug_labels": [],
+                }
 
-                class_names = list(config['nets_by_class'].keys())
+                class_names = list(config["nets_by_class"].keys())
                 total_classes = len(class_names)
 
                 for class_idx, class_name in enumerate(class_names):
                     if self._cancel_requested:
                         break
 
-                    class_nets = config['nets_by_class'][class_name]
-                    params = config['class_params'].get(class_name, {})
+                    class_nets = config["nets_by_class"][class_name]
+                    params = config["class_params"].get(class_name, {})
 
                     # Update status to show which class is being routed
-                    track_w = params.get('track_width', config['track_width'])
+                    track_w = params.get("track_width", config["track_width"])
 
-                    print(f"\nRouting {len(class_nets)} nets from class '{class_name}' "
-                          f"(track={track_w:.3f}mm, "
-                          f"clearance={params.get('clearance', config['clearance']):.3f}mm)")
+                    print(
+                        f"\nRouting {len(class_nets)} nets from class '{class_name}' "
+                        f"(track={track_w:.3f}mm, "
+                        f"clearance={params.get('clearance', config['clearance']):.3f}mm)"
+                    )
 
                     # Create class-aware progress callback
                     def make_class_progress(cname, cidx, total_cls):
@@ -2333,6 +2485,7 @@ class RoutingDialog(wx.Dialog):
                             status = f"[{cname}] {net_name}" if net_name else f"[{cname}]"
                             wx.CallAfter(self._update_progress, current, total, status)
                             time.sleep(0.01)
+
                         return class_on_progress
 
                     class_progress = make_class_progress(class_name, class_idx, total_classes)
@@ -2341,71 +2494,71 @@ class RoutingDialog(wx.Dialog):
                         input_file=self.board_filename,
                         output_file="",
                         net_names=class_nets,
-                        layers=config['layers'],
-                        track_width=params.get('track_width', config['track_width']),
-                        clearance=params.get('clearance', config['clearance']),
-                        via_size=params.get('via_size', config['via_size']),
-                        via_drill=params.get('via_drill', config['via_drill']),
-                        grid_step=config['grid_step'],
-                        via_cost=config['via_cost'],
-                        impedance=config.get('impedance'),
-                        max_iterations=config['max_iterations'],
-                        max_probe_iterations=config.get('max_probe_iterations', 5000),
-                        heuristic_weight=config['heuristic_weight'],
-                        proximity_heuristic_factor=config.get('proximity_heuristic_factor', 0.02),
-                        turn_cost=config['turn_cost'],
-                        direction_preference_cost=config.get('direction_preference_cost', 50),
-                        max_rip_up_count=config['max_ripup'],
-                        ordering_strategy=config['ordering_strategy'],
-                        direction_order=config.get('direction'),
-                        stub_proximity_radius=config['stub_proximity_radius'],
-                        stub_proximity_cost=config['stub_proximity_cost'],
-                        via_proximity_cost=config['via_proximity_cost'],
-                        track_proximity_distance=config['track_proximity_distance'],
-                        track_proximity_cost=config['track_proximity_cost'],
-                        bga_proximity_radius=config.get('bga_proximity_radius', 7.0),
-                        bga_proximity_cost=config.get('bga_proximity_cost', 0.2),
-                        vertical_attraction_radius=config.get('vertical_attraction_radius', 1.0),
-                        vertical_attraction_cost=config.get('vertical_attraction_cost', 0.0),
-                        ripped_route_avoidance_radius=config.get('ripped_route_avoidance_radius', 1.0),
-                        ripped_route_avoidance_cost=config.get('ripped_route_avoidance_cost', 0.1),
-                        crossing_penalty=config.get('crossing_penalty', 1000.0),
-                        routing_clearance_margin=config['routing_clearance_margin'],
-                        hole_to_hole_clearance=config['hole_to_hole_clearance'],
-                        board_edge_clearance=config['board_edge_clearance'],
-                        enable_layer_switch=config['enable_layer_switch'],
-                        crossing_layer_check=not config.get('no_crossing_layer_check', False),
-                        can_swap_to_top_layer=config.get('can_swap_to_top_layer', False),
-                        swappable_net_patterns=config.get('swappable_nets'),
-                        schematic_dir=config.get('schematic_dir'),
-                        mps_reverse_rounds=config.get('mps_reverse_rounds', False),
-                        mps_layer_swap=config.get('mps_layer_swap', False),
-                        mps_segment_intersection=config.get('mps_segment_intersection', False),
-                        bus_enabled=config.get('bus_enabled', False),
-                        bus_detection_radius=config.get('bus_detection_radius', 5.0),
-                        bus_attraction_radius=config.get('bus_attraction_radius', 5.0),
-                        bus_attraction_bonus=config.get('bus_attraction_bonus', 5000),
-                        bus_min_nets=config.get('bus_min_nets', 2),
-                        guide_corridor_enabled=config.get('guide_corridor_enabled', False),
-                        guide_corridor_layer=config.get('guide_corridor_layer', 'User.1'),
-                        guide_corridor_spacing=config.get('guide_corridor_spacing', 0.0),
-                        keepout_enabled=config.get('keepout_enabled', False),
-                        keepout_layer=config.get('keepout_layer', 'User.2'),
-                        power_nets=config.get('power_nets', []),
-                        power_nets_widths=config.get('power_nets_widths', []),
-                        disable_bga_zones=config.get('no_bga_zones'),
-                        layer_costs=config.get('layer_costs', []),
-                        length_match_groups=config.get('length_match_groups'),
-                        length_match_tolerance=config.get('length_match_tolerance', 0.1),
-                        meander_amplitude=config.get('meander_amplitude', 1.0),
-                        time_matching=config.get('time_matching', False),
-                        time_match_tolerance=config.get('time_match_tolerance', 1.0),
-                        add_teardrops=config.get('add_teardrops', False),
-                        verbose=config.get('verbose', False),
-                        skip_routing=config.get('skip_routing', False),
-                        debug_memory=config.get('debug_memory', False),
-                        collect_stats=config.get('stats', False),
-                        debug_lines=config['debug_lines'],
+                        layers=config["layers"],
+                        track_width=params.get("track_width", config["track_width"]),
+                        clearance=params.get("clearance", config["clearance"]),
+                        via_size=params.get("via_size", config["via_size"]),
+                        via_drill=params.get("via_drill", config["via_drill"]),
+                        grid_step=config["grid_step"],
+                        via_cost=config["via_cost"],
+                        impedance=config.get("impedance"),
+                        max_iterations=config["max_iterations"],
+                        max_probe_iterations=config.get("max_probe_iterations", 5000),
+                        heuristic_weight=config["heuristic_weight"],
+                        proximity_heuristic_factor=config.get("proximity_heuristic_factor", 0.02),
+                        turn_cost=config["turn_cost"],
+                        direction_preference_cost=config.get("direction_preference_cost", 50),
+                        max_rip_up_count=config["max_ripup"],
+                        ordering_strategy=config["ordering_strategy"],
+                        direction_order=config.get("direction"),
+                        stub_proximity_radius=config["stub_proximity_radius"],
+                        stub_proximity_cost=config["stub_proximity_cost"],
+                        via_proximity_cost=config["via_proximity_cost"],
+                        track_proximity_distance=config["track_proximity_distance"],
+                        track_proximity_cost=config["track_proximity_cost"],
+                        bga_proximity_radius=config.get("bga_proximity_radius", 7.0),
+                        bga_proximity_cost=config.get("bga_proximity_cost", 0.2),
+                        vertical_attraction_radius=config.get("vertical_attraction_radius", 1.0),
+                        vertical_attraction_cost=config.get("vertical_attraction_cost", 0.0),
+                        ripped_route_avoidance_radius=config.get("ripped_route_avoidance_radius", 1.0),
+                        ripped_route_avoidance_cost=config.get("ripped_route_avoidance_cost", 0.1),
+                        crossing_penalty=config.get("crossing_penalty", 1000.0),
+                        routing_clearance_margin=config["routing_clearance_margin"],
+                        hole_to_hole_clearance=config["hole_to_hole_clearance"],
+                        board_edge_clearance=config["board_edge_clearance"],
+                        enable_layer_switch=config["enable_layer_switch"],
+                        crossing_layer_check=not config.get("no_crossing_layer_check", False),
+                        can_swap_to_top_layer=config.get("can_swap_to_top_layer", False),
+                        swappable_net_patterns=config.get("swappable_nets"),
+                        schematic_dir=config.get("schematic_dir"),
+                        mps_reverse_rounds=config.get("mps_reverse_rounds", False),
+                        mps_layer_swap=config.get("mps_layer_swap", False),
+                        mps_segment_intersection=config.get("mps_segment_intersection", False),
+                        bus_enabled=config.get("bus_enabled", False),
+                        bus_detection_radius=config.get("bus_detection_radius", 5.0),
+                        bus_attraction_radius=config.get("bus_attraction_radius", 5.0),
+                        bus_attraction_bonus=config.get("bus_attraction_bonus", 5000),
+                        bus_min_nets=config.get("bus_min_nets", 2),
+                        guide_corridor_enabled=config.get("guide_corridor_enabled", False),
+                        guide_corridor_layer=config.get("guide_corridor_layer", "User.1"),
+                        guide_corridor_spacing=config.get("guide_corridor_spacing", 0.0),
+                        keepout_enabled=config.get("keepout_enabled", False),
+                        keepout_layer=config.get("keepout_layer", "User.2"),
+                        power_nets=config.get("power_nets", []),
+                        power_nets_widths=config.get("power_nets_widths", []),
+                        disable_bga_zones=config.get("no_bga_zones"),
+                        layer_costs=config.get("layer_costs", []),
+                        length_match_groups=config.get("length_match_groups"),
+                        length_match_tolerance=config.get("length_match_tolerance", 0.1),
+                        meander_amplitude=config.get("meander_amplitude", 1.0),
+                        time_matching=config.get("time_matching", False),
+                        time_match_tolerance=config.get("time_match_tolerance", 1.0),
+                        add_teardrops=config.get("add_teardrops", False),
+                        verbose=config.get("verbose", False),
+                        skip_routing=config.get("skip_routing", False),
+                        debug_memory=config.get("debug_memory", False),
+                        collect_stats=config.get("stats", False),
+                        debug_lines=config["debug_lines"],
                         cancel_check=check_cancel,
                         progress_callback=class_progress,
                         return_results=True,
@@ -2416,10 +2569,10 @@ class RoutingDialog(wx.Dialog):
                     total_successful += successful
                     total_failed += failed
                     if results_data:
-                        all_results['results'].extend(results_data.get('results', []))
-                        all_results['all_swap_vias'].extend(results_data.get('all_swap_vias', []))
-                        all_results['exclusion_zone_lines'].extend(results_data.get('exclusion_zone_lines', []))
-                        all_results['boundary_debug_labels'].extend(results_data.get('boundary_debug_labels', []))
+                        all_results["results"].extend(results_data.get("results", []))
+                        all_results["all_swap_vias"].extend(results_data.get("all_swap_vias", []))
+                        all_results["exclusion_zone_lines"].extend(results_data.get("exclusion_zone_lines", []))
+                        all_results["boundary_debug_labels"].extend(results_data.get("boundary_debug_labels", []))
 
                 successful = total_successful
                 failed = total_failed
@@ -2427,11 +2580,11 @@ class RoutingDialog(wx.Dialog):
             else:
                 # Standard routing with single set of parameters
                 successful, failed, total_time, results_data = run_batch(
-                    config['nets'],
-                    config['track_width'],
-                    config['clearance'],
-                    config['via_size'],
-                    config['via_drill'],
+                    config["nets"],
+                    config["track_width"],
+                    config["clearance"],
+                    config["via_size"],
+                    config["via_drill"],
                 )
 
             if self._cancel_requested:
@@ -2502,7 +2655,7 @@ class RoutingDialog(wx.Dialog):
 
         # Move copper text to silkscreen if enabled
         text_moved = 0
-        if config.get('move_copper_text', True):
+        if config.get("move_copper_text", True):
             text_moved = self._move_copper_text_to_silkscreen(board)
 
         # Track counts for reporting
@@ -2518,48 +2671,50 @@ class RoutingDialog(wx.Dialog):
             return name_to_id.get(layer_name, pcbnew.F_Cu)
 
         # Add segments from routing results
-        for result in results_data.get('results', []):
-            for seg in result.get('new_segments', []):
+        for result in results_data.get("results", []):
+            for seg in result.get("new_segments", []):
                 track = pcbnew.PCB_TRACK(board)
                 # Convert mm to internal units (nanometers)
                 # Round to POSITION_DECIMALS to avoid floating-point precision issues
-                track.SetStart(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(round(seg.start_x, POSITION_DECIMALS)),
-                    pcbnew.FromMM(round(seg.start_y, POSITION_DECIMALS))
-                ))
-                track.SetEnd(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(round(seg.end_x, POSITION_DECIMALS)),
-                    pcbnew.FromMM(round(seg.end_y, POSITION_DECIMALS))
-                ))
+                track.SetStart(
+                    pcbnew.VECTOR2I(
+                        pcbnew.FromMM(round(seg.start_x, POSITION_DECIMALS)),
+                        pcbnew.FromMM(round(seg.start_y, POSITION_DECIMALS)),
+                    )
+                )
+                track.SetEnd(
+                    pcbnew.VECTOR2I(
+                        pcbnew.FromMM(round(seg.end_x, POSITION_DECIMALS)),
+                        pcbnew.FromMM(round(seg.end_y, POSITION_DECIMALS)),
+                    )
+                )
                 track.SetWidth(pcbnew.FromMM(round(seg.width, POSITION_DECIMALS)))
                 track.SetLayer(get_layer_id(seg.layer))
                 track.SetNetCode(seg.net_id)
                 board.Add(track)
                 tracks_added += 1
 
-            for via in result.get('new_vias', []):
+            for via in result.get("new_vias", []):
                 self._add_via_to_board(board, via, get_layer_id)
                 vias_added += 1
 
         # Add vias from layer swapping
-        for via in results_data.get('all_swap_vias', []):
+        for via in results_data.get("all_swap_vias", []):
             self._add_via_to_board(board, via, get_layer_id)
             vias_added += 1
 
         # Add debug visualization lines if enabled
-        if config.get('debug_lines', False):
+        if config.get("debug_lines", False):
             debug_lines_added = self._add_debug_lines(board, results_data)
 
         # Clear guide/keepout User-layer graphics after a successful route, if
         # requested (only for features that were actually enabled this run).
         if successful > 0:
             cleared = 0
-            if config.get('clear_guide_layer') and config.get('guide_corridor_enabled'):
-                cleared += self._clear_user_layer_graphics(
-                    board, config.get('guide_corridor_layer', 'User.1'))
-            if config.get('clear_keepout_layer') and config.get('keepout_enabled'):
-                cleared += self._clear_user_layer_graphics(
-                    board, config.get('keepout_layer', 'User.2'))
+            if config.get("clear_guide_layer") and config.get("guide_corridor_enabled"):
+                cleared += self._clear_user_layer_graphics(board, config.get("guide_corridor_layer", "User.1"))
+            if config.get("clear_keepout_layer") and config.get("keepout_enabled"):
+                cleared += self._clear_user_layer_graphics(board, config.get("keepout_layer", "User.2"))
             if cleared:
                 print(f"Cleared {cleared} graphic(s) from the guide/keepout User layer(s)")
 
@@ -2577,11 +2732,11 @@ class RoutingDialog(wx.Dialog):
         self.progress_bar.SetValue(100)
         self.status_text.SetLabel(f"Complete: {successful} routed, {failed} failed")
 
-        msg = f"Routing complete!\n\n"
+        msg = "Routing complete!\n\n"
         msg += f"Successfully routed: {successful} nets\n"
         msg += f"Failed: {failed}\n"
         msg += f"Time: {total_time:.1f}s\n\n"
-        msg += f"Added to board:\n"
+        msg += "Added to board:\n"
         msg += f"  {tracks_added} segments\n"
         msg += f"  {vias_added} vias\n"
         if text_moved > 0:
@@ -2591,10 +2746,9 @@ class RoutingDialog(wx.Dialog):
         # If any nets failed, append heuristic suggestions for what to tweak.
         if failed > 0:
             try:
-                from routing_diagnostics import (
-                    suggest_route_adjustments, format_suggestions_for_dialog)
-                suggestions = suggest_route_adjustments(
-                    failed=failed, total=successful + failed, config=config)
+                from routing_diagnostics import format_suggestions_for_dialog, suggest_route_adjustments
+
+                suggestions = suggest_route_adjustments(failed=failed, total=successful + failed, config=config)
                 block = format_suggestions_for_dialog(suggestions)
                 if block:
                     msg += "\n" + block + "\n"
@@ -2625,16 +2779,18 @@ class RoutingDialog(wx.Dialog):
     def _add_via_to_board(self, board, via, get_layer_id):
         """Add a via to the pcbnew board."""
         import pcbnew
+
         pcb_via = pcbnew.PCB_VIA(board)
         # Round to POSITION_DECIMALS to avoid floating-point precision issues
-        pcb_via.SetPosition(pcbnew.VECTOR2I(
-            pcbnew.FromMM(round(via.x, POSITION_DECIMALS)),
-            pcbnew.FromMM(round(via.y, POSITION_DECIMALS))
-        ))
+        pcb_via.SetPosition(
+            pcbnew.VECTOR2I(
+                pcbnew.FromMM(round(via.x, POSITION_DECIMALS)), pcbnew.FromMM(round(via.y, POSITION_DECIMALS))
+            )
+        )
         pcb_via.SetWidth(pcbnew.FromMM(round(via.size, POSITION_DECIMALS)))
         pcb_via.SetDrill(pcbnew.FromMM(round(via.drill, POSITION_DECIMALS)))
         pcb_via.SetNetCode(via.net_id)
-        if hasattr(via, 'layers') and len(via.layers) >= 2:
+        if hasattr(via, "layers") and len(via.layers) >= 2:
             top_layer = get_layer_id(via.layers[0])
             bot_layer = get_layer_id(via.layers[1])
             pcb_via.SetLayerPair(top_layer, bot_layer)
@@ -2665,65 +2821,59 @@ class RoutingDialog(wx.Dialog):
 
         # User layer mapping
         user_layers = {
-            'User.3': pcbnew.User_3,   # Connector lines
-            'User.4': pcbnew.User_4,   # Stub direction arrows
-            'User.5': pcbnew.User_5,   # Exclusion zones
-            'User.8': pcbnew.User_8,   # Simplified path
-            'User.9': pcbnew.User_9,   # Raw A* path
+            "User.3": pcbnew.User_3,  # Connector lines
+            "User.4": pcbnew.User_4,  # Stub direction arrows
+            "User.5": pcbnew.User_5,  # Exclusion zones
+            "User.8": pcbnew.User_8,  # Simplified path
+            "User.9": pcbnew.User_9,  # Raw A* path
         }
 
         def add_line(start, end, layer_name, width_mm=0.05):
             nonlocal count
             layer_id = user_layers.get(layer_name, pcbnew.User_9)
             shape = pcbnew.PCB_SHAPE(board)
-            shape_t = getattr(pcbnew, 'SHAPE_T', None)
-            seg_type = getattr(shape_t, 'SEGMENT', None) if shape_t else None
+            shape_t = getattr(pcbnew, "SHAPE_T", None)
+            seg_type = getattr(shape_t, "SEGMENT", None) if shape_t else None
             if seg_type is None:
-                seg_type = getattr(pcbnew, 'SHAPE_T_SEGMENT', getattr(pcbnew, 'S_SEGMENT', 0))
+                seg_type = getattr(pcbnew, "SHAPE_T_SEGMENT", getattr(pcbnew, "S_SEGMENT", 0))
             shape.SetShape(seg_type)
-            shape.SetStart(pcbnew.VECTOR2I(
-                pcbnew.FromMM(start[0]),
-                pcbnew.FromMM(start[1])
-            ))
-            shape.SetEnd(pcbnew.VECTOR2I(
-                pcbnew.FromMM(end[0]),
-                pcbnew.FromMM(end[1])
-            ))
+            shape.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(start[0]), pcbnew.FromMM(start[1])))
+            shape.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(end[0]), pcbnew.FromMM(end[1])))
             shape.SetWidth(pcbnew.FromMM(width_mm))
             shape.SetLayer(layer_id)
             board.Add(shape)
             count += 1
 
-        for result in results_data.get('results', []):
+        for result in results_data.get("results", []):
             # Raw A* path on User.9
-            raw_path = result.get('raw_astar_path', [])
+            raw_path = result.get("raw_astar_path", [])
             if len(raw_path) >= 2:
                 for i in range(len(raw_path) - 1):
                     x1, y1 = raw_path[i][0], raw_path[i][1]
                     x2, y2 = raw_path[i + 1][0], raw_path[i + 1][1]
                     if abs(x1 - x2) > 0.001 or abs(y1 - y2) > 0.001:
-                        add_line((x1, y1), (x2, y2), 'User.9')
+                        add_line((x1, y1), (x2, y2), "User.9")
 
             # Simplified path on User.8
-            simplified_path = result.get('simplified_path', [])
+            simplified_path = result.get("simplified_path", [])
             if len(simplified_path) >= 2:
                 for i in range(len(simplified_path) - 1):
                     x1, y1 = simplified_path[i][0], simplified_path[i][1]
                     x2, y2 = simplified_path[i + 1][0], simplified_path[i + 1][1]
                     if abs(x1 - x2) > 0.001 or abs(y1 - y2) > 0.001:
-                        add_line((x1, y1), (x2, y2), 'User.8')
+                        add_line((x1, y1), (x2, y2), "User.8")
 
             # Connector segments on User.3
-            for start, end in result.get('debug_connector_lines', []):
-                add_line(start, end, 'User.3')
+            for start, end in result.get("debug_connector_lines", []):
+                add_line(start, end, "User.3")
 
             # Stub direction arrows on User.4
-            for start, end in result.get('debug_stub_arrows', []):
-                add_line(start, end, 'User.4')
+            for start, end in result.get("debug_stub_arrows", []):
+                add_line(start, end, "User.4")
 
         # Exclusion zone lines on User.5
-        for start, end in results_data.get('exclusion_zone_lines', []):
-            add_line(start, end, 'User.5')
+        for start, end in results_data.get("exclusion_zone_lines", []):
+            add_line(start, end, "User.5")
 
         return count
 
@@ -2740,11 +2890,7 @@ class RoutingDialog(wx.Dialog):
         self.cancel_btn.SetLabel("Close")
         self.progress_bar.SetValue(0)
         self.status_text.SetLabel("Error")
-        wx.MessageBox(
-            f"Routing error:\n\n{error_msg}",
-            "Routing Error",
-            wx.OK | wx.ICON_ERROR
-        )
+        wx.MessageBox(f"Routing error:\n\n{error_msg}", "Routing Error", wx.OK | wx.ICON_ERROR)
 
     def get_settings(self):
         """Get all current dialog settings for persistence."""

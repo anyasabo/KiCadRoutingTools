@@ -2,13 +2,10 @@
 KiCad PCB Parser - Extracts pads, nets, tracks, vias, and board info from .kicad_pcb files.
 """
 
-import re
-import math
 import json
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Tuple, Optional
-from pathlib import Path
-
+import math
+import re
+from dataclasses import dataclass, field
 
 # Position rounding precision for coordinate comparisons
 # All position-based lookups must use this to ensure consistency
@@ -22,7 +19,7 @@ KICAD_10_MIN_VERSION = 20250000
 
 def detect_kicad_version(content: str) -> int:
     """Extract version number from (version YYYYMMDD) header."""
-    m = re.search(r'\(version\s+(\d+)\)', content)
+    m = re.search(r"\(version\s+(\d+)\)", content)
     return int(m.group(1)) if m else 0
 
 
@@ -34,6 +31,7 @@ def is_kicad_10(content: str) -> bool:
 @dataclass
 class Pad:
     """Represents a component pad with global board coordinates."""
+
     component_ref: str
     pad_number: str
     global_x: float
@@ -43,7 +41,7 @@ class Pad:
     size_x: float
     size_y: float
     shape: str  # circle, rect, roundrect, etc.
-    layers: List[str]
+    layers: list[str]
     net_id: int
     net_name: str
     rotation: float = 0.0  # Total rotation in degrees (pad + footprint)
@@ -56,11 +54,12 @@ class Pad:
 @dataclass
 class Via:
     """Represents a via."""
+
     x: float
     y: float
     size: float
     drill: float
-    layers: List[str]
+    layers: list[str]
     net_id: int
     uuid: str = ""
     free: bool = False  # If True, KiCad won't auto-assign net based on overlapping tracks
@@ -69,6 +68,7 @@ class Via:
 @dataclass
 class Segment:
     """Represents a track segment."""
+
     start_x: float
     start_y: float
     end_x: float
@@ -87,45 +87,50 @@ class Segment:
 @dataclass
 class Zone:
     """Represents a filled zone (power plane)."""
+
     net_id: int
     net_name: str
     layer: str
-    polygon: List[Tuple[float, float]]  # List of (x, y) vertices defining the zone outline
+    polygon: list[tuple[float, float]]  # List of (x, y) vertices defining the zone outline
     uuid: str = ""
 
 
 @dataclass
 class GuidePath:
     """A user-drawn graphic polyline (e.g. on User.1) used as a routing corridor."""
+
     layer: str  # e.g. "User.1"
-    points: List[Tuple[float, float]]  # ordered (x, y) in mm, >= 2 points
+    points: list[tuple[float, float]]  # ordered (x, y) in mm, >= 2 points
     is_closed: bool = False  # True for closed polygons (gr_poly)
 
 
 @dataclass
 class Footprint:
     """Represents a component footprint."""
+
     reference: str
     footprint_name: str
     x: float
     y: float
     rotation: float
     layer: str
-    pads: List[Pad] = field(default_factory=list)
+    pads: list[Pad] = field(default_factory=list)
     value: str = ""  # Component value (e.g., "MCF5213", "100nF", "10K")
 
 
 @dataclass
 class Net:
     """Represents a net (electrical connection)."""
+
     net_id: int
     name: str
-    pads: List[Pad] = field(default_factory=list)
+    pads: list[Pad] = field(default_factory=list)
 
 
 @dataclass
 class StackupLayer:
     """A layer in the board stackup."""
+
     name: str
     layer_type: str  # 'copper', 'core', 'prepreg', etc.
     thickness: float  # in mm
@@ -137,29 +142,35 @@ class StackupLayer:
 @dataclass
 class BoardInfo:
     """Board-level information."""
-    layers: Dict[int, str]  # layer_id -> layer_name
-    copper_layers: List[str]
-    board_bounds: Optional[Tuple[float, float, float, float]] = None  # min_x, min_y, max_x, max_y
-    stackup: List[StackupLayer] = field(default_factory=list)  # ordered top to bottom
-    board_outline: List[Tuple[float, float]] = field(default_factory=list)  # Polygon vertices for non-rectangular boards
-    board_cutouts: List[List[Tuple[float, float]]] = field(default_factory=list)  # Interior cutout polygons
-    keepouts: List[dict] = field(default_factory=list)  # Keep-out rule areas: {polygon, layers:set, tracks_allowed, vias_allowed}
+
+    layers: dict[int, str]  # layer_id -> layer_name
+    copper_layers: list[str]
+    board_bounds: tuple[float, float, float, float] | None = None  # min_x, min_y, max_x, max_y
+    stackup: list[StackupLayer] = field(default_factory=list)  # ordered top to bottom
+    board_outline: list[tuple[float, float]] = field(
+        default_factory=list
+    )  # Polygon vertices for non-rectangular boards
+    board_cutouts: list[list[tuple[float, float]]] = field(default_factory=list)  # Interior cutout polygons
+    keepouts: list[dict] = field(
+        default_factory=list
+    )  # Keep-out rule areas: {polygon, layers:set, tracks_allowed, vias_allowed}
 
 
 @dataclass
 class PCBData:
     """Complete parsed PCB data."""
+
     board_info: BoardInfo
-    nets: Dict[int, Net]
-    footprints: Dict[str, Footprint]
-    vias: List[Via]
-    segments: List[Segment]
-    pads_by_net: Dict[int, List[Pad]]
-    zones: List[Zone] = field(default_factory=list)
+    nets: dict[int, Net]
+    footprints: dict[str, Footprint]
+    vias: list[Via]
+    segments: list[Segment]
+    pads_by_net: dict[int, list[Pad]]
+    zones: list[Zone] = field(default_factory=list)
     kicad_version: int = 0  # File format version (e.g., 20241229 for KiCad 9)
-    net_id_to_name: Dict[int, str] = field(default_factory=dict)  # Synthetic ID -> net name (for KiCad 10 output)
-    guide_paths: List[GuidePath] = field(default_factory=list)  # User-drawn guide corridors (issue #7)
-    keepout_zones: List[GuidePath] = field(default_factory=list)  # User-drawn keepout polygons (issue #27)
+    net_id_to_name: dict[int, str] = field(default_factory=dict)  # Synthetic ID -> net name (for KiCad 10 output)
+    guide_paths: list[GuidePath] = field(default_factory=list)  # User-drawn guide corridors (issue #7)
+    keepout_zones: list[GuidePath] = field(default_factory=list)  # User-drawn keepout polygons (issue #27)
 
     def get_via_barrel_length(self, layer1: str, layer2: str) -> float:
         """Calculate the via barrel length between two copper layers.
@@ -197,8 +208,9 @@ class PCBData:
         return total
 
 
-def local_to_global(fp_x: float, fp_y: float, fp_rotation_deg: float,
-                    pad_local_x: float, pad_local_y: float) -> Tuple[float, float]:
+def local_to_global(
+    fp_x: float, fp_y: float, fp_rotation_deg: float, pad_local_x: float, pad_local_y: float
+) -> tuple[float, float]:
     """
     Transform pad LOCAL coordinates to GLOBAL board coordinates.
 
@@ -226,10 +238,10 @@ def parse_s_expression(text: str) -> list:
         result = []
         while idx < len(tokens):
             token = tokens[idx]
-            if token == '(':
+            if token == "(":
                 sublist, idx = parse_tokens(tokens, idx + 1)
                 result.append(sublist)
-            elif token == ')':
+            elif token == ")":
                 return result, idx
             else:
                 # Remove quotes from strings
@@ -249,7 +261,7 @@ def extract_layers(content: str) -> BoardInfo:
     copper_layers = []
 
     # Find the layers section
-    layers_match = re.search(r'\(layers\s*((?:\([^)]+\)\s*)+)\)', content, re.DOTALL)
+    layers_match = re.search(r"\(layers\s*((?:\([^)]+\)\s*)+)\)", content, re.DOTALL)
     if layers_match:
         layers_text = layers_match.group(1)
         # Parse individual layer entries: (0 "F.Cu" signal)
@@ -259,7 +271,7 @@ def extract_layers(content: str) -> BoardInfo:
             layer_name = m.group(2)
             layer_type = m.group(3)
             layers[layer_id] = layer_name
-            if layer_type == 'signal' and '.Cu' in layer_name:
+            if layer_type == "signal" and ".Cu" in layer_name:
                 copper_layers.append(layer_name)
 
     # Extract board bounds from Edge.Cuts
@@ -271,10 +283,17 @@ def extract_layers(content: str) -> BoardInfo:
     # Extract stackup information
     stackup = extract_stackup(content)
 
-    return BoardInfo(layers=layers, copper_layers=copper_layers, board_bounds=bounds, stackup=stackup, board_outline=outline, board_cutouts=cutouts)
+    return BoardInfo(
+        layers=layers,
+        copper_layers=copper_layers,
+        board_bounds=bounds,
+        stackup=stackup,
+        board_outline=outline,
+        board_cutouts=cutouts,
+    )
 
 
-def extract_stackup(content: str) -> List[StackupLayer]:
+def extract_stackup(content: str) -> list[StackupLayer]:
     """Extract board stackup information for impedance calculation and via barrel length.
 
     Extracts copper and dielectric layers with their electrical properties:
@@ -286,10 +305,10 @@ def extract_stackup(content: str) -> List[StackupLayer]:
     stackup = []
 
     # Find the stackup section
-    stackup_match = re.search(r'\(stackup\s+(.*?)\n\s*\(copper_finish', content, re.DOTALL)
+    stackup_match = re.search(r"\(stackup\s+(.*?)\n\s*\(copper_finish", content, re.DOTALL)
     if not stackup_match:
         # Try alternate pattern without copper_finish
-        stackup_match = re.search(r'\(stackup\s+(.*?)\n\s*\)\s*\n', content, re.DOTALL)
+        stackup_match = re.search(r"\(stackup\s+(.*?)\n\s*\)\s*\n", content, re.DOTALL)
 
     if not stackup_match:
         return stackup
@@ -304,18 +323,18 @@ def extract_stackup(content: str) -> List[StackupLayer]:
     for layer_name, layer_content in layer_blocks:
         # Extract type
         type_match = re.search(r'\(type\s+"([^"]+)"\)', layer_content)
-        layer_type = type_match.group(1) if type_match else 'unknown'
+        layer_type = type_match.group(1) if type_match else "unknown"
 
         # Extract thickness (in mm)
-        thickness_match = re.search(r'\(thickness\s+([\d.]+)\)', layer_content)
+        thickness_match = re.search(r"\(thickness\s+([\d.]+)\)", layer_content)
         thickness = float(thickness_match.group(1)) if thickness_match else 0.0
 
         # Extract dielectric constant (epsilon_r)
-        epsilon_match = re.search(r'\(epsilon_r\s+([\d.]+)\)', layer_content)
+        epsilon_match = re.search(r"\(epsilon_r\s+([\d.]+)\)", layer_content)
         epsilon_r = float(epsilon_match.group(1)) if epsilon_match else 0.0
 
         # Extract loss tangent
-        loss_match = re.search(r'\(loss_tangent\s+([\d.]+)\)', layer_content)
+        loss_match = re.search(r"\(loss_tangent\s+([\d.]+)\)", layer_content)
         loss_tangent = float(loss_match.group(1)) if loss_match else 0.0
 
         # Extract material name
@@ -323,22 +342,24 @@ def extract_stackup(content: str) -> List[StackupLayer]:
         material = material_match.group(1) if material_match else ""
 
         # Only include copper and dielectric layers (skip mask, silk, paste)
-        if layer_type in ('copper', 'core', 'prepreg'):
-            stackup.append(StackupLayer(
-                name=layer_name,
-                layer_type=layer_type,
-                thickness=thickness,
-                epsilon_r=epsilon_r,
-                loss_tangent=loss_tangent,
-                material=material
-            ))
+        if layer_type in ("copper", "core", "prepreg"):
+            stackup.append(
+                StackupLayer(
+                    name=layer_name,
+                    layer_type=layer_type,
+                    thickness=thickness,
+                    epsilon_r=epsilon_r,
+                    loss_tangent=loss_tangent,
+                    material=material,
+                )
+            )
 
     return stackup
 
 
-def _arc_to_segments(start: Tuple[float, float], mid: Tuple[float, float],
-                     end: Tuple[float, float], num_segments: int = 16
-                     ) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def _arc_to_segments(
+    start: tuple[float, float], mid: tuple[float, float], end: tuple[float, float], num_segments: int = 16
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Convert a 3-point arc to a polyline of straight segments.
 
     Given start, mid (on arc), and end points, computes the circular arc
@@ -399,14 +420,16 @@ def _arc_to_segments(start: Tuple[float, float], mid: Tuple[float, float],
     return segments
 
 
-def extract_board_bounds(content: str) -> Optional[Tuple[float, float, float, float]]:
+def extract_board_bounds(content: str) -> tuple[float, float, float, float] | None:
     """Extract board outline bounds from Edge.Cuts layer."""
-    min_x = min_y = float('inf')
-    max_x = max_y = float('-inf')
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
     found = False
 
     # Look for gr_rect on Edge.Cuts (multi-line format)
-    rect_pattern = r'\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    rect_pattern = (
+        r'\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    )
     for m in re.finditer(rect_pattern, content, re.DOTALL):
         x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
         min_x = min(min_x, x1, x2)
@@ -416,7 +439,9 @@ def extract_board_bounds(content: str) -> Optional[Tuple[float, float, float, fl
         found = True
 
     # Look for gr_line on Edge.Cuts (multi-line format)
-    line_pattern = r'\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    line_pattern = (
+        r'\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    )
     for m in re.finditer(line_pattern, content, re.DOTALL):
         x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
         min_x = min(min_x, x1, x2)
@@ -445,12 +470,14 @@ def extract_board_bounds(content: str) -> Optional[Tuple[float, float, float, fl
     return None
 
 
-def _collect_edge_cuts_segments(content: str) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def _collect_edge_cuts_segments(content: str) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Parse all gr_line, gr_arc, and gr_rect segments on Edge.Cuts from file content."""
     segments = []
 
     # gr_line
-    line_pattern = r'\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    line_pattern = (
+        r'\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    )
     for m in re.finditer(line_pattern, content, re.DOTALL):
         x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
         segments.append(((x1, y1), (x2, y2)))
@@ -464,7 +491,9 @@ def _collect_edge_cuts_segments(content: str) -> List[Tuple[Tuple[float, float],
         segments.extend(_arc_to_segments((sx, sy), (mx, my), (ex, ey)))
 
     # gr_rect - expand to 4 line segments
-    rect_pattern = r'\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    rect_pattern = (
+        r'\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\).*?\(layer\s+"Edge\.Cuts"\)'
+    )
     for m in re.finditer(rect_pattern, content, re.DOTALL):
         x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
         segments.append(((x1, y1), (x2, y1)))
@@ -478,24 +507,26 @@ def _collect_edge_cuts_segments(content: str) -> List[Tuple[Tuple[float, float],
 # Regex gap that matches anything EXCEPT the start of another graphic element,
 # so a lazy match can't run past the current element to a later (layer "...")
 # token. Shared by the gr_line/gr_poly/gr_rect readers below.
-_GR_ELEMENT_GAP = r'(?:(?!\(gr_)[\s\S])*?'
+_GR_ELEMENT_GAP = r"(?:(?!\(gr_)[\s\S])*?"
 
 
-def _parse_gr_polys_on_layer(content: str, layer: str) -> List[List[Tuple[float, float]]]:
+def _parse_gr_polys_on_layer(content: str, layer: str) -> list[list[tuple[float, float]]]:
     """Return the vertex list of every gr_poly drawn on the given layer."""
     layer_re = re.escape(layer)
     pattern = (
-        r'\(gr_poly\s+\(pts\s+((?:\(xy\s+[\d.-]+\s+[\d.-]+\)\s*)+)\)'
-        + _GR_ELEMENT_GAP + r'\(layer\s+"' + layer_re + r'"\)'
+        r"\(gr_poly\s+\(pts\s+((?:\(xy\s+[\d.-]+\s+[\d.-]+\)\s*)+)\)"
+        + _GR_ELEMENT_GAP
+        + r'\(layer\s+"'
+        + layer_re
+        + r'"\)'
     )
     polys = []
     for m in re.finditer(pattern, content, re.DOTALL):
-        polys.append([(float(px), float(py))
-                      for px, py in re.findall(r'\(xy\s+([\d.-]+)\s+([\d.-]+)\)', m.group(1))])
+        polys.append([(float(px), float(py)) for px, py in re.findall(r"\(xy\s+([\d.-]+)\s+([\d.-]+)\)", m.group(1))])
     return polys
 
 
-def parse_guide_paths(content: str, layer: str) -> List["GuidePath"]:
+def parse_guide_paths(content: str, layer: str) -> list["GuidePath"]:
     """Parse user-drawn graphic polylines on a given layer from file content.
 
     Reads gr_line and gr_poly graphics on the named layer (e.g. "User.1") and
@@ -510,7 +541,7 @@ def parse_guide_paths(content: str, layer: str) -> List["GuidePath"]:
         List of GuidePath (mm coordinates). Empty if none found.
     """
     layer_re = re.escape(layer)
-    paths: List[GuidePath] = []
+    paths: list[GuidePath] = []
 
     # gr_poly: a closed polygon with a (pts (xy ..) (xy ..) ...) block.
     for points in _parse_gr_polys_on_layer(content, layer):
@@ -519,19 +550,21 @@ def parse_guide_paths(content: str, layer: str) -> List["GuidePath"]:
 
     # gr_line: collect 2-point segments, then stitch into chains.
     line_pattern = (
-        r'\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\)'
-        + _GR_ELEMENT_GAP + r'\(layer\s+"' + layer_re + r'"\)'
+        r"\(gr_line\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\)"
+        + _GR_ELEMENT_GAP
+        + r'\(layer\s+"'
+        + layer_re
+        + r'"\)'
     )
     segments = []
     for m in re.finditer(line_pattern, content, re.DOTALL):
-        segments.append(((float(m.group(1)), float(m.group(2))),
-                         (float(m.group(3)), float(m.group(4)))))
+        segments.append(((float(m.group(1)), float(m.group(2))), (float(m.group(3)), float(m.group(4)))))
 
     paths.extend(_chain_guide_segments(segments, layer))
     return paths
 
 
-def _chain_guide_segments(segments, layer: str, tol: float = 0.01) -> List["GuidePath"]:
+def _chain_guide_segments(segments, layer: str, tol: float = 0.01) -> list["GuidePath"]:
     """Stitch line segments into open polylines by shared endpoints."""
     if not segments:
         return []
@@ -540,7 +573,7 @@ def _chain_guide_segments(segments, layer: str, tol: float = 0.01) -> List["Guid
         return abs(p1[0] - p2[0]) < tol and abs(p1[1] - p2[1]) < tol
 
     remaining = list(segments)
-    paths: List[GuidePath] = []
+    paths: list[GuidePath] = []
     while remaining:
         a, b = remaining.pop(0)
         chain = [a, b]
@@ -565,7 +598,7 @@ def _chain_guide_segments(segments, layer: str, tol: float = 0.01) -> List["Guid
     return paths
 
 
-def _poly_points_from_drawing(drawing, to_mm) -> List[Tuple[float, float]]:
+def _poly_points_from_drawing(drawing, to_mm) -> list[tuple[float, float]]:
     """Extract a poly PCB_SHAPE's outline vertices as (x, y) mm tuples."""
     pts = []
     outline = drawing.GetPolyShape().Outline(0)
@@ -575,7 +608,7 @@ def _poly_points_from_drawing(drawing, to_mm) -> List[Tuple[float, float]]:
     return pts
 
 
-def extract_guide_paths_from_board(board, layer_name: str = "User.1") -> List["GuidePath"]:
+def extract_guide_paths_from_board(board, layer_name: str = "User.1") -> list["GuidePath"]:
     """Read user-layer guide polylines from a live pcbnew board (best-effort)."""
     import pcbnew
 
@@ -586,11 +619,11 @@ def extract_guide_paths_from_board(board, layer_name: str = "User.1") -> List["G
     if layer_id is None or layer_id < 0:
         return []
 
-    seg_shape = getattr(pcbnew, 'S_SEGMENT', getattr(pcbnew, 'SHAPE_T_SEGMENT', None))
-    poly_shape = getattr(pcbnew, 'S_POLYGON', getattr(pcbnew, 'SHAPE_T_POLY', None))
+    seg_shape = getattr(pcbnew, "S_SEGMENT", getattr(pcbnew, "SHAPE_T_SEGMENT", None))
+    poly_shape = getattr(pcbnew, "S_POLYGON", getattr(pcbnew, "SHAPE_T_POLY", None))
     to_mm = pcbnew.ToMM
     segments = []
-    paths: List[GuidePath] = []
+    paths: list[GuidePath] = []
     for drawing in board.GetDrawings():
         try:
             if drawing.GetLayer() != layer_id:
@@ -618,7 +651,7 @@ def extract_guide_paths_from_board(board, layer_name: str = "User.1") -> List["G
     return paths
 
 
-def parse_keepout_zones(content: str, layer: str) -> List["GuidePath"]:
+def parse_keepout_zones(content: str, layer: str) -> list["GuidePath"]:
     """Parse user-drawn closed keepout polygons on a given layer from file content.
 
     Reads gr_poly and gr_rect graphics on the named layer (e.g. "User.2") and
@@ -633,7 +666,7 @@ def parse_keepout_zones(content: str, layer: str) -> List["GuidePath"]:
         List of closed GuidePath (mm coordinates). Empty if none found.
     """
     layer_re = re.escape(layer)
-    zones: List[GuidePath] = []
+    zones: list[GuidePath] = []
 
     # gr_poly: a closed polygon with a (pts (xy ..) (xy ..) ...) block.
     for points in _parse_gr_polys_on_layer(content, layer):
@@ -642,21 +675,20 @@ def parse_keepout_zones(content: str, layer: str) -> List["GuidePath"]:
 
     # gr_rect: a rectangle given by opposite corners -> 4-vertex closed box.
     rect_pattern = (
-        r'\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\)'
-        + _GR_ELEMENT_GAP + r'\(layer\s+"' + layer_re + r'"\)'
+        r"\(gr_rect\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s+\(end\s+([\d.-]+)\s+([\d.-]+)\)"
+        + _GR_ELEMENT_GAP
+        + r'\(layer\s+"'
+        + layer_re
+        + r'"\)'
     )
     for m in re.finditer(rect_pattern, content, re.DOTALL):
-        x1, y1, x2, y2 = (float(m.group(1)), float(m.group(2)),
-                          float(m.group(3)), float(m.group(4)))
-        zones.append(GuidePath(
-            layer=layer,
-            points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
-            is_closed=True))
+        x1, y1, x2, y2 = (float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)))
+        zones.append(GuidePath(layer=layer, points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)], is_closed=True))
 
     return zones
 
 
-def extract_keepout_zones_from_board(board, layer_name: str = "User.2") -> List["GuidePath"]:
+def extract_keepout_zones_from_board(board, layer_name: str = "User.2") -> list["GuidePath"]:
     """Read user-layer closed keepout polygons from a live pcbnew board (best-effort)."""
     import pcbnew
 
@@ -667,10 +699,10 @@ def extract_keepout_zones_from_board(board, layer_name: str = "User.2") -> List[
     if layer_id is None or layer_id < 0:
         return []
 
-    poly_shape = getattr(pcbnew, 'S_POLYGON', getattr(pcbnew, 'SHAPE_T_POLY', None))
-    rect_shape = getattr(pcbnew, 'S_RECT', getattr(pcbnew, 'SHAPE_T_RECT', None))
+    poly_shape = getattr(pcbnew, "S_POLYGON", getattr(pcbnew, "SHAPE_T_POLY", None))
+    rect_shape = getattr(pcbnew, "S_RECT", getattr(pcbnew, "SHAPE_T_RECT", None))
     to_mm = pcbnew.ToMM
-    zones: List[GuidePath] = []
+    zones: list[GuidePath] = []
     for drawing in board.GetDrawings():
         try:
             if drawing.GetLayer() != layer_id:
@@ -691,19 +723,18 @@ def extract_keepout_zones_from_board(board, layer_name: str = "User.2") -> List[
             try:
                 s, e = drawing.GetStart(), drawing.GetEnd()
                 x1, y1, x2, y2 = to_mm(s.x), to_mm(s.y), to_mm(e.x), to_mm(e.y)
-                zones.append(GuidePath(
-                    layer=layer_name,
-                    points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)],
-                    is_closed=True))
+                zones.append(
+                    GuidePath(layer=layer_name, points=[(x1, y1), (x2, y1), (x2, y2), (x1, y2)], is_closed=True)
+                )
             except Exception:
                 continue
 
     return zones
 
 
-def _chain_segments_into_contours(segments: List[Tuple[Tuple[float, float], Tuple[float, float]]],
-                                   tol: float = 0.01
-                                   ) -> List[List[Tuple[float, float]]]:
+def _chain_segments_into_contours(
+    segments: list[tuple[tuple[float, float], tuple[float, float]]], tol: float = 0.01
+) -> list[list[tuple[float, float]]]:
     """Chain line segments into closed polygon contours.
 
     Groups segments by connectivity (shared endpoints), chains each group
@@ -732,6 +763,7 @@ def _chain_segments_into_contours(segments: List[Tuple[Tuple[float, float], Tupl
     # Build spatial index: bucket endpoints for fast lookup
     bucket_size = tol * 2
     from collections import defaultdict
+
     endpoint_buckets = defaultdict(list)
     for i, seg in enumerate(segments):
         for pt in [seg[0], seg[1]]:
@@ -751,7 +783,7 @@ def _chain_segments_into_contours(segments: List[Tuple[Tuple[float, float], Tupl
                         if j <= i:
                             continue
                         seg_j = segments[j]
-                        if (approx_equal(pt, seg_j[0]) or approx_equal(pt, seg_j[1])):
+                        if approx_equal(pt, seg_j[0]) or approx_equal(pt, seg_j[1]):
                             union(i, j)
 
     # Group segments by component
@@ -822,7 +854,7 @@ def _chain_segments_into_contours(segments: List[Tuple[Tuple[float, float], Tupl
     return contours
 
 
-def extract_board_outline(content: str) -> List[Tuple[float, float]]:
+def extract_board_outline(content: str) -> list[tuple[float, float]]:
     """Extract board outline polygon from Edge.Cuts layer.
 
     Parses gr_line, gr_arc, and gr_rect segments and assembles them into
@@ -833,7 +865,7 @@ def extract_board_outline(content: str) -> List[Tuple[float, float]]:
     return outline
 
 
-def extract_board_contours(content: str) -> Tuple[List[Tuple[float, float]], List[List[Tuple[float, float]]]]:
+def extract_board_contours(content: str) -> tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]:
     """Extract board outline and cutout polygons from Edge.Cuts layer.
 
     Returns:
@@ -853,10 +885,7 @@ def extract_board_contours(content: str) -> Tuple[List[Tuple[float, float]], Lis
             vertices.add((round(seg[0][0], 3), round(seg[0][1], 3)))
             vertices.add((round(seg[1][0], 3), round(seg[1][1], 3)))
         if len(vertices) == 4:
-            all_axis_aligned = all(
-                abs(s[0][0] - s[1][0]) < 0.001 or abs(s[0][1] - s[1][1]) < 0.001
-                for s in segments
-            )
+            all_axis_aligned = all(abs(s[0][0] - s[1][0]) < 0.001 or abs(s[0][1] - s[1][1]) < 0.001 for s in segments)
             if all_axis_aligned:
                 return [], []  # Simple rectangle, use bounding box
 
@@ -877,7 +906,7 @@ def extract_board_contours(content: str) -> Tuple[List[Tuple[float, float]], Lis
     return outline, cutouts
 
 
-def extract_nets(content: str, kicad_version: int = 0) -> Tuple[Dict[int, Net], Dict[str, int]]:
+def extract_nets(content: str, kicad_version: int = 0) -> tuple[dict[int, Net], dict[str, int]]:
     """Extract all net definitions.
 
     Returns:
@@ -885,7 +914,7 @@ def extract_nets(content: str, kicad_version: int = 0) -> Tuple[Dict[int, Net], 
         For KiCad 9, net_id comes from the file. For KiCad 10, synthetic IDs are assigned.
     """
     nets = {}
-    name_to_id: Dict[str, int] = {}
+    name_to_id: dict[str, int] = {}
 
     if kicad_version >= KICAD_10_MIN_VERSION:
         # KiCad 10 removes the top-level net table entirely.
@@ -912,10 +941,12 @@ def extract_nets(content: str, kicad_version: int = 0) -> Tuple[Dict[int, Net], 
     return nets, name_to_id
 
 
-def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: Dict[str, int] = None) -> Tuple[Dict[str, Footprint], Dict[int, List[Pad]]]:
+def extract_footprints_and_pads(
+    content: str, nets: dict[int, Net], name_to_id: dict[str, int] = None
+) -> tuple[dict[str, Footprint], dict[int, list[Pad]]]:
     """Extract footprints and their pads with global coordinates."""
     footprints = {}
-    pads_by_net: Dict[int, List[Pad]] = {}
+    pads_by_net: dict[int, list[Pad]] = {}
 
     # Find all footprints - need to handle nested parentheses properly
     # Strategy: find (footprint and then match balanced parens
@@ -926,9 +957,9 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
         depth = 0
         end = start
         for i, char in enumerate(content[start:], start):
-            if char == '(':
+            if char == "(":
                 depth += 1
-            elif char == ')':
+            elif char == ")":
                 depth -= 1
                 if depth == 0:
                     end = i + 1
@@ -943,7 +974,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
         fp_name = fp_name_match.group(1)
 
         # Extract position and rotation
-        at_match = re.search(r'\(at\s+([\d.-]+)\s+([\d.-]+)(?:\s+([\d.-]+))?\)', fp_text)
+        at_match = re.search(r"\(at\s+([\d.-]+)\s+([\d.-]+)(?:\s+([\d.-]+))?\)", fp_text)
         if not at_match:
             continue
 
@@ -970,7 +1001,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             y=fp_y,
             rotation=fp_rotation,
             layer=fp_layer,
-            value=value
+            value=value,
         )
 
         # Extract pads
@@ -985,9 +1016,9 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             depth = 0
             pad_end = pad_start
             for i, char in enumerate(fp_text[pad_start:], pad_start):
-                if char == '(':
+                if char == "(":
                     depth += 1
-                elif char == ')':
+                elif char == ")":
                     depth -= 1
                     if depth == 0:
                         pad_end = i + 1
@@ -1000,7 +1031,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             pad_shape = pad_match.group(3)  # circle, rect, roundrect, etc.
 
             # Extract pad local position and rotation
-            pad_at_match = re.search(r'\(at\s+([\d.-]+)\s+([\d.-]+)(?:\s+([\d.-]+))?\)', pad_text)
+            pad_at_match = re.search(r"\(at\s+([\d.-]+)\s+([\d.-]+)(?:\s+([\d.-]+))?\)", pad_text)
             if not pad_at_match:
                 continue
 
@@ -1012,7 +1043,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             total_rotation = (pad_rotation + fp_rotation) % 360
 
             # Extract size
-            size_match = re.search(r'\(size\s+([\d.-]+)\s+([\d.-]+)\)', pad_text)
+            size_match = re.search(r"\(size\s+([\d.-]+)\s+([\d.-]+)\)", pad_text)
             if size_match:
                 size_x = float(size_match.group(1))
                 size_y = float(size_match.group(2))
@@ -1028,7 +1059,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
                 size_x, size_y = size_y, size_x
 
             # Extract layers - use findall to get all quoted layer names
-            layers_section = re.search(r'\(layers\s+([^)]+)\)', pad_text)
+            layers_section = re.search(r"\(layers\s+([^)]+)\)", pad_text)
             pad_layers = []
             if layers_section:
                 pad_layers = re.findall(r'"([^"]+)"', layers_section.group(1))
@@ -1057,16 +1088,16 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
             pintype = pintype_match.group(1) if pintype_match else ""
 
             # Extract drill size for through-hole pads
-            drill_match = re.search(r'\(drill\s+([\d.]+)', pad_text)
+            drill_match = re.search(r"\(drill\s+([\d.]+)", pad_text)
             drill_size = float(drill_match.group(1)) if drill_match else 0.0
 
             # Extract roundrect_rratio for roundrect pads
-            rratio_match = re.search(r'\(roundrect_rratio\s+([\d.]+)\)', pad_text)
+            rratio_match = re.search(r"\(roundrect_rratio\s+([\d.]+)\)", pad_text)
             roundrect_rratio = float(rratio_match.group(1)) if rratio_match else 0.0
 
             # For custom pads, compute bounding box from primitives
-            if pad_shape == 'custom' and '(primitives' in pad_text:
-                prim_coords = re.findall(r'\(xy\s+([\d.-]+)\s+([\d.-]+)\)', pad_text)
+            if pad_shape == "custom" and "(primitives" in pad_text:
+                prim_coords = re.findall(r"\(xy\s+([\d.-]+)\s+([\d.-]+)\)", pad_text)
                 if prim_coords:
                     pxs = [float(x) for x, _ in prim_coords]
                     pys = [float(y) for _, y in prim_coords]
@@ -1098,7 +1129,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
                 pinfunction=pinfunction,
                 pintype=pintype,
                 drill=drill_size,
-                roundrect_rratio=roundrect_rratio
+                roundrect_rratio=roundrect_rratio,
             )
 
             footprint.pads.append(pad)
@@ -1117,7 +1148,7 @@ def extract_footprints_and_pads(content: str, nets: Dict[int, Net], name_to_id: 
     return footprints, pads_by_net
 
 
-def extract_vias(content: str, name_to_id: Dict[str, int] = None) -> List[Via]:
+def extract_vias(content: str, name_to_id: dict[str, int] = None) -> list[Via]:
     """Extract all vias from PCB file."""
     vias = []
 
@@ -1135,7 +1166,7 @@ def extract_vias(content: str, name_to_id: Dict[str, int] = None) -> List[Via]:
             layers=[m.group(5), m.group(6)],
             net_id=int(m.group(8)),
             uuid=m.group(9),
-            free=(free_value == "yes")
+            free=(free_value == "yes"),
         )
         vias.append(via)
 
@@ -1154,7 +1185,7 @@ def extract_vias(content: str, name_to_id: Dict[str, int] = None) -> List[Via]:
                 layers=[m.group(5), m.group(6)],
                 net_id=name_to_id.get(net_name, 0),
                 uuid=m.group(8),
-                free=False  # Parse free from content if present
+                free=False,  # Parse free from content if present
             )
             vias.append(via)
         # Check for free flag in matched vias
@@ -1168,7 +1199,7 @@ def extract_vias(content: str, name_to_id: Dict[str, int] = None) -> List[Via]:
     return vias
 
 
-def extract_segments(content: str, name_to_id: Dict[str, int] = None) -> List[Segment]:
+def extract_segments(content: str, name_to_id: dict[str, int] = None) -> list[Segment]:
     """Extract all track segments from PCB file."""
     segments = []
 
@@ -1189,7 +1220,7 @@ def extract_segments(content: str, name_to_id: Dict[str, int] = None) -> List[Se
             start_x_str=m.group(1),
             start_y_str=m.group(2),
             end_x_str=m.group(3),
-            end_y_str=m.group(4)
+            end_y_str=m.group(4),
         )
         segments.append(segment)
 
@@ -1210,7 +1241,7 @@ def extract_segments(content: str, name_to_id: Dict[str, int] = None) -> List[Se
                 start_x_str=m.group(1),
                 start_y_str=m.group(2),
                 end_x_str=m.group(3),
-                end_y_str=m.group(4)
+                end_y_str=m.group(4),
             )
             segments.append(segment)
 
@@ -1225,7 +1256,7 @@ def _iter_zone_blocks(content: str):
     content between the opening ``(zone`` line and its matching closing paren.
     Shared by :func:`extract_zones` and :func:`extract_keepouts`.
     """
-    zone_start_pattern = r'\r?\n\t\(zone\s*\r?\n'
+    zone_start_pattern = r"\r?\n\t\(zone\s*\r?\n"
     for start_match in re.finditer(zone_start_pattern, content):
         # Find the matching closing paren by counting balanced parens
         paren_count = 1
@@ -1233,19 +1264,19 @@ def _iter_zone_blocks(content: str):
         zone_end = None
         while pos < len(content) and paren_count > 0:
             char = content[pos]
-            if char == '(':
+            if char == "(":
                 paren_count += 1
-            elif char == ')':
+            elif char == ")":
                 paren_count -= 1
                 if paren_count == 0:
                     zone_end = pos
             pos += 1
         if zone_end is None:
             continue
-        yield content[start_match.end():zone_end]
+        yield content[start_match.end() : zone_end]
 
 
-def extract_zones(content: str, name_to_id: Dict[str, int] = None) -> List[Zone]:
+def extract_zones(content: str, name_to_id: dict[str, int] = None) -> list[Zone]:
     """Extract all filled zones from PCB file.
 
     Parses zone definitions including their net assignment, layer, and polygon outline.
@@ -1255,7 +1286,7 @@ def extract_zones(content: str, name_to_id: Dict[str, int] = None) -> List[Zone]
 
     for zone_content in _iter_zone_blocks(content):
         # Extract net id - try KiCad 9 format first, then KiCad 10
-        net_match = re.search(r'\(net\s+(\d+)\)', zone_content)
+        net_match = re.search(r"\(net\s+(\d+)\)", zone_content)
         if net_match:
             net_id = int(net_match.group(1))
         elif name_to_id:
@@ -1289,7 +1320,7 @@ def extract_zones(content: str, name_to_id: Dict[str, int] = None) -> List[Zone]
         uuid = uuid_match.group(1) if uuid_match else ""
 
         # Extract polygon points - find (pts ...) and extract xy coordinates
-        pts_start = zone_content.find('(pts')
+        pts_start = zone_content.find("(pts")
         if pts_start < 0:
             continue
 
@@ -1297,36 +1328,29 @@ def extract_zones(content: str, name_to_id: Dict[str, int] = None) -> List[Zone]
         paren_count = 0
         pts_end = pts_start
         for i in range(pts_start, len(zone_content)):
-            if zone_content[i] == '(':
+            if zone_content[i] == "(":
                 paren_count += 1
-            elif zone_content[i] == ')':
+            elif zone_content[i] == ")":
                 paren_count -= 1
                 if paren_count == 0:
                     pts_end = i
                     break
 
-        pts_content = zone_content[pts_start:pts_end + 1]
+        pts_content = zone_content[pts_start : pts_end + 1]
         # Parse all (xy x y) points
-        xy_pattern = r'\(xy\s+([\d.-]+)\s+([\d.-]+)\)'
-        polygon = [(float(m.group(1)), float(m.group(2)))
-                   for m in re.finditer(xy_pattern, pts_content)]
+        xy_pattern = r"\(xy\s+([\d.-]+)\s+([\d.-]+)\)"
+        polygon = [(float(m.group(1)), float(m.group(2))) for m in re.finditer(xy_pattern, pts_content)]
 
         if not polygon:
             continue
 
-        zone = Zone(
-            net_id=net_id,
-            net_name=net_name,
-            layer=layer,
-            polygon=polygon,
-            uuid=uuid
-        )
+        zone = Zone(net_id=net_id, net_name=net_name, layer=layer, polygon=polygon, uuid=uuid)
         zones.append(zone)
 
     return zones
 
 
-def extract_keepouts(content: str) -> List[dict]:
+def extract_keepouts(content: str) -> list[dict]:
     """Extract keep-out rule areas (zones with a (keepout ...) clause and no net fill).
 
     These define regions where tracks and/or vias are not allowed — e.g. an
@@ -1339,52 +1363,53 @@ def extract_keepouts(content: str) -> List[dict]:
         # The keepout clause holds nested sub-clauses, e.g.
         #   (keepout (tracks not_allowed) (vias not_allowed) (pads allowed) ...)
         # so capture its full balanced-paren body rather than just the first ).
-        ko_start = zc.find('(keepout')
+        ko_start = zc.find("(keepout")
         if ko_start < 0:
             continue
         pc = 0
         ko_end = ko_start
         for i in range(ko_start, len(zc)):
-            if zc[i] == '(':
+            if zc[i] == "(":
                 pc += 1
-            elif zc[i] == ')':
+            elif zc[i] == ")":
                 pc -= 1
                 if pc == 0:
                     ko_end = i
                     break
-        ko_body = zc[ko_start:ko_end + 1]
-        tracks_allowed = 'tracks not_allowed' not in ko_body
-        vias_allowed = 'vias not_allowed' not in ko_body
+        ko_body = zc[ko_start : ko_end + 1]
+        tracks_allowed = "tracks not_allowed" not in ko_body
+        vias_allowed = "vias not_allowed" not in ko_body
 
         # Layers: (layers "F.Cu" "In1.Cu" ...) or single (layer "F.Cu")
-        lm = re.search(r'\(layers\s+([^)]+)\)', zc) or re.search(r'\(layer\s+("[^"]+")\)', zc)
+        lm = re.search(r"\(layers\s+([^)]+)\)", zc) or re.search(r'\(layer\s+("[^"]+")\)', zc)
         layers = set(re.findall(r'"([^"]+)"', lm.group(1))) if lm else set()
 
         # Polygon (same parsing as filled zones)
-        pts_start = zc.find('(pts')
+        pts_start = zc.find("(pts")
         if pts_start < 0:
             continue
         pc = 0
         pts_end = pts_start
         for i in range(pts_start, len(zc)):
-            if zc[i] == '(':
+            if zc[i] == "(":
                 pc += 1
-            elif zc[i] == ')':
+            elif zc[i] == ")":
                 pc -= 1
                 if pc == 0:
                     pts_end = i
                     break
-        polygon = [(float(a), float(b)) for a, b in
-                   re.findall(r'\(xy\s+([\d.-]+)\s+([\d.-]+)\)', zc[pts_start:pts_end + 1])]
+        polygon = [
+            (float(a), float(b)) for a, b in re.findall(r"\(xy\s+([\d.-]+)\s+([\d.-]+)\)", zc[pts_start : pts_end + 1])
+        ]
         if len(polygon) < 3:
             continue
-        keepouts.append({'polygon': polygon, 'layers': layers,
-                         'tracks_allowed': tracks_allowed, 'vias_allowed': vias_allowed})
+        keepouts.append(
+            {"polygon": polygon, "layers": layers, "tracks_allowed": tracks_allowed, "vias_allowed": vias_allowed}
+        )
     return keepouts
 
 
-def parse_kicad_pcb(filepath: str, guide_layer: str = "User.1",
-                    keepout_layer: str = "User.2") -> PCBData:
+def parse_kicad_pcb(filepath: str, guide_layer: str = "User.1", keepout_layer: str = "User.2") -> PCBData:
     """
     Parse a KiCad PCB file and extract all routing-relevant information.
 
@@ -1396,7 +1421,7 @@ def parse_kicad_pcb(filepath: str, guide_layer: str = "User.1",
     Returns:
         PCBData object containing all parsed data
     """
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, encoding="utf-8") as f:
         content = f.read()
 
     kicad_version = detect_kicad_version(content)
@@ -1426,12 +1451,11 @@ def parse_kicad_pcb(filepath: str, guide_layer: str = "User.1",
         kicad_version=kicad_version,
         net_id_to_name=net_id_to_name,
         guide_paths=guide_paths,
-        keepout_zones=keepout_zones
+        keepout_zones=keepout_zones,
     )
 
 
-def build_pcb_data_from_board(board, guide_layer: str = "User.1",
-                              keepout_layer: str = "User.2") -> PCBData:
+def build_pcb_data_from_board(board, guide_layer: str = "User.1", keepout_layer: str = "User.2") -> PCBData:
     """Build PCBData directly from a pcbnew board object (no file I/O).
 
     This is much faster than parse_kicad_pcb() since it reads from pcbnew's
@@ -1449,11 +1473,11 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         return pcbnew.ToMM(val)
 
     # --- Build layer mappings ---
-    id_to_name = {pcbnew.F_Cu: 'F.Cu', pcbnew.B_Cu: 'B.Cu'}
+    id_to_name = {pcbnew.F_Cu: "F.Cu", pcbnew.B_Cu: "B.Cu"}
     for i in range(1, 31):
-        layer_id = getattr(pcbnew, f'In{i}_Cu', None)
+        layer_id = getattr(pcbnew, f"In{i}_Cu", None)
         if layer_id is not None:
-            id_to_name[layer_id] = f'In{i}.Cu'
+            id_to_name[layer_id] = f"In{i}.Cu"
 
     def get_layer_name(layer_id):
         if layer_id in id_to_name:
@@ -1463,31 +1487,35 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
     # --- Pad shape mapping ---
     pad_shape_map = {}
     for attr, name in [
-        ('PAD_SHAPE_CIRCLE', 'circle'),
-        ('PAD_SHAPE_RECT', 'rect'),
-        ('PAD_SHAPE_OVAL', 'oval'),
-        ('PAD_SHAPE_ROUNDRECT', 'roundrect'),
-        ('PAD_SHAPE_TRAPEZOID', 'trapezoid'),
-        ('PAD_SHAPE_CUSTOM', 'custom'),
-        ('PAD_SHAPE_CHAMFERED_RECT', 'roundrect'),
+        ("PAD_SHAPE_CIRCLE", "circle"),
+        ("PAD_SHAPE_RECT", "rect"),
+        ("PAD_SHAPE_OVAL", "oval"),
+        ("PAD_SHAPE_ROUNDRECT", "roundrect"),
+        ("PAD_SHAPE_TRAPEZOID", "trapezoid"),
+        ("PAD_SHAPE_CUSTOM", "custom"),
+        ("PAD_SHAPE_CHAMFERED_RECT", "roundrect"),
     ]:
         val = getattr(pcbnew, attr, None)
         if val is not None:
             pad_shape_map[val] = name
     # KiCad 10 enum class: pcbnew.PAD_SHAPE.CIRCLE, etc.
-    pad_shape_enum = getattr(pcbnew, 'PAD_SHAPE', None)
+    pad_shape_enum = getattr(pcbnew, "PAD_SHAPE", None)
     if pad_shape_enum is not None:
         for member, name in [
-            ('CIRCLE', 'circle'), ('RECTANGLE', 'rect'), ('OVAL', 'oval'),
-            ('ROUNDRECT', 'roundrect'), ('TRAPEZOID', 'trapezoid'),
-            ('CUSTOM', 'custom'), ('CHAMFERED_RECT', 'roundrect'),
+            ("CIRCLE", "circle"),
+            ("RECTANGLE", "rect"),
+            ("OVAL", "oval"),
+            ("ROUNDRECT", "roundrect"),
+            ("TRAPEZOID", "trapezoid"),
+            ("CUSTOM", "custom"),
+            ("CHAMFERED_RECT", "roundrect"),
         ]:
             val = getattr(pad_shape_enum, member, None)
             if val is not None and val not in pad_shape_map:
                 pad_shape_map[val] = name
 
     def get_pad_shape_name(shape_enum):
-        return pad_shape_map.get(shape_enum, 'rect')
+        return pad_shape_map.get(shape_enum, "rect")
 
     def get_pad_layers(pad):
         """Get layer names from a pad's layer set, using wildcards to match file format."""
@@ -1497,35 +1525,35 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         # Check copper layers - use *.Cu wildcard if pad is on ALL copper layers
         copper_on = [lname for lid, lname in id_to_name.items() if layer_set.Contains(lid)]
         if len(copper_on) == len(id_to_name):
-            layers.append('*.Cu')
+            layers.append("*.Cu")
         elif copper_on:
             layers.extend(copper_on)
 
         # Check mask layers - use *.Mask wildcard if both present
-        f_mask_id = getattr(pcbnew, 'F_Mask', None)
-        b_mask_id = getattr(pcbnew, 'B_Mask', None)
+        f_mask_id = getattr(pcbnew, "F_Mask", None)
+        b_mask_id = getattr(pcbnew, "B_Mask", None)
         has_f_mask = f_mask_id is not None and layer_set.Contains(f_mask_id)
         has_b_mask = b_mask_id is not None and layer_set.Contains(b_mask_id)
         if has_f_mask and has_b_mask:
-            layers.append('*.Mask')
+            layers.append("*.Mask")
         else:
             if has_f_mask:
-                layers.append('F.Mask')
+                layers.append("F.Mask")
             if has_b_mask:
-                layers.append('B.Mask')
+                layers.append("B.Mask")
 
         # Check paste layers - use *.Paste wildcard if both present
-        f_paste_id = getattr(pcbnew, 'F_Paste', None)
-        b_paste_id = getattr(pcbnew, 'B_Paste', None)
+        f_paste_id = getattr(pcbnew, "F_Paste", None)
+        b_paste_id = getattr(pcbnew, "B_Paste", None)
         has_f_paste = f_paste_id is not None and layer_set.Contains(f_paste_id)
         has_b_paste = b_paste_id is not None and layer_set.Contains(b_paste_id)
         if has_f_paste and has_b_paste:
-            layers.append('*.Paste')
+            layers.append("*.Paste")
         else:
             if has_f_paste:
-                layers.append('F.Paste')
+                layers.append("F.Paste")
             if has_b_paste:
-                layers.append('B.Paste')
+                layers.append("B.Paste")
 
         return layers
 
@@ -1545,10 +1573,10 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
     # produced a degenerate (0,0,0,0) board_bounds.
     board_bounds = None
     try:
-        edge_cuts_id = getattr(pcbnew, 'Edge_Cuts', None)
+        edge_cuts_id = getattr(pcbnew, "Edge_Cuts", None)
         if edge_cuts_id is not None:
-            bmin_x = bmin_y = float('inf')
-            bmax_x = bmax_y = float('-inf')
+            bmin_x = bmin_y = float("inf")
+            bmax_x = bmax_y = float("-inf")
             found_edge = False
             for drawing in board.GetDrawings():
                 if drawing.GetLayer() != edge_cuts_id:
@@ -1581,9 +1609,12 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         try:
             bbox = board.GetBoardEdgesBoundingBox()
             if bbox.GetWidth() > 0 and bbox.GetHeight() > 0:
-                board_bounds = (to_mm(bbox.GetX()), to_mm(bbox.GetY()),
-                                to_mm(bbox.GetX() + bbox.GetWidth()),
-                                to_mm(bbox.GetY() + bbox.GetHeight()))
+                board_bounds = (
+                    to_mm(bbox.GetX()),
+                    to_mm(bbox.GetY()),
+                    to_mm(bbox.GetX() + bbox.GetWidth()),
+                    to_mm(bbox.GetY() + bbox.GetHeight()),
+                )
         except Exception:
             pass
 
@@ -1599,7 +1630,7 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         board_bounds=board_bounds,
         stackup=stackup,
         board_outline=board_outline,
-        board_cutouts=board_cutouts
+        board_cutouts=board_cutouts,
     )
 
     # --- Extract nets ---
@@ -1624,7 +1655,7 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
 
     # --- Extract footprints and pads ---
     footprints = {}
-    pads_by_net: Dict[int, List[Pad]] = {}
+    pads_by_net: dict[int, list[Pad]] = {}
 
     for fp in board.GetFootprints():
         reference = fp.GetReference()
@@ -1668,7 +1699,7 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
             y=fp_y,
             rotation=fp_rotation,
             layer=fp_layer,
-            value=fp_value
+            value=fp_value,
         )
 
         # Extract pads
@@ -1761,7 +1792,7 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
                 pinfunction=pinfunction,
                 pintype=pintype,
                 drill=drill,
-                roundrect_rratio=roundrect_rratio
+                roundrect_rratio=roundrect_rratio,
             )
 
             footprint.pads.append(pad_obj)
@@ -1822,7 +1853,7 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         pads_by_net=pads_by_net,
         zones=zones,
         guide_paths=guide_paths,
-        keepout_zones=keepout_zones
+        keepout_zones=keepout_zones,
     )
 
 
@@ -1855,7 +1886,7 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
     """
     import pcbnew
 
-    edge_cuts_id = getattr(pcbnew, 'Edge_Cuts', None)
+    edge_cuts_id = getattr(pcbnew, "Edge_Cuts", None)
     if edge_cuts_id is None:
         return [], []
 
@@ -1863,16 +1894,16 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
     # KiCad 8: S_SEGMENT, S_RECT, S_ARC
     # KiCad 9: SHAPE_T_SEGMENT, SHAPE_T_RECT, SHAPE_T_ARC
     # KiCad 10: SHAPE_T.SEGMENT, SHAPE_T.RECT, SHAPE_T.ARC (enum class)
-    shape_t = getattr(pcbnew, 'SHAPE_T', None)
-    SHAPE_SEGMENT = getattr(shape_t, 'SEGMENT', None) if shape_t else None
-    SHAPE_RECT = getattr(shape_t, 'RECT', None) if shape_t else None
-    SHAPE_ARC = getattr(shape_t, 'ARC', None) if shape_t else None
+    shape_t = getattr(pcbnew, "SHAPE_T", None)
+    SHAPE_SEGMENT = getattr(shape_t, "SEGMENT", None) if shape_t else None
+    SHAPE_RECT = getattr(shape_t, "RECT", None) if shape_t else None
+    SHAPE_ARC = getattr(shape_t, "ARC", None) if shape_t else None
     if SHAPE_SEGMENT is None:
-        SHAPE_SEGMENT = getattr(pcbnew, 'SHAPE_T_SEGMENT', getattr(pcbnew, 'S_SEGMENT', -1))
+        SHAPE_SEGMENT = getattr(pcbnew, "SHAPE_T_SEGMENT", getattr(pcbnew, "S_SEGMENT", -1))
     if SHAPE_RECT is None:
-        SHAPE_RECT = getattr(pcbnew, 'SHAPE_T_RECT', getattr(pcbnew, 'S_RECT', -2))
+        SHAPE_RECT = getattr(pcbnew, "SHAPE_T_RECT", getattr(pcbnew, "S_RECT", -2))
     if SHAPE_ARC is None:
-        SHAPE_ARC = getattr(pcbnew, 'SHAPE_T_ARC', getattr(pcbnew, 'S_ARC', -3))
+        SHAPE_ARC = getattr(pcbnew, "SHAPE_T_ARC", getattr(pcbnew, "S_ARC", -3))
 
     segments = []
     for drawing in board.GetDrawings():
@@ -1886,10 +1917,7 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
                 if shape_type == SHAPE_SEGMENT:
                     start = drawing.GetStart()
                     end = drawing.GetEnd()
-                    segments.append((
-                        (to_mm(start.x), to_mm(start.y)),
-                        (to_mm(end.x), to_mm(end.y))
-                    ))
+                    segments.append(((to_mm(start.x), to_mm(start.y)), (to_mm(end.x), to_mm(end.y))))
                 elif shape_type == SHAPE_RECT:
                     start = drawing.GetStart()
                     end = drawing.GetEnd()
@@ -1903,11 +1931,11 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
                     start = drawing.GetStart()
                     mid = drawing.GetArcMid()
                     end = drawing.GetEnd()
-                    segments.extend(_arc_to_segments(
-                        (to_mm(start.x), to_mm(start.y)),
-                        (to_mm(mid.x), to_mm(mid.y)),
-                        (to_mm(end.x), to_mm(end.y))
-                    ))
+                    segments.extend(
+                        _arc_to_segments(
+                            (to_mm(start.x), to_mm(start.y)), (to_mm(mid.x), to_mm(mid.y)), (to_mm(end.x), to_mm(end.y))
+                        )
+                    )
             except Exception:
                 continue
 
@@ -1921,10 +1949,7 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
             vertices.add((round(seg[0][0], 3), round(seg[0][1], 3)))
             vertices.add((round(seg[1][0], 3), round(seg[1][1], 3)))
         if len(vertices) == 4:
-            all_axis_aligned = all(
-                abs(s[0][0] - s[1][0]) < 0.001 or abs(s[0][1] - s[1][1]) < 0.001
-                for s in segments
-            )
+            all_axis_aligned = all(abs(s[0][0] - s[1][0]) < 0.001 or abs(s[0][1] - s[1][1]) < 0.001 for s in segments)
             if all_axis_aligned:
                 return [], []
 
@@ -1959,16 +1984,22 @@ def _extract_stackup_from_pcbnew(board, to_mm):
             try:
                 layer_name = item.GetLayerName()
                 type_name = item.GetTypeName()
-                if type_name not in ('copper', 'core', 'prepreg', 'dielectric'):
+                if type_name not in ("copper", "core", "prepreg", "dielectric"):
                     continue
                 thickness = to_mm(item.GetThickness())
-                epsilon_r = getattr(item, 'GetEpsilonR', lambda: 0.0)()
-                loss_tangent = getattr(item, 'GetLossTangent', lambda: 0.0)()
-                material = getattr(item, 'GetMaterial', lambda: "")()
-                stackup.append(StackupLayer(
-                    name=layer_name, layer_type=type_name, thickness=thickness,
-                    epsilon_r=epsilon_r, loss_tangent=loss_tangent, material=material
-                ))
+                epsilon_r = getattr(item, "GetEpsilonR", lambda: 0.0)()
+                loss_tangent = getattr(item, "GetLossTangent", lambda: 0.0)()
+                material = getattr(item, "GetMaterial", lambda: "")()
+                stackup.append(
+                    StackupLayer(
+                        name=layer_name,
+                        layer_type=type_name,
+                        thickness=thickness,
+                        epsilon_r=epsilon_r,
+                        loss_tangent=loss_tangent,
+                        material=material,
+                    )
+                )
             except Exception:
                 continue
     except Exception:
@@ -1981,7 +2012,7 @@ def _extract_stackup_from_pcbnew(board, to_mm):
     try:
         board_filename = board.GetFileName()
         if board_filename:
-            with open(board_filename, 'r', encoding='utf-8') as f:
+            with open(board_filename, encoding="utf-8") as f:
                 content = f.read(8192)  # Stackup is near the top of the file
             stackup = extract_stackup(content)
     except Exception:
@@ -2015,12 +2046,7 @@ def _extract_zones_from_pcbnew(board, to_mm, get_layer_name):
             if not polygon:
                 continue
 
-            zone_obj = Zone(
-                net_id=net_id,
-                net_name=net_name,
-                layer=layer,
-                polygon=polygon
-            )
+            zone_obj = Zone(net_id=net_id, net_name=net_name, layer=layer, polygon=polygon)
             zones.append(zone_obj)
     except Exception:
         pass
@@ -2028,7 +2054,7 @@ def _extract_zones_from_pcbnew(board, to_mm, get_layer_name):
     return zones
 
 
-def compare_pcb_data(from_board: 'PCBData', from_file: 'PCBData', tolerance: float = 0.01) -> List[str]:
+def compare_pcb_data(from_board: "PCBData", from_file: "PCBData", tolerance: float = 0.01) -> list[str]:
     """Compare two PCBData objects and return list of differences.
 
     Useful for validating that build_pcb_data_from_board() produces the same
@@ -2054,7 +2080,7 @@ def compare_pcb_data(from_board: 'PCBData', from_file: 'PCBData', tolerance: flo
         diffs.append(f"Copper layers differ: board={bi_b.copper_layers} file={bi_f.copper_layers}")
 
     if bi_b.board_bounds and bi_f.board_bounds:
-        for i, label in enumerate(['min_x', 'min_y', 'max_x', 'max_y']):
+        for i, label in enumerate(["min_x", "min_y", "max_x", "max_y"]):
             if not close(bi_b.board_bounds[i], bi_f.board_bounds[i]):
                 diffs.append(f"Board bounds {label}: board={bi_b.board_bounds[i]:.3f} file={bi_f.board_bounds[i]:.3f}")
     elif bi_b.board_bounds != bi_f.board_bounds:
@@ -2112,13 +2138,17 @@ def compare_pcb_data(from_board: 'PCBData', from_file: 'PCBData', tolerance: flo
                     diffs.append(f"Footprint {ref} pad number mismatch: board={bp.pad_number} file={fp.pad_number}")
                     continue
                 if not close(bp.global_x, fp.global_x) or not close(bp.global_y, fp.global_y):
-                    diffs.append(f"Pad {ref}:{bp.pad_number} position: board=({bp.global_x:.3f},{bp.global_y:.3f}) file=({fp.global_x:.3f},{fp.global_y:.3f})")
+                    diffs.append(
+                        f"Pad {ref}:{bp.pad_number} position: board=({bp.global_x:.3f},{bp.global_y:.3f}) file=({fp.global_x:.3f},{fp.global_y:.3f})"
+                    )
                 if bp.net_id != fp.net_id:
                     diffs.append(f"Pad {ref}:{bp.pad_number} net_id: board={bp.net_id} file={fp.net_id}")
                 if bp.shape != fp.shape:
                     diffs.append(f"Pad {ref}:{bp.pad_number} shape: board={bp.shape} file={fp.shape}")
                 if not close(bp.size_x, fp.size_x) or not close(bp.size_y, fp.size_y):
-                    diffs.append(f"Pad {ref}:{bp.pad_number} size: board=({bp.size_x:.3f},{bp.size_y:.3f}) file=({fp.size_x:.3f},{fp.size_y:.3f})")
+                    diffs.append(
+                        f"Pad {ref}:{bp.pad_number} size: board=({bp.size_x:.3f},{bp.size_y:.3f}) file=({fp.size_x:.3f},{fp.size_y:.3f})"
+                    )
                 if not close(bp.drill, fp.drill):
                     diffs.append(f"Pad {ref}:{bp.pad_number} drill: board={bp.drill:.3f} file={fp.drill:.3f}")
                 # Compare layers (as sets since order may differ)
@@ -2146,7 +2176,9 @@ def compare_pcb_data(from_board: 'PCBData', from_file: 'PCBData', tolerance: flo
             if bz.layer != fz.layer:
                 diffs.append(f"Zone layer mismatch: board={bz.layer} file={fz.layer}")
             if len(bz.polygon) != len(fz.polygon):
-                diffs.append(f"Zone net={bz.net_id} layer={bz.layer} vertex count: board={len(bz.polygon)} file={len(fz.polygon)}")
+                diffs.append(
+                    f"Zone net={bz.net_id} layer={bz.layer} vertex count: board={len(bz.polygon)} file={len(fz.polygon)}"
+                )
 
     return diffs
 
@@ -2155,7 +2187,7 @@ def save_extracted_data(pcb_data: PCBData, output_path: str):
     """Save extracted PCB data to JSON file."""
 
     def serialize(obj):
-        if hasattr(obj, '__dict__'):
+        if hasattr(obj, "__dict__"):
             return {k: serialize(v) for k, v in obj.__dict__.items()}
         elif isinstance(obj, dict):
             return {str(k): serialize(v) for k, v in obj.items()}
@@ -2166,14 +2198,16 @@ def save_extracted_data(pcb_data: PCBData, output_path: str):
 
     data = serialize(pcb_data)
 
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 
-def get_nets_to_route(pcb_data: PCBData,
-                      net_patterns: Optional[List[str]] = None,
-                      exclude_patterns: Optional[List[str]] = None,
-                      component_ref: Optional[str] = None) -> List[Net]:
+def get_nets_to_route(
+    pcb_data: PCBData,
+    net_patterns: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+    component_ref: str | None = None,
+) -> list[Net]:
     """
     Get nets that need routing based on filters.
 
@@ -2189,7 +2223,7 @@ def get_nets_to_route(pcb_data: PCBData,
     import fnmatch
 
     if exclude_patterns is None:
-        exclude_patterns = ['*GND*', '*VCC*', '*VDD*', '*unconnected*', '*NC*', '']
+        exclude_patterns = ["*GND*", "*VCC*", "*VDD*", "*unconnected*", "*NC*", ""]
 
     routes = []
 
@@ -2242,21 +2276,21 @@ def detect_package_type(footprint: Footprint) -> str:
     fp_name = footprint.footprint_name.upper()
 
     # Check footprint name first
-    if 'BGA' in fp_name or 'FBGA' in fp_name or 'LFBGA' in fp_name:
-        return 'BGA'
-    if 'QFN' in fp_name or 'DFN' in fp_name or 'MLF' in fp_name:
-        return 'QFN'
-    if 'QFP' in fp_name or 'LQFP' in fp_name or 'TQFP' in fp_name:
-        return 'QFP'
-    if 'SOIC' in fp_name or 'SOP' in fp_name or 'SSOP' in fp_name or 'TSSOP' in fp_name:
-        return 'SOIC'
-    if 'DIP' in fp_name or 'PDIP' in fp_name:
-        return 'DIP'
+    if "BGA" in fp_name or "FBGA" in fp_name or "LFBGA" in fp_name:
+        return "BGA"
+    if "QFN" in fp_name or "DFN" in fp_name or "MLF" in fp_name:
+        return "QFN"
+    if "QFP" in fp_name or "LQFP" in fp_name or "TQFP" in fp_name:
+        return "QFP"
+    if "SOIC" in fp_name or "SOP" in fp_name or "SSOP" in fp_name or "TSSOP" in fp_name:
+        return "SOIC"
+    if "DIP" in fp_name or "PDIP" in fp_name:
+        return "DIP"
 
     # Analyze pad arrangement if name doesn't indicate type
     pads = footprint.pads
     if len(pads) < 4:
-        return 'OTHER'
+        return "OTHER"
 
     # Get unique X and Y positions
     x_positions = sorted(set(round(p.global_x, POSITION_DECIMALS) for p in pads))
@@ -2277,10 +2311,12 @@ def detect_package_type(footprint: Footprint) -> str:
         tolerance = 0.1
 
         for pad in pads:
-            on_edge = (abs(pad.global_x - min_x) < tolerance or
-                      abs(pad.global_x - max_x) < tolerance or
-                      abs(pad.global_y - min_y) < tolerance or
-                      abs(pad.global_y - max_y) < tolerance)
+            on_edge = (
+                abs(pad.global_x - min_x) < tolerance
+                or abs(pad.global_x - max_x) < tolerance
+                or abs(pad.global_y - min_y) < tolerance
+                or abs(pad.global_y - max_y) < tolerance
+            )
             if on_edge:
                 perimeter_pads += 1
             else:
@@ -2288,20 +2324,20 @@ def detect_package_type(footprint: Footprint) -> str:
 
         # BGA has many interior pads, QFN/QFP has mostly perimeter pads
         if interior_pads > perimeter_pads:
-            return 'BGA'
+            return "BGA"
         elif perimeter_pads > 0:
             # Check pad shapes - QFN typically has rectangular pads, BGA has circular
-            circular_pads = sum(1 for p in pads if p.shape in ('circle', 'oval'))
-            rect_pads = sum(1 for p in pads if p.shape in ('rect', 'roundrect'))
+            circular_pads = sum(1 for p in pads if p.shape in ("circle", "oval"))
+            rect_pads = sum(1 for p in pads if p.shape in ("rect", "roundrect"))
             if rect_pads > circular_pads:
-                return 'QFN'
+                return "QFN"
             else:
-                return 'BGA'
+                return "BGA"
 
-    return 'OTHER'
+    return "OTHER"
 
 
-def get_footprint_bounds(footprint: Footprint, margin: float = 0.0) -> Tuple[float, float, float, float]:
+def get_footprint_bounds(footprint: Footprint, margin: float = 0.0) -> tuple[float, float, float, float]:
     """
     Get the bounding box of a footprint based on its pad positions.
 
@@ -2314,18 +2350,17 @@ def get_footprint_bounds(footprint: Footprint, margin: float = 0.0) -> Tuple[flo
     """
     if not footprint.pads:
         # Fall back to footprint position if no pads
-        return (footprint.x - margin, footprint.y - margin,
-                footprint.x + margin, footprint.y + margin)
+        return (footprint.x - margin, footprint.y - margin, footprint.x + margin, footprint.y + margin)
 
-    min_x = min(p.global_x - p.size_x/2 for p in footprint.pads)
-    max_x = max(p.global_x + p.size_x/2 for p in footprint.pads)
-    min_y = min(p.global_y - p.size_y/2 for p in footprint.pads)
-    max_y = max(p.global_y + p.size_y/2 for p in footprint.pads)
+    min_x = min(p.global_x - p.size_x / 2 for p in footprint.pads)
+    max_x = max(p.global_x + p.size_x / 2 for p in footprint.pads)
+    min_y = min(p.global_y - p.size_y / 2 for p in footprint.pads)
+    max_y = max(p.global_y + p.size_y / 2 for p in footprint.pads)
 
     return (min_x - margin, min_y - margin, max_x + margin, max_y + margin)
 
 
-def find_components_by_type(pcb_data: 'PCBData', package_type: str) -> List[Footprint]:
+def find_components_by_type(pcb_data: "PCBData", package_type: str) -> list[Footprint]:
     """
     Find all components of a specific package type.
 
@@ -2359,10 +2394,10 @@ def detect_bga_pitch(footprint: Footprint) -> float:
 
     pitches = []
     if len(x_positions) > 1:
-        x_diffs = [x_positions[i+1] - x_positions[i] for i in range(len(x_positions)-1)]
+        x_diffs = [x_positions[i + 1] - x_positions[i] for i in range(len(x_positions) - 1)]
         pitches.extend(x_diffs)
     if len(y_positions) > 1:
-        y_diffs = [y_positions[i+1] - y_positions[i] for i in range(len(y_positions)-1)]
+        y_diffs = [y_positions[i + 1] - y_positions[i] for i in range(len(y_positions) - 1)]
         pitches.extend(y_diffs)
 
     if pitches:
@@ -2371,7 +2406,9 @@ def detect_bga_pitch(footprint: Footprint) -> float:
     return 1.0
 
 
-def auto_detect_bga_exclusion_zones(pcb_data: 'PCBData', margin: float = 0.5) -> List[Tuple[float, float, float, float, float]]:
+def auto_detect_bga_exclusion_zones(
+    pcb_data: "PCBData", margin: float = 0.5
+) -> list[tuple[float, float, float, float, float]]:
     """
     Auto-detect BGA exclusion zones from all BGA components in the PCB.
 
@@ -2389,7 +2426,7 @@ def auto_detect_bga_exclusion_zones(pcb_data: 'PCBData', margin: float = 0.5) ->
         List of (min_x, min_y, max_x, max_y, edge_tolerance) tuples for each BGA
     """
     zones = []
-    bga_components = find_components_by_type(pcb_data, 'BGA')
+    bga_components = find_components_by_type(pcb_data, "BGA")
 
     for fp in bga_components:
         bounds = get_footprint_bounds(fp, margin=margin)
@@ -2409,12 +2446,12 @@ if __name__ == "__main__":
         sys.exit(1)
 
     input_file = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else input_file.replace('.kicad_pcb', '_extracted.json')
+    output_file = sys.argv[2] if len(sys.argv) > 2 else input_file.replace(".kicad_pcb", "_extracted.json")
 
     print(f"Parsing {input_file}...")
     pcb_data = parse_kicad_pcb(input_file)
 
-    print(f"Found:")
+    print("Found:")
     print(f"  - {len(pcb_data.board_info.copper_layers)} copper layers: {pcb_data.board_info.copper_layers}")
     print(f"  - {len(pcb_data.nets)} nets")
     print(f"  - {len(pcb_data.footprints)} footprints")

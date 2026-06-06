@@ -23,7 +23,6 @@ import threading
 
 import wx
 
-
 # Mapping of pip package name -> import statement used to verify it. The
 # specific submodule imports catch broken/partial installs (e.g. shapely
 # without its native lib) better than a bare `import pkg`. Packages not in
@@ -60,7 +59,7 @@ def _parse_requirements(path):
     names = []
     if not os.path.isfile(path):
         return names
-    with open(path, "r") as f:
+    with open(path) as f:
         for raw in f:
             line = raw.split("#", 1)[0].strip()
             if not line or line.startswith("-") or "://" in line:
@@ -73,8 +72,7 @@ def _parse_requirements(path):
 
 def _required_packages():
     """Return [(pip_name, import_statement)] derived from requirements.txt."""
-    return [(name, IMPORT_TESTS.get(name, f"import {name}"))
-            for name in _parse_requirements(_requirements_path())]
+    return [(name, IMPORT_TESTS.get(name, f"import {name}")) for name in _parse_requirements(_requirements_path())]
 
 
 def _missing_packages():
@@ -109,8 +107,12 @@ def _find_python_executable():
             os.path.join(prefix, "Scripts", "python.exe"),
         ]
     else:
-        for name in (f"python{sys.version_info.major}.{sys.version_info.minor}",
-                     f"python{sys.version_info.major}", "python3", "python"):
+        for name in (
+            f"python{sys.version_info.major}.{sys.version_info.minor}",
+            f"python{sys.version_info.major}",
+            "python3",
+            "python",
+        ):
             candidates.append(os.path.join(prefix, "bin", name))
     for path in candidates:
         if os.path.isfile(path):
@@ -133,9 +135,7 @@ def _pip_install_threaded(packages, progress):
 
     def run():
         try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=600
-            )
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             result["returncode"] = proc.returncode
             result["stdout"] = proc.stdout or ""
             result["stderr"] = proc.stderr or ""
@@ -179,7 +179,9 @@ def ensure_dependencies(parent=None):
         f"({python_exe})"
     )
     dlg = wx.MessageDialog(
-        parent, msg, "Install missing dependencies",
+        parent,
+        msg,
+        "Install missing dependencies",
         wx.YES_NO | wx.ICON_QUESTION,
     )
     choice = dlg.ShowModal()
@@ -190,7 +192,8 @@ def ensure_dependencies(parent=None):
     progress = wx.ProgressDialog(
         "Installing dependencies",
         f"Running pip install {pkg_list}...\n\nThis may take a minute.",
-        maximum=100, parent=parent,
+        maximum=100,
+        parent=parent,
         style=wx.PD_APP_MODAL | wx.PD_CAN_ABORT | wx.PD_AUTO_HIDE,
     )
 
@@ -201,9 +204,11 @@ def ensure_dependencies(parent=None):
         wx.MessageBox(
             f"pip install failed.\n\n"
             f"You may need to install manually with:\n"
-            f"  \"{python_exe}\" -m pip install {pkg_list}\n\n"
+            f'  "{python_exe}" -m pip install {pkg_list}\n\n'
             f"Output:\n{log[-2000:]}",
-            "Install failed", wx.OK | wx.ICON_ERROR, parent=parent,
+            "Install failed",
+            wx.OK | wx.ICON_ERROR,
+            parent=parent,
         )
         return False
 
@@ -212,7 +217,9 @@ def ensure_dependencies(parent=None):
         wx.MessageBox(
             "Dependencies were installed but are still not importable in this "
             "KiCad session. Please restart KiCad and try again.",
-            "Restart required", wx.OK | wx.ICON_INFORMATION, parent=parent,
+            "Restart required",
+            wx.OK | wx.ICON_INFORMATION,
+            parent=parent,
         )
         return False
 

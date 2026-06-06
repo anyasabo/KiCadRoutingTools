@@ -5,13 +5,12 @@ Functions for querying pads, nets, differential pairs, and computing
 MPS (Maximum Planar Subset) net ordering.
 """
 
-import math
 import fnmatch
+import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Set, Union
 
 
-def matches_net_filter(net_name: str, patterns: List[str]) -> bool:
+def matches_net_filter(net_name: str, patterns: list[str]) -> bool:
     """
     Check if a net name matches a list of filter patterns.
 
@@ -40,8 +39,8 @@ def matches_net_filter(net_name: str, patterns: List[str]) -> bool:
     if not patterns:
         return True  # No filter = include all
 
-    include_patterns = [p for p in patterns if not p.startswith('!')]
-    exclude_patterns = [p[1:] for p in patterns if p.startswith('!')]
+    include_patterns = [p for p in patterns if not p.startswith("!")]
+    exclude_patterns = [p[1:] for p in patterns if p.startswith("!")]
 
     # Check exclusion first: if net matches any exclude pattern, reject it
     if exclude_patterns:
@@ -59,33 +58,41 @@ def matches_net_filter(net_name: str, patterns: List[str]) -> bool:
     # No include patterns (only exclusions) and didn't match any exclusion
     return True
 
-from kicad_parser import PCBData, Segment, Via, Pad
-from routing_config import GridRouteConfig, GridCoord, DiffPairNet
+
 from chip_boundary import (
-    build_chip_list, identify_chip_for_point, compute_far_side,
-    compute_boundary_position, crossings_from_boundary_order
+    build_chip_list,
+    compute_boundary_position,
+    compute_far_side,
+    crossings_from_boundary_order,
+    identify_chip_for_point,
 )
-from routing_utils import pos_key, segment_length
 from connectivity import (
-    find_connected_groups, find_stub_free_ends, get_net_routing_endpoints,
-    get_net_mst_segments, segments_intersect
+    find_connected_groups,
+    find_stub_free_ends,
+    get_net_mst_segments,
+    get_net_routing_endpoints,
+    segments_intersect,
 )
+from kicad_parser import Pad, PCBData, Segment, Via
+from routing_config import DiffPairNet
+from routing_utils import pos_key, segment_length
 
 
 @dataclass
 class MPSResult:
     """Extended result from MPS net ordering with conflict and layer information."""
-    ordered_ids: List[int]                                    # Ordered net IDs
-    conflicts: Dict[int, Set[int]]                            # unit_id -> set of conflicting unit_ids (layer-filtered)
-    unit_layers: Dict[int, Tuple[Set[str], Set[str]]]         # unit_id -> (src_layers, tgt_layers)
-    unit_to_nets: Dict[int, List[int]]                        # unit_id -> [net_ids]
-    unit_names: Dict[int, str]                                # unit_id -> display name
-    round_assignments: Dict[int, int]                         # unit_id -> round_number (1-indexed)
+
+    ordered_ids: list[int]  # Ordered net IDs
+    conflicts: dict[int, set[int]]  # unit_id -> set of conflicting unit_ids (layer-filtered)
+    unit_layers: dict[int, tuple[set[str], set[str]]]  # unit_id -> (src_layers, tgt_layers)
+    unit_to_nets: dict[int, list[int]]  # unit_id -> [net_ids]
+    unit_names: dict[int, str]  # unit_id -> display name
+    round_assignments: dict[int, int]  # unit_id -> round_number (1-indexed)
     num_rounds: int
-    geometric_conflicts: Dict[int, Set[int]] = None           # All crossings regardless of layer (for swap checking)
+    geometric_conflicts: dict[int, set[int]] = None  # All crossings regardless of layer (for swap checking)
 
 
-def calculate_route_length(segments: List[Segment], vias: List[Via] = None, pcb_data=None) -> float:
+def calculate_route_length(segments: list[Segment], vias: list[Via] = None, pcb_data=None) -> float:
     """
     Calculate the total length of a routed path.
 
@@ -102,7 +109,7 @@ def calculate_route_length(segments: List[Segment], vias: List[Via] = None, pcb_
         total += segment_length(seg)
 
     # Add via barrel lengths if pcb_data with stackup is provided
-    if vias and pcb_data and hasattr(pcb_data, 'get_via_barrel_length'):
+    if vias and pcb_data and hasattr(pcb_data, "get_via_barrel_length"):
         for via in vias:
             if via.layers and len(via.layers) >= 2:
                 barrel_len = pcb_data.get_via_barrel_length(via.layers[0], via.layers[1])
@@ -111,7 +118,7 @@ def calculate_route_length(segments: List[Segment], vias: List[Via] = None, pcb_
     return total
 
 
-def calculate_via_barrel_length(vias: List[Via], pcb_data) -> float:
+def calculate_via_barrel_length(vias: list[Via], pcb_data) -> float:
     """
     Calculate total via barrel length for a list of vias.
 
@@ -122,7 +129,7 @@ def calculate_via_barrel_length(vias: List[Via], pcb_data) -> float:
     Returns:
         Total via barrel length in mm
     """
-    if not vias or not pcb_data or not hasattr(pcb_data, 'get_via_barrel_length'):
+    if not vias or not pcb_data or not hasattr(pcb_data, "get_via_barrel_length"):
         return 0.0
 
     total = 0.0
@@ -132,7 +139,7 @@ def calculate_via_barrel_length(vias: List[Via], pcb_data) -> float:
     return total
 
 
-def find_pad_at_position(pcb_data: PCBData, x: float, y: float, tolerance: float = 0.01) -> Optional[Pad]:
+def find_pad_at_position(pcb_data: PCBData, x: float, y: float, tolerance: float = 0.01) -> Pad | None:
     """Find a pad at the given position within tolerance."""
     for pads in pcb_data.pads_by_net.values():
         for pad in pads:
@@ -141,8 +148,7 @@ def find_pad_at_position(pcb_data: PCBData, x: float, y: float, tolerance: float
     return None
 
 
-def expand_net_patterns(pcb_data: PCBData, patterns: List[str],
-                        exclude_unconnected: bool = True) -> List[str]:
+def expand_net_patterns(pcb_data: PCBData, patterns: list[str], exclude_unconnected: bool = True) -> list[str]:
     """
     Expand wildcard patterns to matching net names.
 
@@ -174,8 +180,7 @@ def expand_net_patterns(pcb_data: PCBData, patterns: List[str],
     # Filter out unconnected nets (KiCad pins not connected in schematic)
     # and empty net names
     if exclude_unconnected:
-        all_net_names = {name for name in all_net_names
-                        if name and not name.lower().startswith('unconnected-')}
+        all_net_names = {name for name in all_net_names if name and not name.lower().startswith("unconnected-")}
 
     all_net_names = list(all_net_names)
     result = []
@@ -184,9 +189,9 @@ def expand_net_patterns(pcb_data: PCBData, patterns: List[str],
 
     for pattern in patterns:
         # Check for exclusion pattern (starts with !)
-        if pattern.startswith('!'):
+        if pattern.startswith("!"):
             exclude_pattern = pattern[1:]  # Remove the !
-            if '*' in exclude_pattern or '?' in exclude_pattern:
+            if "*" in exclude_pattern or "?" in exclude_pattern:
                 # Wildcard exclusion
                 matches = [name for name in all_net_names if fnmatch.fnmatch(name, exclude_pattern)]
                 if matches:
@@ -203,10 +208,11 @@ def expand_net_patterns(pcb_data: PCBData, patterns: List[str],
                     result.remove(exclude_pattern)
                     seen.remove(exclude_pattern)
                     print(f"Excluded net '{exclude_pattern}'")
-        elif '*' in pattern or '?' in pattern:
+        elif "*" in pattern or "?" in pattern:
             # It's a wildcard pattern - find all matching nets
-            matches = sorted([name for name in all_net_names
-                            if fnmatch.fnmatch(name, pattern) and name not in excluded])
+            matches = sorted(
+                [name for name in all_net_names if fnmatch.fnmatch(name, pattern) and name not in excluded]
+            )
             if not matches:
                 print(f"Warning: Pattern '{pattern}' matched no nets")
             else:
@@ -225,9 +231,7 @@ def expand_net_patterns(pcb_data: PCBData, patterns: List[str],
     return result
 
 
-def identify_power_nets(pcb_data: PCBData,
-                        patterns: List[str],
-                        widths: List[float]) -> Dict[int, float]:
+def identify_power_nets(pcb_data: PCBData, patterns: list[str], widths: list[float]) -> dict[int, float]:
     """
     Identify power nets and map them to track widths based on pattern matching.
 
@@ -250,7 +254,7 @@ def identify_power_nets(pcb_data: PCBData,
     if len(patterns) != len(widths):
         raise ValueError(f"patterns ({len(patterns)}) and widths ({len(widths)}) must have same length")
 
-    power_net_widths: Dict[int, float] = {}
+    power_net_widths: dict[int, float] = {}
 
     # Collect all net names and IDs
     for net_id, net in pcb_data.nets.items():
@@ -266,7 +270,7 @@ def identify_power_nets(pcb_data: PCBData,
     return power_net_widths
 
 
-def extract_diff_pair_base(net_name: str) -> Optional[Tuple[str, bool]]:
+def extract_diff_pair_base(net_name: str) -> tuple[str, bool] | None:
     """
     Extract differential pair base name and polarity from net name.
 
@@ -286,43 +290,43 @@ def extract_diff_pair_base(net_name: str) -> Optional[Tuple[str, bool]]:
 
     # Try _t_X/_c_X pattern (DDR style with channel suffix, e.g., DQS0_t_A / DQS0_c_A)
     # Match _t_ or _c_ followed by any suffix
-    tc_match = re.match(r'^(.+)_([tc])_(.+)$', net_name)
+    tc_match = re.match(r"^(.+)_([tc])_(.+)$", net_name)
     if tc_match:
-        base = tc_match.group(1) + '_X_' + tc_match.group(3)  # Keep suffix in base for pairing
-        is_positive = tc_match.group(2) == 't'
+        base = tc_match.group(1) + "_X_" + tc_match.group(3)  # Keep suffix in base for pairing
+        is_positive = tc_match.group(2) == "t"
         return (base, is_positive)
 
     # Try _t/_c suffix (DDR style, e.g., CK_t / CK_c)
-    if net_name.endswith('_t'):
+    if net_name.endswith("_t"):
         return (net_name[:-2], True)
-    if net_name.endswith('_c'):
+    if net_name.endswith("_c"):
         return (net_name[:-2], False)
 
     # Try _P/_N suffix (most common for LVDS)
-    if net_name.endswith('_P'):
+    if net_name.endswith("_P"):
         return (net_name[:-2], True)
-    if net_name.endswith('_N'):
+    if net_name.endswith("_N"):
         return (net_name[:-2], False)
 
     # Try P/N suffix without underscore
-    if net_name.endswith('P') and len(net_name) > 1:
+    if net_name.endswith("P") and len(net_name) > 1:
         # Check it's not just ending in P as part of name
-        if net_name[-2] in '0123456789_':
+        if net_name[-2] in "0123456789_":
             return (net_name[:-1], True)
-    if net_name.endswith('N') and len(net_name) > 1:
-        if net_name[-2] in '0123456789_':
+    if net_name.endswith("N") and len(net_name) > 1:
+        if net_name[-2] in "0123456789_":
             return (net_name[:-1], False)
 
     # Try +/- suffix
-    if net_name.endswith('+'):
+    if net_name.endswith("+"):
         return (net_name[:-1], True)
-    if net_name.endswith('-'):
+    if net_name.endswith("-"):
         return (net_name[:-1], False)
 
     return None
 
 
-def find_differential_pairs(pcb_data: PCBData, patterns: List[str]) -> Dict[str, DiffPairNet]:
+def find_differential_pairs(pcb_data: PCBData, patterns: list[str]) -> dict[str, DiffPairNet]:
     """
     Find all differential pairs in the PCB matching the given glob patterns.
 
@@ -333,7 +337,7 @@ def find_differential_pairs(pcb_data: PCBData, patterns: List[str]) -> Dict[str,
     Returns:
         Dict mapping base_name to DiffPair with complete P/N pairs
     """
-    pairs: Dict[str, DiffPairNet] = {}
+    pairs: dict[str, DiffPairNet] = {}
 
     # Collect all net names from pcb_data
     for net_id, net in pcb_data.nets.items():
@@ -370,10 +374,8 @@ def find_differential_pairs(pcb_data: PCBData, patterns: List[str]) -> Dict[str,
 
 
 def find_single_ended_nets(
-    pcb_data: PCBData,
-    patterns: List[str],
-    exclude_net_ids: Set[int] = None
-) -> List[Tuple[str, int]]:
+    pcb_data: PCBData, patterns: list[str], exclude_net_ids: set[int] = None
+) -> list[tuple[str, int]]:
     """
     Find all single-ended nets matching the given glob patterns.
 
@@ -406,7 +408,7 @@ def find_single_ended_nets(
     return result
 
 
-def expand_pad_layers(pad_layers: List[str], routing_layers: List[str]) -> List[str]:
+def expand_pad_layers(pad_layers: list[str], routing_layers: list[str]) -> list[str]:
     """
     Expand wildcard layer specifications to actual layer names.
 
@@ -435,7 +437,7 @@ def expand_pad_layers(pad_layers: List[str], routing_layers: List[str]) -> List[
     return sorted(unique, key=lambda l: layer_order.get(l, len(routing_layers)))
 
 
-def get_all_unrouted_net_ids(pcb_data: PCBData) -> List[int]:
+def get_all_unrouted_net_ids(pcb_data: PCBData) -> list[int]:
     """
     Find all net IDs in the PCB that need routing.
 
@@ -448,7 +450,7 @@ def get_all_unrouted_net_ids(pcb_data: PCBData) -> List[int]:
     unrouted_ids = set()
 
     # Group segments by net ID
-    net_segments: Dict[int, List[Segment]] = {}
+    net_segments: dict[int, list[Segment]] = {}
     for seg in pcb_data.segments:
         if seg.net_id not in net_segments:
             net_segments[seg.net_id] = []
@@ -478,7 +480,7 @@ def get_all_unrouted_net_ids(pcb_data: PCBData) -> List[int]:
     return list(unrouted_ids)
 
 
-def get_chip_pad_positions(pcb_data: PCBData, net_ids: List[int], min_pads: int = 4) -> List[Tuple[float, float, str]]:
+def get_chip_pad_positions(pcb_data: PCBData, net_ids: list[int], min_pads: int = 4) -> list[tuple[float, float, str]]:
     """Get pad positions on chips for unrouted nets, to use as pseudo-stubs for proximity avoidance.
 
     This treats pads on "chips" (components with many pads) as stubs, discouraging
@@ -513,7 +515,7 @@ def get_chip_pad_positions(pcb_data: PCBData, net_ids: List[int], min_pads: int 
                 # Use first copper layer from pad's layers
                 pad_layer = None
                 for layer in pad.layers:
-                    if layer.endswith('.Cu') and not layer.startswith('*'):
+                    if layer.endswith(".Cu") and not layer.startswith("*"):
                         pad_layer = layer
                         break
                 if pad_layer:
@@ -522,14 +524,14 @@ def get_chip_pad_positions(pcb_data: PCBData, net_ids: List[int], min_pads: int 
     return chip_pads
 
 
-def find_pad_nearest_to_position(pcb_data: PCBData, net_id: int, x: float, y: float) -> Optional[Pad]:
+def find_pad_nearest_to_position(pcb_data: PCBData, net_id: int, x: float, y: float) -> Pad | None:
     """Find the pad for a given net that is nearest to the specified position."""
     pads = pcb_data.pads_by_net.get(net_id, [])
     if not pads:
         return None
 
     best_pad = None
-    best_dist = float('inf')
+    best_dist = float("inf")
     for pad in pads:
         dist = (pad.global_x - x) ** 2 + (pad.global_y - y) ** 2
         if dist < best_dist:
@@ -540,9 +542,8 @@ def find_pad_nearest_to_position(pcb_data: PCBData, net_id: int, x: float, y: fl
 
 
 def find_containing_or_nearest_bga_zone(
-    point: Tuple[float, float],
-    bga_zones: List[Tuple[float, float, float, float]]
-) -> Optional[Tuple[float, float, float, float]]:
+    point: tuple[float, float], bga_zones: list[tuple[float, float, float, float]]
+) -> tuple[float, float, float, float] | None:
     """
     Find the BGA zone containing a point, or the nearest zone if outside all zones.
 
@@ -566,7 +567,7 @@ def find_containing_or_nearest_bga_zone(
 
     # Not inside any zone - find nearest
     best_zone = None
-    best_dist = float('inf')
+    best_dist = float("inf")
 
     for zone in bga_zones:
         min_x, min_y, max_x, max_y = zone[:4]
@@ -582,10 +583,7 @@ def find_containing_or_nearest_bga_zone(
     return best_zone
 
 
-def get_source_chip_center(
-    pcb_data: PCBData,
-    source_pads: List[Pad]
-) -> Optional[Tuple[float, float]]:
+def get_source_chip_center(pcb_data: PCBData, source_pads: list[Pad]) -> tuple[float, float] | None:
     """
     Get the center of the source chip/component from source pads.
 
@@ -624,9 +622,9 @@ def get_source_chip_center(
 
 
 def compute_routing_aware_distance(
-    target_free_end: Tuple[float, float],
-    source_chip_center: Tuple[float, float],
-    bga_zone: Tuple[float, float, float, float]
+    target_free_end: tuple[float, float],
+    source_chip_center: tuple[float, float],
+    bga_zone: tuple[float, float, float, float],
 ) -> float:
     """
     Compute the shortest path distance from target stub free end to source chip center,
@@ -649,15 +647,15 @@ def compute_routing_aware_distance(
     sx, sy = source_chip_center
     min_x, min_y, max_x, max_y = bga_zone[:4]
 
-    def point_distance(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
-        return math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+    def point_distance(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+        return math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
 
     # Get BGA corners
     corners = {
-        'top_left': (min_x, min_y),
-        'top_right': (max_x, min_y),
-        'bottom_left': (min_x, max_y),
-        'bottom_right': (max_x, max_y)
+        "top_left": (min_x, min_y),
+        "top_right": (max_x, min_y),
+        "bottom_left": (min_x, max_y),
+        "bottom_right": (max_x, max_y),
     }
 
     # Determine which edge the target stub is on/nearest to
@@ -671,16 +669,16 @@ def compute_routing_aware_distance(
     # Determine candidate corners based on stub edge position
     if min_dist == dist_to_top:
         # Stub on top edge - can go around top-left or top-right corner
-        corner1, corner2 = corners['top_left'], corners['top_right']
+        corner1, corner2 = corners["top_left"], corners["top_right"]
     elif min_dist == dist_to_bottom:
         # Stub on bottom edge
-        corner1, corner2 = corners['bottom_left'], corners['bottom_right']
+        corner1, corner2 = corners["bottom_left"], corners["bottom_right"]
     elif min_dist == dist_to_left:
         # Stub on left edge
-        corner1, corner2 = corners['top_left'], corners['bottom_left']
+        corner1, corner2 = corners["top_left"], corners["bottom_left"]
     else:  # dist_to_right
         # Stub on right edge
-        corner1, corner2 = corners['top_right'], corners['bottom_right']
+        corner1, corner2 = corners["top_right"], corners["bottom_right"]
 
     # Path 1: target -> corner1 -> source
     dist1 = point_distance(target_free_end, corner1) + point_distance(corner1, source_chip_center)
@@ -692,9 +690,8 @@ def compute_routing_aware_distance(
 
 
 def get_unit_routing_info(
-    pcb_data: PCBData,
-    unit_net_ids: List[int]
-) -> Optional[Tuple[Tuple[float, float], Tuple[float, float]]]:
+    pcb_data: PCBData, unit_net_ids: list[int]
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """
     Get target stub free end and source chip center for a routing unit.
 
@@ -778,21 +775,19 @@ def get_unit_routing_info(
     # Average for diff pairs
     avg_target = (
         sum(p[0] for p in target_free_ends) / len(target_free_ends),
-        sum(p[1] for p in target_free_ends) / len(target_free_ends)
+        sum(p[1] for p in target_free_ends) / len(target_free_ends),
     )
     avg_source = (
         sum(p[0] for p in source_chip_centers) / len(source_chip_centers),
-        sum(p[1] for p in source_chip_centers) / len(source_chip_centers)
+        sum(p[1] for p in source_chip_centers) / len(source_chip_centers),
     )
 
     return (avg_target, avg_source)
 
 
 def _build_mps_unit_mappings(
-    pcb_data: PCBData,
-    net_ids: List[int],
-    diff_pairs: Dict
-) -> Tuple[Dict[int, int], Dict[int, List[int]], Dict[int, str], List[int]]:
+    pcb_data: PCBData, net_ids: list[int], diff_pairs: dict
+) -> tuple[dict[int, int], dict[int, list[int]], dict[int, str], list[int]]:
     """
     Build mapping from net_id to unit_id for MPS ordering.
 
@@ -835,10 +830,8 @@ def _build_mps_unit_mappings(
 
 
 def _compute_mps_unit_endpoints(
-    pcb_data: PCBData,
-    unit_ids: List[int],
-    unit_to_nets: Dict[int, List[int]]
-) -> Dict[int, List[Tuple[float, float]]]:
+    pcb_data: PCBData, unit_ids: list[int], unit_to_nets: dict[int, list[int]]
+) -> dict[int, list[tuple[float, float]]]:
     """
     Compute routing endpoints for each unit.
 
@@ -856,10 +849,8 @@ def _compute_mps_unit_endpoints(
             p_endpoints = get_net_routing_endpoints(pcb_data, unit_net_ids[0])
             n_endpoints = get_net_routing_endpoints(pcb_data, unit_net_ids[1])
             if len(p_endpoints) >= 2 and len(n_endpoints) >= 2:
-                src = ((p_endpoints[0][0] + n_endpoints[0][0]) / 2,
-                       (p_endpoints[0][1] + n_endpoints[0][1]) / 2)
-                tgt = ((p_endpoints[1][0] + n_endpoints[1][0]) / 2,
-                       (p_endpoints[1][1] + n_endpoints[1][1]) / 2)
+                src = ((p_endpoints[0][0] + n_endpoints[0][0]) / 2, (p_endpoints[0][1] + n_endpoints[0][1]) / 2)
+                tgt = ((p_endpoints[1][0] + n_endpoints[1][0]) / 2, (p_endpoints[1][1] + n_endpoints[1][1]) / 2)
                 unit_endpoints[unit_id] = [src, tgt]
         else:
             # Single net
@@ -871,9 +862,8 @@ def _compute_mps_unit_endpoints(
 
 
 def _compute_mps_center(
-    unit_endpoints: Dict[int, List[Tuple[float, float]]],
-    center: Tuple[float, float] = None
-) -> Tuple[float, float]:
+    unit_endpoints: dict[int, list[tuple[float, float]]], center: tuple[float, float] = None
+) -> tuple[float, float]:
     """Compute center point for angular projection if not provided."""
     if center is not None:
         return center
@@ -882,18 +872,13 @@ def _compute_mps_center(
     for endpoints in unit_endpoints.values():
         all_points.extend(endpoints)
     if all_points:
-        return (
-            sum(p[0] for p in all_points) / len(all_points),
-            sum(p[1] for p in all_points) / len(all_points)
-        )
+        return (sum(p[0] for p in all_points) / len(all_points), sum(p[1] for p in all_points) / len(all_points))
     return (0, 0)
 
 
 def _compute_mps_unit_layers(
-    pcb_data: PCBData,
-    unit_ids: List[int],
-    unit_to_nets: Dict[int, List[int]]
-) -> Dict[int, Tuple[Set[str], Set[str]]]:
+    pcb_data: PCBData, unit_ids: list[int], unit_to_nets: dict[int, list[int]]
+) -> dict[int, tuple[set[str], set[str]]]:
     """
     Build layer information for each unit from stub segments.
 
@@ -922,7 +907,7 @@ def _compute_mps_unit_layers(
                 net_pads = pcb_data.pads_by_net.get(net_id, [])
                 for pad in net_pads:
                     for layer in pad.layers:
-                        if layer.endswith('.Cu') and not layer.startswith('*'):
+                        if layer.endswith(".Cu") and not layer.startswith("*"):
                             src_layers.add(layer)
                             tgt_layers.add(layer)
 
@@ -933,11 +918,11 @@ def _compute_mps_unit_layers(
 
 def _compute_mps_unit_distances(
     pcb_data: PCBData,
-    unit_list: List[int],
-    unit_to_nets: Dict[int, List[int]],
-    unit_endpoints: Dict[int, List[Tuple[float, float]]],
-    bga_exclusion_zones: List[Tuple[float, float, float, float]]
-) -> Dict[int, float]:
+    unit_list: list[int],
+    unit_to_nets: dict[int, list[int]],
+    unit_endpoints: dict[int, list[tuple[float, float]]],
+    bga_exclusion_zones: list[tuple[float, float, float, float]],
+) -> dict[int, float]:
     """
     Compute routing-aware distances for each unit.
 
@@ -956,9 +941,7 @@ def _compute_mps_unit_distances(
             bga_zone = find_containing_or_nearest_bga_zone(target_free_end, bga_exclusion_zones)
 
             if bga_zone:
-                unit_distances[unit_id] = compute_routing_aware_distance(
-                    target_free_end, source_chip_center, bga_zone
-                )
+                unit_distances[unit_id] = compute_routing_aware_distance(target_free_end, source_chip_center, bga_zone)
             else:
                 dx = source_chip_center[0] - target_free_end[0]
                 dy = source_chip_center[1] - target_free_end[1]
@@ -970,18 +953,18 @@ def _compute_mps_unit_distances(
                 dy = endpoints[1][1] - endpoints[0][1]
                 unit_distances[unit_id] = math.sqrt(dx * dx + dy * dy)
             else:
-                unit_distances[unit_id] = float('inf')
+                unit_distances[unit_id] = float("inf")
 
     return unit_distances
 
 
 def _greedy_order_mps_units(
-    unit_list: List[int],
-    conflicts: Dict[int, Set[int]],
-    unit_distances: Dict[int, float],
-    unit_names: Dict[int, str],
-    reverse_rounds: bool
-) -> Tuple[List[int], Dict[int, int], int]:
+    unit_list: list[int],
+    conflicts: dict[int, set[int]],
+    unit_distances: dict[int, float],
+    unit_names: dict[int, str],
+    reverse_rounds: bool,
+) -> tuple[list[int], dict[int, int], int]:
     """
     Order units using greedy algorithm: pick unit with fewest conflicts.
 
@@ -1002,7 +985,7 @@ def _greedy_order_mps_units(
         while round_remaining:
             best_unit = min(
                 round_remaining,
-                key=lambda uid: (len(conflicts[uid] & round_remaining), unit_distances.get(uid, 0), uid)
+                key=lambda uid: (len(conflicts[uid] & round_remaining), unit_distances.get(uid, 0), uid),
             )
 
             round_winners.append(best_unit)
@@ -1033,15 +1016,18 @@ def _greedy_order_mps_units(
     return ordered_units, round_assignments, round_num
 
 
-def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
-                              center: Tuple[float, float] = None,
-                              diff_pairs: Dict = None,
-                              use_boundary_ordering: bool = True,
-                              bga_exclusion_zones: List[Tuple[float, float, float, float]] = None,
-                              reverse_rounds: bool = False,
-                              crossing_layer_check: bool = True,
-                              return_extended_info: bool = False,
-                              use_segment_intersection: bool = None) -> Union[List[int], MPSResult]:
+def compute_mps_net_ordering(
+    pcb_data: PCBData,
+    net_ids: list[int],
+    center: tuple[float, float] = None,
+    diff_pairs: dict = None,
+    use_boundary_ordering: bool = True,
+    bga_exclusion_zones: list[tuple[float, float, float, float]] = None,
+    reverse_rounds: bool = False,
+    crossing_layer_check: bool = True,
+    return_extended_info: bool = False,
+    use_segment_intersection: bool = None,
+) -> list[int] | MPSResult:
     """
     Compute optimal net routing order using Maximum Planar Subset (MPS) algorithm.
 
@@ -1080,9 +1066,7 @@ def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
         If return_extended_info=True: MPSResult with full conflict/layer/round info
     """
     # Step 1: Build unit mappings (group diff pair P/N nets)
-    net_to_unit, unit_to_nets, unit_names, unit_ids = _build_mps_unit_mappings(
-        pcb_data, net_ids, diff_pairs
-    )
+    net_to_unit, unit_to_nets, unit_names, unit_ids = _build_mps_unit_mappings(pcb_data, net_ids, diff_pairs)
 
     # Step 2: Get routing endpoints for each unit
     unit_endpoints = _compute_mps_unit_endpoints(pcb_data, unit_ids, unit_to_nets)
@@ -1150,7 +1134,7 @@ def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
             print("MPS: Using segment intersection method (no nets on BGA chips)")
 
     # Compute angular positions (fallback method)
-    def angle_from_center(point: Tuple[float, float]) -> float:
+    def angle_from_center(point: tuple[float, float]) -> float:
         dx = point[0] - center[0]
         dy = point[1] - center[1]
         ang = math.atan2(dy, dx)
@@ -1222,7 +1206,7 @@ def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
     conflicts = {unit_id: set() for unit_id in unit_list}
 
     for i, unit_a in enumerate(unit_list):
-        for unit_b in unit_list[i+1:]:
+        for unit_b in unit_list[i + 1 :]:
             if units_cross_geometric(unit_a, unit_b):
                 # Always add to geometric conflicts
                 geometric_conflicts[unit_a].add(unit_b)
@@ -1237,14 +1221,14 @@ def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
     num_diff_pairs = sum(1 for uid in unit_list if len(unit_to_nets.get(uid, [])) == 2)
     num_single = len(unit_list) - num_diff_pairs
     if num_diff_pairs > 0:
-        print(f"MPS: {num_diff_pairs} diff pairs + {num_single} single nets = {len(unit_list)} units with {total_conflicts} crossing conflicts")
+        print(
+            f"MPS: {num_diff_pairs} diff pairs + {num_single} single nets = {len(unit_list)} units with {total_conflicts} crossing conflicts"
+        )
     else:
         print(f"MPS: {len(unit_list)} nets with {total_conflicts} crossing conflicts detected")
 
     # Step 7: Compute route distances for each unit
-    unit_distances = _compute_mps_unit_distances(
-        pcb_data, unit_list, unit_to_nets, unit_endpoints, bga_exclusion_zones
-    )
+    unit_distances = _compute_mps_unit_distances(pcb_data, unit_list, unit_to_nets, unit_endpoints, bga_exclusion_zones)
 
     # Step 8: Greedy ordering - pick units with fewest conflicts
     ordered_units, round_assignments, round_num = _greedy_order_mps_units(
@@ -1273,6 +1257,6 @@ def compute_mps_net_ordering(pcb_data: PCBData, net_ids: List[int],
             unit_names=unit_names,
             round_assignments=round_assignments,
             num_rounds=round_num,
-            geometric_conflicts=geometric_conflicts
+            geometric_conflicts=geometric_conflicts,
         )
     return ordered

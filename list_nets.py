@@ -21,7 +21,8 @@ Examples:
 
 import argparse
 from fnmatch import fnmatch
-from kicad_parser import parse_kicad_pcb, find_components_by_type
+
+from kicad_parser import find_components_by_type, parse_kicad_pcb
 
 
 def find_differential_pairs(pcb_data):
@@ -29,17 +30,17 @@ def find_differential_pairs(pcb_data):
     net_names = [n.name for n in pcb_data.nets.values() if n.name]
 
     diff_patterns = [
-        ('_P', '_N'),      # USB, PCIe, generic
-        ('_p', '_n'),      # lowercase variant
-        ('+', '-'),        # Some designs
-        ('_DP', '_DN'),    # USB data
-        ('_D+', '_D-'),    # USB alternate
-        ('_TX+', '_TX-'),  # Ethernet TX
-        ('_RX+', '_RX-'),  # Ethernet RX
-        ('_TXP', '_TXN'),  # High-speed serial
-        ('_RXP', '_RXN'),  # High-speed serial
-        ('_t', '_c'),      # DDR DQS (true/complement)
-        ('_T', '_C'),      # DDR DQS uppercase
+        ("_P", "_N"),  # USB, PCIe, generic
+        ("_p", "_n"),  # lowercase variant
+        ("+", "-"),  # Some designs
+        ("_DP", "_DN"),  # USB data
+        ("_D+", "_D-"),  # USB alternate
+        ("_TX+", "_TX-"),  # Ethernet TX
+        ("_RX+", "_RX-"),  # Ethernet RX
+        ("_TXP", "_TXN"),  # High-speed serial
+        ("_RXP", "_RXN"),  # High-speed serial
+        ("_t", "_c"),  # DDR DQS (true/complement)
+        ("_T", "_C"),  # DDR DQS uppercase
     ]
 
     found_pairs = []
@@ -50,7 +51,7 @@ def find_differential_pairs(pcb_data):
             continue
         for pos, neg in diff_patterns:
             if name.endswith(pos):
-                base = name[:-len(pos)]
+                base = name[: -len(pos)]
                 pair_name = base + neg
                 if pair_name in net_names and pair_name not in used_nets:
                     found_pairs.append((name, pair_name))
@@ -63,8 +64,8 @@ def find_differential_pairs(pcb_data):
 
 def find_power_nets(pcb_data):
     """Find power and ground nets by name patterns and connection count."""
-    gnd_patterns = ['GND', 'VSS', 'AGND', 'DGND', 'PGND', 'GNDA', 'GNDD']
-    vcc_patterns = ['VCC', 'VDD', '+3.3', '+5', '+12', '+1.8', '+2.5', 'VBUS', 'VBAT', 'VIN']
+    gnd_patterns = ["GND", "VSS", "AGND", "DGND", "PGND", "GNDA", "GNDD"]
+    vcc_patterns = ["VCC", "VDD", "+3.3", "+5", "+12", "+1.8", "+2.5", "VBUS", "VBAT", "VIN"]
 
     gnd_nets = []
     vcc_nets = []
@@ -77,7 +78,9 @@ def find_power_nets(pcb_data):
 
         if any(g in name_upper for g in gnd_patterns):
             gnd_nets.append((net.name, pad_count))
-        elif any(v in name_upper for v in vcc_patterns) or (net.name.startswith('+') and any(c.isdigit() for c in net.name)):
+        elif any(v in name_upper for v in vcc_patterns) or (
+            net.name.startswith("+") and any(c.isdigit() for c in net.name)
+        ):
             vcc_nets.append((net.name, pad_count))
 
     # Sort by pad count descending
@@ -91,7 +94,7 @@ def find_high_connection_nets(pcb_data, top_n=10):
     """Find nets with the most connections (often power/ground)."""
     nets_by_count = []
     for net in pcb_data.nets.values():
-        if net.name and not net.name.startswith('unconnected'):
+        if net.name and not net.name.startswith("unconnected"):
             nets_by_count.append((net.name, len(net.pads)))
 
     nets_by_count.sort(key=lambda x: -x[1])
@@ -100,17 +103,17 @@ def find_high_connection_nets(pcb_data, top_n=10):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='List and analyze nets in a KiCad PCB file',
+        description="List and analyze nets in a KiCad PCB file",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument('pcb', help='Input PCB file')
-    parser.add_argument('--component', '-c', help='Component reference (e.g., U1)')
-    parser.add_argument('--pads', action='store_true', help='Show pad-to-net assignments')
-    parser.add_argument('--diff-pairs', '-d', action='store_true', help='Detect differential pairs')
-    parser.add_argument('--power', '-p', action='store_true', help='Show power/ground nets')
-    parser.add_argument('--top', '-t', type=int, default=10, help='Show top N most-connected nets (default: 10)')
-    parser.add_argument('--pattern', help='Filter nets by glob pattern')
+    parser.add_argument("pcb", help="Input PCB file")
+    parser.add_argument("--component", "-c", help="Component reference (e.g., U1)")
+    parser.add_argument("--pads", action="store_true", help="Show pad-to-net assignments")
+    parser.add_argument("--diff-pairs", "-d", action="store_true", help="Detect differential pairs")
+    parser.add_argument("--power", "-p", action="store_true", help="Show power/ground nets")
+    parser.add_argument("--top", "-t", type=int, default=10, help="Show top N most-connected nets (default: 10)")
+    parser.add_argument("--pattern", help="Filter nets by glob pattern")
 
     args = parser.parse_args()
 
@@ -125,9 +128,9 @@ def main():
         print(f"\nTop {args.top} most-connected nets:")
         for name, count in find_high_connection_nets(pcb_data, args.top):
             print(f"  {name}: {count} pads")
-        print(f"\nUse --component/-c to list nets on a component")
-        print(f"Use --diff-pairs/-d to detect differential pairs")
-        print(f"Use --power/-p to show power/ground nets")
+        print("\nUse --component/-c to list nets on a component")
+        print("Use --diff-pairs/-d to detect differential pairs")
+        print("Use --power/-p to show power/ground nets")
         return 0
 
     # Differential pair detection
@@ -155,8 +158,8 @@ def main():
     # Component-specific listing
     if args.component:
         # Auto-detect BGA component if 'auto' specified
-        if args.component.lower() == 'auto':
-            bga_components = find_components_by_type(pcb_data, 'BGA')
+        if args.component.lower() == "auto":
+            bga_components = find_components_by_type(pcb_data, "BGA")
             if bga_components:
                 args.component = bga_components[0].reference
                 print(f"Auto-detected BGA component: {args.component}")
@@ -175,11 +178,14 @@ def main():
         if args.pads:
             # Show pad-to-net assignments
             print(f"\nPads on {args.component} ({len(footprint.pads)} pads):\n")
-            pads_sorted = sorted(footprint.pads, key=lambda p: (
-                # Sort by pad number (handle alphanumeric like A1, B2)
-                ''.join(c for c in p.pad_number if c.isalpha()),
-                int(''.join(c for c in p.pad_number if c.isdigit()) or '0')
-            ))
+            pads_sorted = sorted(
+                footprint.pads,
+                key=lambda p: (
+                    # Sort by pad number (handle alphanumeric like A1, B2)
+                    "".join(c for c in p.pad_number if c.isalpha()),
+                    int("".join(c for c in p.pad_number if c.isdigit()) or "0"),
+                ),
+            )
             for pad in pads_sorted:
                 net_name = pad.net_name if pad.net_name else "(no net)"
                 if args.pattern and not fnmatch(net_name, args.pattern):
@@ -202,5 +208,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

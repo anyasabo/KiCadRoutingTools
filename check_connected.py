@@ -2,17 +2,17 @@
 Connectivity Checker - Verify that tracks form fully connected routes from source to target pads.
 """
 
-import sys
 import argparse
-import math
 import fnmatch
-from typing import List, Dict, Set, Tuple, Optional
+import math
+import sys
 from collections import defaultdict
-from kicad_parser import parse_kicad_pcb, Segment, Via, Pad, PCBData, Zone
+
+from kicad_parser import Pad, Segment, Via, Zone, parse_kicad_pcb
 from net_queries import expand_pad_layers
 
 
-def point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) -> bool:
+def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> bool:
     """Check if a point (x, y) is inside a polygon using ray casting algorithm.
 
     Args:
@@ -40,7 +40,7 @@ def point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) -> 
     return inside
 
 
-def matches_any_pattern(name: str, patterns: List[str]) -> bool:
+def matches_any_pattern(name: str, patterns: list[str]) -> bool:
     """Check if a net name matches any of the given patterns (fnmatch style)."""
     for pattern in patterns:
         if fnmatch.fnmatch(name, pattern):
@@ -48,7 +48,7 @@ def matches_any_pattern(name: str, patterns: List[str]) -> bool:
     return False
 
 
-from geometry_utils import UnionFind, point_key
+from geometry_utils import UnionFind
 
 
 def points_match(x1: float, y1: float, x2: float, y2: float, tolerance: float = 0.02) -> bool:
@@ -63,7 +63,7 @@ class SpatialIndex:
         self.cell_size = cell_size
         self.grid = defaultdict(list)  # (gx, gy, layer) -> list of (x, y, point_id, size)
 
-    def _cell(self, x: float, y: float) -> Tuple[int, int]:
+    def _cell(self, x: float, y: float) -> tuple[int, int]:
         return (int(x // self.cell_size), int(y // self.cell_size))
 
     def add(self, x: float, y: float, layer: str, point_id: int, size: float):
@@ -90,7 +90,7 @@ class SegmentIndex:
         self.cell_size = cell_size
         self.grid = defaultdict(list)  # (gx, gy, layer) -> list of (seg, seg_start_id)
 
-    def _cells_for_segment(self, seg) -> List[Tuple[int, int]]:
+    def _cells_for_segment(self, seg) -> list[tuple[int, int]]:
         """Return all grid cells that a segment passes through."""
         x1, y1, x2, y2 = seg.start_x, seg.start_y, seg.end_x, seg.end_y
         gx1, gy1 = int(min(x1, x2) // self.cell_size), int(min(y1, y2) // self.cell_size)
@@ -144,10 +144,15 @@ def point_on_segment(px: float, py: float, x1: float, y1: float, x2: float, y2: 
     return dist_sq <= tolerance * tolerance
 
 
-def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via],
-                           pads: List[Pad], zones: List[Zone] = None,
-                           tolerance: float = 0.02,
-                           verbose: bool = False) -> Dict:
+def check_net_connectivity(
+    net_id: int,
+    segments: list[Segment],
+    vias: list[Via],
+    pads: list[Pad],
+    zones: list[Zone] = None,
+    tolerance: float = 0.02,
+    verbose: bool = False,
+) -> dict:
     """Check connectivity for a single net.
 
     Args:
@@ -173,29 +178,29 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
     # Detect all copper layers from segments, vias, and pads
     copper_layer_set = set()
     for seg in segments:
-        if seg.layer.endswith('.Cu'):
+        if seg.layer.endswith(".Cu"):
             copper_layer_set.add(seg.layer)
     for via in vias:
         if via.layers:
             for layer in via.layers:
-                if layer.endswith('.Cu'):
+                if layer.endswith(".Cu"):
                     copper_layer_set.add(layer)
     for pad in pads:
         for layer in pad.layers:
             # Skip wildcards like "*.Cu" - they don't represent actual layers
-            if layer.endswith('.Cu') and not layer.startswith('*'):
+            if layer.endswith(".Cu") and not layer.startswith("*"):
                 copper_layer_set.add(layer)
     for zone in zones:
-        if zone.layer.endswith('.Cu'):
+        if zone.layer.endswith(".Cu"):
             copper_layer_set.add(zone.layer)
 
     # Sort layers: F.Cu first, then In*.Cu in order, then B.Cu last
     def layer_sort_key(layer):
-        if layer == 'F.Cu':
+        if layer == "F.Cu":
             return (0, 0)
-        elif layer == 'B.Cu':
+        elif layer == "B.Cu":
             return (2, 0)
-        elif layer.startswith('In') and layer.endswith('.Cu'):
+        elif layer.startswith("In") and layer.endswith(".Cu"):
             try:
                 num = int(layer[2:-3])  # Extract number from 'InX.Cu'
                 return (1, num)
@@ -206,7 +211,7 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
 
     all_copper_layers = sorted(copper_layer_set, key=layer_sort_key)
     if not all_copper_layers:
-        all_copper_layers = ['F.Cu', 'In1.Cu', 'In2.Cu', 'B.Cu']  # Fallback
+        all_copper_layers = ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"]  # Fallback
 
     # Collect all points with their actual coordinates and size info
     # Each point: (x, y, layer, point_id, size, type, extra_info)
@@ -218,11 +223,11 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
     for seg_idx, seg in enumerate(segments):
         start_id = point_id
         all_points.append((seg.start_x, seg.start_y, seg.layer, start_id, seg.width))
-        point_info[start_id] = ('segment_start', seg_idx, seg.layer, seg.start_x, seg.start_y)
+        point_info[start_id] = ("segment_start", seg_idx, seg.layer, seg.start_x, seg.start_y)
         point_id += 1
         end_id = point_id
         all_points.append((seg.end_x, seg.end_y, seg.layer, end_id, seg.width))
-        point_info[end_id] = ('segment_end', seg_idx, seg.layer, seg.end_x, seg.end_y)
+        point_info[end_id] = ("segment_end", seg_idx, seg.layer, seg.end_x, seg.end_y)
         point_id += 1
         # Connect segment's own endpoints
         uf.union(start_id, end_id)
@@ -230,18 +235,18 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
     # Add vias - they connect all layers at one location
     for via_idx, via in enumerate(vias):
         if via.layers:
-            if 'F.Cu' in via.layers and 'B.Cu' in via.layers:
+            if "F.Cu" in via.layers and "B.Cu" in via.layers:
                 via_layers = all_copper_layers
             else:
                 via_layers = via.layers
         else:
             via_layers = all_copper_layers
 
-        via_size = getattr(via, 'size', 0.6)  # Default via size if not available
+        via_size = getattr(via, "size", 0.6)  # Default via size if not available
         via_ids = []
         for layer in via_layers:
             all_points.append((via.x, via.y, layer, point_id, via_size))
-            point_info[point_id] = ('via', via_idx, layer, via.x, via.y)
+            point_info[point_id] = ("via", via_idx, layer, via.x, via.y)
             via_ids.append(point_id)
             point_id += 1
         # Connect all via layers together
@@ -262,7 +267,7 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
                 continue
             pad_size = 0.4  # Default pad connection tolerance
             all_points.append((pad.global_x, pad.global_y, layer, point_id, pad_size))
-            point_info[point_id] = ('pad', pad_idx, layer, pad.global_x, pad.global_y, pad.component_ref)
+            point_info[point_id] = ("pad", pad_idx, layer, pad.global_x, pad.global_y, pad.component_ref)
             pad_ids.append(point_id)
             pad_locations.append((pad.global_x, pad.global_y, layer, pad.component_ref))
             this_pad_ids.append(point_id)
@@ -276,8 +281,7 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
     for zone in zones:
         zone_layer = zone.layer
         # Find all points on this zone's layer
-        points_on_layer = [(x, y, layer, pid, size) for x, y, layer, pid, size in all_points
-                           if layer == zone_layer]
+        points_on_layer = [(x, y, layer, pid, size) for x, y, layer, pid, size in all_points if layer == zone_layer]
 
         # Find which points are inside the zone polygon
         points_in_zone = []
@@ -332,12 +336,12 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
     # Check if all pads are in the same component
     if not pad_ids:
         return {
-            'connected': True,
-            'num_components': 0,
-            'pad_components': {},
-            'disconnected_pads': [],
-            'message': 'No pads found for this net',
-            'debug_info': None
+            "connected": True,
+            "num_components": 0,
+            "pad_components": {},
+            "disconnected_pads": [],
+            "message": "No pads found for this net",
+            "debug_info": None,
         }
 
     pad_roots = [uf.find(pid) for pid in pad_ids]
@@ -367,7 +371,7 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
         for pt in all_points:
             x, y, layer, pid, size = pt
             root = uf.find(pid)
-            info = point_info.get(pid, ('unknown',))
+            info = point_info.get(pid, ("unknown",))
             components[root].append((x, y, layer, info))
 
         # For each component, find boundary points (potential disconnection points)
@@ -379,35 +383,35 @@ def check_net_connectivity(net_id: int, segments: List[Segment], vias: List[Via]
 
             # Summarize component
             summary = {
-                'layers': list(by_layer.keys()),
-                'points_by_layer': {l: len(pts) for l, pts in by_layer.items()},
-                'has_pads': any(info[0] == 'pad' for _, _, _, info in points),
-                'has_vias': any(info[0] == 'via' for _, _, _, info in points),
-                'sample_points': [(x, y, layer, info[0]) for x, y, layer, info in points[:10]]
+                "layers": list(by_layer.keys()),
+                "points_by_layer": {l: len(pts) for l, pts in by_layer.items()},
+                "has_pads": any(info[0] == "pad" for _, _, _, info in points),
+                "has_vias": any(info[0] == "via" for _, _, _, info in points),
+                "sample_points": [(x, y, layer, info[0]) for x, y, layer, info in points[:10]],
             }
             component_summaries[root] = summary
 
         debug_info = {
-            'components': component_summaries,
-            'component_points': dict(components),  # Raw points by component for gap analysis
-            'main_root': main_root,
-            'all_points': all_points,
-            'point_info': point_info,
-            'segments': segments,
-            'vias': vias
+            "components": component_summaries,
+            "component_points": dict(components),  # Raw points by component for gap analysis
+            "main_root": main_root,
+            "all_points": all_points,
+            "point_info": point_info,
+            "segments": segments,
+            "vias": vias,
         }
 
     return {
-        'connected': len(unique_roots) == 1,
-        'num_components': len(unique_roots),
-        'pad_components': {loc: uf.find(pid) for pid, loc in zip(pad_ids, pad_locations)},
-        'disconnected_pads': disconnected,
-        'message': None,
-        'debug_info': debug_info
+        "connected": len(unique_roots) == 1,
+        "num_components": len(unique_roots),
+        "pad_components": {loc: uf.find(pid) for pid, loc in zip(pad_ids, pad_locations)},
+        "disconnected_pads": disconnected,
+        "message": None,
+        "debug_info": debug_info,
     }
 
 
-def find_gap_between_components(debug_info: Dict, tolerance: float) -> Optional[Dict]:
+def find_gap_between_components(debug_info: dict, tolerance: float) -> dict | None:
     """Analyze debug info to find where the gap is between disconnected components.
 
     Returns information about the likely disconnection point.
@@ -415,22 +419,22 @@ def find_gap_between_components(debug_info: Dict, tolerance: float) -> Optional[
     if not debug_info:
         return None
 
-    component_summaries = debug_info['components']
-    component_points = debug_info.get('component_points', {})
-    all_points = debug_info['all_points']
-    segments = debug_info['segments']
-    vias = debug_info['vias']
+    component_summaries = debug_info["components"]
+    component_points = debug_info.get("component_points", {})
+    all_points = debug_info["all_points"]
+    segments = debug_info["segments"]
+    vias = debug_info["vias"]
 
     if len(component_points) < 2:
         return None
 
     # Find the closest points between different components
-    min_dist = float('inf')
+    min_dist = float("inf")
     gap_info = None
 
     roots = list(component_points.keys())
     for i, root1 in enumerate(roots):
-        for root2 in roots[i+1:]:
+        for root2 in roots[i + 1 :]:
             for pt1 in component_points[root1]:
                 x1, y1, l1, info1 = pt1[0], pt1[1], pt1[2], pt1[3]
                 for pt2 in component_points[root2]:
@@ -444,11 +448,11 @@ def find_gap_between_components(debug_info: Dict, tolerance: float) -> Optional[
                         info1_type = info1[0] if isinstance(info1, tuple) else info1
                         info2_type = info2[0] if isinstance(info2, tuple) else info2
                         gap_info = {
-                            'distance': dist,
-                            'point1': (x1, y1, l1, info1_type),
-                            'point2': (x2, y2, l2, info2_type),
-                            'component1_root': root1,
-                            'component2_root': root2
+                            "distance": dist,
+                            "point1": (x1, y1, l1, info1_type),
+                            "point2": (x2, y2, l2, info2_type),
+                            "component1_root": root1,
+                            "component2_root": root2,
                         }
 
     # Also find if there are points on different layers at the same position
@@ -468,17 +472,17 @@ def find_gap_between_components(debug_info: Dict, tolerance: float) -> Optional[
                         info1_type = info1[0] if isinstance(info1, tuple) else info1
                         info2_type = info2[0] if isinstance(info2, tuple) else info2
                         return {
-                            'type': 'missing_via',
-                            'position': (x1, y1),
-                            'layers': [l1, l2],
-                            'point1_type': info1_type,
-                            'point2_type': info2_type,
-                            'message': f"Gap at ({x1:.3f}, {y1:.3f}): {info1_type} on {l1} not connected to {info2_type} on {l2}"
+                            "type": "missing_via",
+                            "position": (x1, y1),
+                            "layers": [l1, l2],
+                            "point1_type": info1_type,
+                            "point2_type": info2_type,
+                            "message": f"Gap at ({x1:.3f}, {y1:.3f}): {info1_type} on {l1} not connected to {info2_type} on {l2}",
                         }
 
     if gap_info:
-        gap_info['type'] = 'gap_on_layer'
-        gap_info['message'] = (
+        gap_info["type"] = "gap_on_layer"
+        gap_info["message"] = (
             f"Nearest gap: {gap_info['distance']:.3f}mm on {gap_info['point1'][2]} between "
             f"{gap_info['point1'][3]} at ({gap_info['point1'][0]:.3f}, {gap_info['point1'][1]:.3f}) and "
             f"{gap_info['point2'][3]} at ({gap_info['point2'][0]:.3f}, {gap_info['point2'][1]:.3f})"
@@ -487,10 +491,15 @@ def find_gap_between_components(debug_info: Dict, tolerance: float) -> Optional[
     return gap_info
 
 
-def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = None,
-                           tolerance: float = 0.02, quiet: bool = False,
-                           verbose: bool = False, component: Optional[str] = None,
-                           routed_only: bool = False) -> List[Dict]:
+def run_connectivity_check(
+    pcb_file: str,
+    net_patterns: list[str] | None = None,
+    tolerance: float = 0.02,
+    quiet: bool = False,
+    verbose: bool = False,
+    component: str | None = None,
+    routed_only: bool = False,
+) -> list[dict]:
     """Run connectivity checks on the PCB file.
 
     Args:
@@ -507,7 +516,7 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
     """
     if quiet and (net_patterns or component):
         # Print a brief summary line in quiet mode
-        desc = ', '.join(net_patterns) if net_patterns else f"component {component}"
+        desc = ", ".join(net_patterns) if net_patterns else f"component {component}"
         print(f"Checking {desc} for connectivity...", end=" ", flush=True)
     elif not quiet:
         print(f"Loading {pcb_file}...")
@@ -573,7 +582,7 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
     if not routed_only:
         for net_id, net_info in pcb_data.nets.items():
             # Skip power nets (GND, VCC, etc.) - they're often connected via zones
-            if net_info.name in ('', 'GND', 'VCC', '+5V', '+3V3', '+3.3V'):
+            if net_info.name in ("", "GND", "VCC", "+5V", "+3V3", "+3.3V"):
                 continue
             # Filter by component if specified
             if component_net_ids is not None and net_id not in component_net_ids:
@@ -602,17 +611,19 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
 
     # Report unrouted nets as issues
     for net_id, net_name, num_pads in unrouted_nets:
-        issues.append({
-            'net_id': net_id,
-            'net_name': net_name,
-            'num_segments': 0,
-            'num_vias': 0,
-            'num_pads': num_pads,
-            'num_components': num_pads,  # Each pad is its own component
-            'disconnected_pads': [],
-            'unrouted': True,
-            'message': f'Unrouted net with {num_pads} pads'
-        })
+        issues.append(
+            {
+                "net_id": net_id,
+                "net_name": net_name,
+                "num_segments": 0,
+                "num_vias": 0,
+                "num_pads": num_pads,
+                "num_components": num_pads,  # Each pad is its own component
+                "disconnected_pads": [],
+                "unrouted": True,
+                "message": f"Unrouted net with {num_pads} pads",
+            }
+        )
 
     for net_id, net_name in nets_to_check:
         segments = segments_by_net.get(net_id, [])
@@ -622,24 +633,24 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
 
         result = check_net_connectivity(net_id, segments, vias, pads, zones, tolerance, verbose=verbose)
 
-        if not result['connected']:
+        if not result["connected"]:
             issue = {
-                'net_id': net_id,
-                'net_name': net_name,
-                'num_segments': len(segments),
-                'num_vias': len(vias),
-                'num_pads': len(pads),
-                'num_components': result['num_components'],
-                'disconnected_pads': result['disconnected_pads'],
-                'message': result.get('message'),
-                'debug_info': result.get('debug_info')
+                "net_id": net_id,
+                "net_name": net_name,
+                "num_segments": len(segments),
+                "num_vias": len(vias),
+                "num_pads": len(pads),
+                "num_components": result["num_components"],
+                "disconnected_pads": result["disconnected_pads"],
+                "message": result.get("message"),
+                "debug_info": result.get("debug_info"),
             }
 
             # Analyze the gap
-            if verbose and result.get('debug_info'):
-                gap = find_gap_between_components(result['debug_info'], tolerance)
+            if verbose and result.get("debug_info"):
+                gap = find_gap_between_components(result["debug_info"], tolerance)
                 if gap:
-                    issue['gap_info'] = gap
+                    issue["gap_info"] = gap
 
             issues.append(issue)
 
@@ -656,8 +667,8 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
         print("\n" + "=" * 60 if not quiet else "=" * 60)
         if issues:
             # Separate unrouted from connectivity issues
-            unrouted_issues = [i for i in issues if i.get('unrouted')]
-            connectivity_issues = [i for i in issues if not i.get('unrouted')]
+            unrouted_issues = [i for i in issues if i.get("unrouted")]
+            connectivity_issues = [i for i in issues if not i.get("unrouted")]
 
             print(f"FOUND {len(issues)} ISSUES:\n")
 
@@ -671,29 +682,33 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
                 print(f"  Connectivity issues ({len(connectivity_issues)}):")
                 for issue in connectivity_issues:
                     print(f"\n  {issue['net_name']} (net {issue['net_id']}):")
-                    print(f"    Segments: {issue['num_segments']}, Vias: {issue['num_vias']}, Pads: {issue['num_pads']}")
+                    print(
+                        f"    Segments: {issue['num_segments']}, Vias: {issue['num_vias']}, Pads: {issue['num_pads']}"
+                    )
                     print(f"    Disconnected components: {issue['num_components']}")
-                    if issue['disconnected_pads']:
-                        print(f"    Disconnected pads:")
-                        for loc in issue['disconnected_pads'][:5]:
+                    if issue["disconnected_pads"]:
+                        print("    Disconnected pads:")
+                        for loc in issue["disconnected_pads"][:5]:
                             print(f"      ({loc[0]:.2f}, {loc[1]:.2f}) on {loc[2]} [{loc[3]}]")
-                        if len(issue['disconnected_pads']) > 5:
+                        if len(issue["disconnected_pads"]) > 5:
                             print(f"      ... and {len(issue['disconnected_pads']) - 5} more")
-                    if issue.get('gap_info'):
-                        gap = issue['gap_info']
+                    if issue.get("gap_info"):
+                        gap = issue["gap_info"]
                         print(f"    Break location: {gap['message']}")
-                        if verbose and gap.get('type') == 'gap_on_layer':
-                            debug = issue.get('debug_info')
+                        if verbose and gap.get("type") == "gap_on_layer":
+                            debug = issue.get("debug_info")
                             if debug:
                                 # Show component details
-                                for root, summary in debug['components'].items():
-                                    is_main = root == debug['main_root']
-                                    print(f"    Component {'(main)' if is_main else '(disconnected)'}: "
-                                          f"layers={summary['layers']}, "
-                                          f"has_pads={summary['has_pads']}, has_vias={summary['has_vias']}")
+                                for root, summary in debug["components"].items():
+                                    is_main = root == debug["main_root"]
+                                    print(
+                                        f"    Component {'(main)' if is_main else '(disconnected)'}: "
+                                        f"layers={summary['layers']}, "
+                                        f"has_pads={summary['has_pads']}, has_vias={summary['has_vias']}"
+                                    )
                                     if verbose:
                                         print(f"      Points by layer: {summary['points_by_layer']}")
-                    if issue.get('message'):
+                    if issue.get("message"):
                         print(f"    Note: {issue['message']}")
         else:
             print("ALL NETS FULLY CONNECTED!")
@@ -703,22 +718,30 @@ def run_connectivity_check(pcb_file: str, net_patterns: Optional[List[str]] = No
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Check PCB for track connectivity (disconnected routes)')
-    parser.add_argument('pcb', help='Input PCB file')
-    parser.add_argument('--nets', '-n', nargs='+', default=None,
-                        help='Net name patterns to check (fnmatch wildcards supported, e.g., "*lvds*")')
-    parser.add_argument('--component', '-C',
-                        help='Check all nets connected to this component (e.g., U1)')
-    parser.add_argument('--tolerance', '-t', type=float, default=0.02,
-                        help='Minimum connection tolerance in mm (default: 0.02)')
-    parser.add_argument('--quiet', '-q', action='store_true',
-                        help='Only print a summary line unless there are issues')
-    parser.add_argument('--verbose', '-v', action='store_true',
-                        help='Show detailed break location info for disconnected nets')
-    parser.add_argument('--routed-only', '-r', action='store_true',
-                        help='Only check routed nets (skip unrouted net detection)')
+    parser = argparse.ArgumentParser(description="Check PCB for track connectivity (disconnected routes)")
+    parser.add_argument("pcb", help="Input PCB file")
+    parser.add_argument(
+        "--nets",
+        "-n",
+        nargs="+",
+        default=None,
+        help='Net name patterns to check (fnmatch wildcards supported, e.g., "*lvds*")',
+    )
+    parser.add_argument("--component", "-C", help="Check all nets connected to this component (e.g., U1)")
+    parser.add_argument(
+        "--tolerance", "-t", type=float, default=0.02, help="Minimum connection tolerance in mm (default: 0.02)"
+    )
+    parser.add_argument("--quiet", "-q", action="store_true", help="Only print a summary line unless there are issues")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed break location info for disconnected nets"
+    )
+    parser.add_argument(
+        "--routed-only", "-r", action="store_true", help="Only check routed nets (skip unrouted net detection)"
+    )
 
     args = parser.parse_args()
 
-    issues = run_connectivity_check(args.pcb, args.nets, args.tolerance, args.quiet, args.verbose, args.component, args.routed_only)
+    issues = run_connectivity_check(
+        args.pcb, args.nets, args.tolerance, args.quiet, args.verbose, args.component, args.routed_only
+    )
     sys.exit(1 if issues else 0)

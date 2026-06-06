@@ -5,10 +5,10 @@ code duplication across obstacle_map.py, obstacle_cache.py, blocking_analysis.py
 obstacle_costs.py, plane_blocker_detection.py, and plane_region_connector.py.
 """
 
-from typing import Generator, Tuple
+from collections.abc import Generator
 
 
-def walk_line(gx1: int, gy1: int, gx2: int, gy2: int) -> Generator[Tuple[int, int], None, None]:
+def walk_line(gx1: int, gy1: int, gx2: int, gy2: int) -> Generator[tuple[int, int], None, None]:
     """Walk along a line from (gx1, gy1) to (gx2, gy2), yielding each grid point.
 
     Uses the optimized Bresenham line algorithm with the e2 = 2*err variant.
@@ -47,7 +47,7 @@ def is_diagonal_segment(gx1: int, gy1: int, gx2: int, gy2: int) -> bool:
     return abs(gx2 - gx1) > 0 and abs(gy2 - gy1) > 0
 
 
-def get_diagonal_via_blocking_params(via_block_grid: int, is_diagonal: bool) -> Tuple[float, int]:
+def get_diagonal_via_blocking_params(via_block_grid: int, is_diagonal: bool) -> tuple[float, int]:
     """Get effective blocking parameters for diagonal segment handling.
 
     For diagonal segments, the actual line passes between grid points,

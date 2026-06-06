@@ -6,38 +6,39 @@ traces from other nets cutting through the plane. This module detects disconnect
 regions and routes wide, short tracks between them to ensure electrical continuity.
 """
 
-from typing import List, Optional, Tuple, Dict, Set
-from collections import deque
 import math
+import os
+import sys
+from collections import deque
 
 import numpy as np
 
-from kicad_parser import PCBData, Via, Segment, Pad, POSITION_DECIMALS
-from routing_config import GridRouteConfig, GridCoord
-from geometry_utils import UnionFind
 from bresenham_utils import walk_line
-from obstacle_map import (add_board_edge_obstacles, add_user_keepout_obstacles,
-                          add_rule_area_keepout_obstacles)
+from geometry_utils import UnionFind
+from kicad_parser import POSITION_DECIMALS, Pad, PCBData, Segment
+from obstacle_map import add_board_edge_obstacles, add_rule_area_keepout_obstacles, add_user_keepout_obstacles
 from plane_obstacle_builder import (
-    _precompute_circle_offsets, _bresenham_centers,
-    _batch_block_circles_via, _batch_block_circles_cell
+    _batch_block_circles_cell,
+    _batch_block_circles_via,
+    _bresenham_centers,
+    _precompute_circle_offsets,
 )
+from routing_config import GridCoord, GridRouteConfig
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 from grid_router import GridObstacleMap, GridRouter
+
 import routing_defaults as defaults
 
 
 def _collect_anchor_points(
     net_id: int,
-    zone_bounds: Tuple[float, float, float, float],
+    zone_bounds: tuple[float, float, float, float],
     pcb_data: PCBData,
     coord: GridCoord,
-    zone_layers: Set[str],
-    routing_layers: List[str]
-) -> Tuple[List[Tuple[float, float]], List[Tuple[int, int]]]:
+    zone_layers: set[str],
+    routing_layers: list[str],
+) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Collect anchor points (vias and pads) for flood fill connectivity analysis.
 
@@ -53,15 +54,15 @@ def _collect_anchor_points(
         Tuple of (anchor_points, anchor_grid_points)
     """
     min_x, min_y, max_x, max_y = zone_bounds
-    anchor_points: List[Tuple[float, float]] = []
-    anchor_grid_points: List[Tuple[int, int]] = []
-    seen_anchors: Set[Tuple[float, float]] = set()
+    anchor_points: list[tuple[float, float]] = []
+    anchor_grid_points: list[tuple[int, int]] = []
+    seen_anchors: set[tuple[float, float]] = set()
 
-    def via_connects_layer(via_layers: List[str], layer: str) -> bool:
+    def via_connects_layer(via_layers: list[str], layer: str) -> bool:
         """Check if a via connects to a given layer."""
         if layer in via_layers:
             return True
-        if 'F.Cu' in via_layers and 'B.Cu' in via_layers:
+        if "F.Cu" in via_layers and "B.Cu" in via_layers:
             return layer in routing_layers
         return False
 
@@ -81,7 +82,7 @@ def _collect_anchor_points(
 
     # Add pads of our net on any zone layer
     for pad in pcb_data.pads_by_net.get(net_id, []):
-        touches_zone = '*.Cu' in pad.layers or any(zl in pad.layers for zl in zone_layers)
+        touches_zone = "*.Cu" in pad.layers or any(zl in pad.layers for zl in zone_layers)
         if not touches_zone:
             continue
         if min_x <= pad.global_x <= max_x and min_y <= pad.global_y <= max_y:
@@ -95,10 +96,8 @@ def _collect_anchor_points(
 
 
 def _collect_cross_layer_points(
-    net_id: int,
-    pcb_data: PCBData,
-    routing_layers: List[str]
-) -> List[Tuple[float, float, Set[str]]]:
+    net_id: int, pcb_data: PCBData, routing_layers: list[str]
+) -> list[tuple[float, float, set[str]]]:
     """
     Collect cross-layer connection points (vias and through-hole pads) for connectivity analysis.
 
@@ -110,32 +109,29 @@ def _collect_cross_layer_points(
     Returns:
         List of (x, y, connected_layers) tuples
     """
-    def get_via_connected_layers(via_layers: List[str]) -> Set[str]:
+
+    def get_via_connected_layers(via_layers: list[str]) -> set[str]:
         """Get all layers a via connects to."""
-        if 'F.Cu' in via_layers and 'B.Cu' in via_layers:
+        if "F.Cu" in via_layers and "B.Cu" in via_layers:
             return set(routing_layers)
         return set(via_layers)
 
-    cross_layer_points: List[Tuple[float, float, Set[str]]] = []
+    cross_layer_points: list[tuple[float, float, set[str]]] = []
 
     for via in pcb_data.vias:
         if via.net_id == net_id:
             cross_layer_points.append((via.x, via.y, get_via_connected_layers(via.layers)))
 
     for pad in pcb_data.pads_by_net.get(net_id, []):
-        if '*.Cu' in pad.layers:  # Through-hole pad
+        if "*.Cu" in pad.layers:  # Through-hole pad
             cross_layer_points.append((pad.global_x, pad.global_y, set(routing_layers)))
 
     return cross_layer_points
 
 
 def _build_layer_blocked_set(
-    layer: str,
-    net_id: int,
-    pcb_data: PCBData,
-    coord: GridCoord,
-    layer_clearance: float
-) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
+    layer: str, net_id: int, pcb_data: PCBData, coord: GridCoord, layer_clearance: float
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
     """
     Build blocked set and net segment cells for a single layer.
 
@@ -149,7 +145,7 @@ def _build_layer_blocked_set(
     Returns:
         Tuple of (blocked_cells, net_segment_cells)
     """
-    blocked: Set[Tuple[int, int]] = set()
+    blocked: set[tuple[int, int]] = set()
 
     # Block cells for other nets' vias
     for via in pcb_data.vias:
@@ -176,12 +172,12 @@ def _build_layer_blocked_set(
         if pad_net_id == net_id:
             continue
         for pad in pads:
-            if layer not in pad.layers and '*.Cu' not in pad.layers:
+            if layer not in pad.layers and "*.Cu" not in pad.layers:
                 continue
             _block_pad_cells(blocked, pad, coord, layer_clearance)
 
     # Mark cells along same-net segments as connected
-    net_segment_cells: Set[Tuple[int, int]] = set()
+    net_segment_cells: set[tuple[int, int]] = set()
     for seg in pcb_data.segments:
         if seg.net_id != net_id:
             continue
@@ -195,16 +191,16 @@ def _build_layer_blocked_set(
 def find_disconnected_zone_regions(
     net_id: int,
     plane_layer: str,
-    zone_bounds: Tuple[float, float, float, float],  # min_x, min_y, max_x, max_y
+    zone_bounds: tuple[float, float, float, float],  # min_x, min_y, max_x, max_y
     pcb_data: PCBData,
     config: GridRouteConfig,
     zone_clearance: float = 0.2,
     analysis_grid_step: float = 0.5,  # Coarser grid for faster analysis
-    routing_layers: Optional[List[str]] = None,  # All copper layers to check for cross-layer connectivity
-    zone_layers: Optional[Set[str]] = None,  # Layers that have zones for this net (allow flood fill)
+    routing_layers: list[str] | None = None,  # All copper layers to check for cross-layer connectivity
+    zone_layers: set[str] | None = None,  # Layers that have zones for this net (allow flood fill)
     debug: bool = False,  # If True, return debug paths showing connectivity
-    zone_clearances: Optional[Dict[str, float]] = None  # Per-layer zone clearances (layer -> clearance)
-) -> Tuple[List[List[Tuple[float, float]]], List[Set[Tuple[int, int]]], List[Tuple[List[Tuple[float, float]], str]]]:
+    zone_clearances: dict[str, float] | None = None,  # Per-layer zone clearances (layer -> clearance)
+) -> tuple[list[list[tuple[float, float]]], list[set[tuple[int, int]]], list[tuple[list[tuple[float, float]], str]]]:
     """
     Find disconnected regions within a zone using flood fill on a grid.
 
@@ -262,14 +258,14 @@ def find_disconnected_zone_regions(
     cross_layer_points = _collect_cross_layer_points(net_id, pcb_data, routing_layers)
 
     # Helper function for via layer connections (still needed for loop below)
-    def get_via_connected_layers(via_layers: List[str]) -> Set[str]:
+    def get_via_connected_layers(via_layers: list[str]) -> set[str]:
         """Get all layers a via connects to."""
-        if 'F.Cu' in via_layers and 'B.Cu' in via_layers:
+        if "F.Cu" in via_layers and "B.Cu" in via_layers:
             return set(routing_layers)
         return set(via_layers)
 
     # Build map from grid position to cross-layer point index
-    grid_to_crosslayer: Dict[Tuple[int, int], List[int]] = {}
+    grid_to_crosslayer: dict[tuple[int, int], list[int]] = {}
     for i, (x, y, layers) in enumerate(cross_layer_points):
         gp = coord.to_grid(x, y)
         if gp not in grid_to_crosslayer:
@@ -283,7 +279,7 @@ def find_disconnected_zone_regions(
     anchor_uf = UnionFind()
 
     # Debug paths: list of (path_points, layer_name) showing connectivity
-    debug_paths: List[Tuple[List[Tuple[float, float]], str]] = []
+    debug_paths: list[tuple[list[tuple[float, float]], str]] = []
 
     # First pass: connect cross-layer points that are at the same location
     # (e.g., a via and a pad at the same spot)
@@ -309,8 +305,8 @@ def find_disconnected_zone_regions(
 
     # For each layer, do flood fill to find connectivity through the plane
     # Cache the blocked set and segment cells for plane_layer to reuse later
-    blocked_plane: Optional[Set[Tuple[int, int]]] = None
-    net_plane_segment_cells: Optional[Set[Tuple[int, int]]] = None
+    blocked_plane: set[tuple[int, int]] | None = None
+    net_plane_segment_cells: set[tuple[int, int]] | None = None
 
     for layer in routing_layers:
         # Get layer-specific clearance (fall back to default zone_clearance)
@@ -319,9 +315,7 @@ def find_disconnected_zone_regions(
             layer_clearance = zone_clearances[layer]
 
         # Build blocked set and net segment cells using helper function
-        blocked, net_segment_cells = _build_layer_blocked_set(
-            layer, net_id, pcb_data, coord, layer_clearance
-        )
+        blocked, net_segment_cells = _build_layer_blocked_set(layer, net_id, pcb_data, coord, layer_clearance)
 
         # Cache plane_layer data for reuse in anchor flood fill
         if layer == plane_layer:
@@ -329,7 +323,7 @@ def find_disconnected_zone_regions(
             net_plane_segment_cells = net_segment_cells
 
         # Find cross-layer points on this layer
-        layer_cls: List[int] = []
+        layer_cls: list[int] = []
         for i, (x, y, layers) in enumerate(cross_layer_points):
             if layer in layers:
                 layer_cls.append(i)
@@ -338,7 +332,7 @@ def find_disconnected_zone_regions(
             continue
 
         # Map grid position to cross-layer indices on this layer
-        layer_grid_to_cl: Dict[Tuple[int, int], List[int]] = {}
+        layer_grid_to_cl: dict[tuple[int, int], list[int]] = {}
         for i in layer_cls:
             x, y, _ = cross_layer_points[i]
             gp = coord.to_grid(x, y)
@@ -347,9 +341,9 @@ def find_disconnected_zone_regions(
             layer_grid_to_cl[gp].append(i)
 
         # Flood fill from each cross-layer point to find which ones connect on this layer
-        layer_visited: Set[Tuple[int, int]] = set()
+        layer_visited: set[tuple[int, int]] = set()
         # Track parent pointers for path reconstruction (only if debug)
-        layer_parent: Dict[Tuple[int, int], Tuple[int, int]] = {} if debug else {}
+        layer_parent: dict[tuple[int, int], tuple[int, int]] = {} if debug else {}
 
         for start_cl_idx in layer_cls:
             x, y, _ = cross_layer_points[start_cl_idx]
@@ -412,14 +406,14 @@ def find_disconnected_zone_regions(
 
     # Now map anchor connectivity based on cross-layer point connectivity
     # Build map from anchor grid position to anchor indices
-    grid_to_anchors: Dict[Tuple[int, int], List[int]] = {}
+    grid_to_anchors: dict[tuple[int, int], list[int]] = {}
     for i, gp in enumerate(anchor_grid_points):
         if gp not in grid_to_anchors:
             grid_to_anchors[gp] = []
         grid_to_anchors[gp].append(i)
 
     # For each anchor, find which cross-layer point(s) it corresponds to
-    anchor_to_cl: Dict[int, int] = {}
+    anchor_to_cl: dict[int, int] = {}
     for i, gp in enumerate(anchor_grid_points):
         if gp in grid_to_crosslayer:
             # Anchor is at a cross-layer point position
@@ -439,7 +433,7 @@ def find_disconnected_zone_regions(
     # Use cached blocked_plane and net_plane_segment_cells from the layer loop above
     assert blocked_plane is not None, "plane_layer should have been processed in the loop"
     assert net_plane_segment_cells is not None, "plane_layer should have been processed in the loop"
-    plane_visited: Set[Tuple[int, int]] = set()
+    plane_visited: set[tuple[int, int]] = set()
     for start_anchor_idx in range(len(anchor_points)):
         start_gx, start_gy = anchor_grid_points[start_anchor_idx]
 
@@ -472,7 +466,7 @@ def find_disconnected_zone_regions(
                 queue.append((nx, ny))
 
     # Group anchors by their root
-    groups: Dict[int, List[int]] = {}
+    groups: dict[int, list[int]] = {}
     for i in range(len(anchor_points)):
         root = anchor_uf.find(i)
         if root not in groups:
@@ -480,8 +474,8 @@ def find_disconnected_zone_regions(
         groups[root].append(i)
 
     # Build result lists
-    region_anchors: List[List[Tuple[float, float]]] = []
-    region_cells: List[Set[Tuple[int, int]]] = []
+    region_anchors: list[list[tuple[float, float]]] = []
+    region_cells: list[set[tuple[int, int]]] = []
 
     for root, indices in groups.items():
         anchors = [anchor_points[i] for i in indices]
@@ -492,11 +486,7 @@ def find_disconnected_zone_regions(
     return region_anchors, region_cells, debug_paths
 
 
-def _add_segment_cells(
-    cells: Set[Tuple[int, int]],
-    seg: Segment,
-    coord: GridCoord
-):
+def _add_segment_cells(cells: set[tuple[int, int]], seg: Segment, coord: GridCoord):
     """Add grid cells along a segment (no expansion, just the segment path)."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
@@ -505,12 +495,7 @@ def _add_segment_cells(
         cells.add((gx, gy))
 
 
-def _block_segment_cells(
-    blocked: Set[Tuple[int, int]],
-    seg: Segment,
-    coord: GridCoord,
-    block_radius: int
-):
+def _block_segment_cells(blocked: set[tuple[int, int]], seg: Segment, coord: GridCoord, block_radius: int):
     """Block grid cells along a segment with given radius."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
@@ -523,12 +508,7 @@ def _block_segment_cells(
                     blocked.add((gx + ex, gy + ey))
 
 
-def _block_pad_cells(
-    blocked: Set[Tuple[int, int]],
-    pad: Pad,
-    coord: GridCoord,
-    clearance: float
-):
+def _block_pad_cells(blocked: set[tuple[int, int]], pad: Pad, coord: GridCoord, clearance: float):
     """Block grid cells for a pad with clearance."""
     half_w = pad.size_x / 2 + clearance
     half_h = pad.size_y / 2 + clearance
@@ -544,10 +524,8 @@ def _block_pad_cells(
 
 
 def find_region_connection_points(
-    region_anchors: List[List[Tuple[float, float]]],
-    region_cells: List[Set[Tuple[int, int]]],
-    coord: GridCoord
-) -> List[Tuple[int, int, Tuple[float, float], Tuple[float, float], float]]:
+    region_anchors: list[list[tuple[float, float]]], region_cells: list[set[tuple[int, int]]], coord: GridCoord
+) -> list[tuple[int, int, tuple[float, float], tuple[float, float], float]]:
     """
     Find MST edges connecting disconnected regions using closest anchor points.
 
@@ -564,17 +542,17 @@ def find_region_connection_points(
         return []
 
     # Find closest points between each pair of regions
-    edges: List[Tuple[float, int, int, Tuple[float, float], Tuple[float, float]]] = []
+    edges: list[tuple[float, int, int, tuple[float, float], tuple[float, float]]] = []
 
     for i in range(n_regions):
         for j in range(i + 1, n_regions):
-            best_dist = float('inf')
+            best_dist = float("inf")
             best_pi = None
             best_pj = None
 
             for pi in region_anchors[i]:
                 for pj in region_anchors[j]:
-                    dist = math.sqrt((pi[0] - pj[0])**2 + (pi[1] - pj[1])**2)
+                    dist = math.sqrt((pi[0] - pj[0]) ** 2 + (pi[1] - pj[1]) ** 2)
                     if dist < best_dist:
                         best_dist = dist
                         best_pi = pi
@@ -587,7 +565,7 @@ def find_region_connection_points(
     edges.sort(key=lambda e: e[0])
 
     mst_uf = UnionFind()
-    mst_edges: List[Tuple[int, int, Tuple[float, float], Tuple[float, float], float]] = []
+    mst_edges: list[tuple[int, int, tuple[float, float], tuple[float, float], float]] = []
 
     for dist, i, j, pi, pj in edges:
         if not mst_uf.connected(i, j):
@@ -600,12 +578,12 @@ def find_region_connection_points(
 
 
 def find_open_space_point(
-    anchors: List[Tuple[float, float]],
+    anchors: list[tuple[float, float]],
     base_obstacles: GridObstacleMap,
     plane_layer_idx: int,
     coord: GridCoord,
-    search_radius: float = 5.0
-) -> Optional[Tuple[float, float]]:
+    search_radius: float = 5.0,
+) -> tuple[float, float] | None:
     """
     Find the most open space near a region's anchors - a point with maximum clearance from obstacles.
 
@@ -658,12 +636,7 @@ def find_open_space_point(
     return None
 
 
-def _calculate_clearance(
-    gx: int, gy: int,
-    obstacles: GridObstacleMap,
-    layer_idx: int,
-    max_check: int = 10
-) -> int:
+def _calculate_clearance(gx: int, gy: int, obstacles: GridObstacleMap, layer_idx: int, max_check: int = 10) -> int:
     """Calculate clearance from a grid cell to nearest obstacle."""
     for r in range(1, max_check + 1):
         # Check cells at distance r (manhattan approximation for speed)
@@ -675,24 +648,24 @@ def _calculate_clearance(
     return max_check
 
 
-from terminal_colors import GREEN, RED, YELLOW, RESET
+from terminal_colors import GREEN, RED, RESET, YELLOW
 
 
 def _try_route_between_regions(
-    anchors_i: List[Tuple[float, float]],
-    anchors_j: List[Tuple[float, float]],
+    anchors_i: list[tuple[float, float]],
+    anchors_j: list[tuple[float, float]],
     base_obstacles: GridObstacleMap,
     plane_layer_idx: int,
-    routing_layers: List[str],
+    routing_layers: list[str],
     config: GridRouteConfig,
-    net_vias: List[Tuple[float, float]],
+    net_vias: list[tuple[float, float]],
     max_track_width: float,
     min_track_width: float,
     max_iterations: int,
     coord: GridCoord,
     verbose: bool = False,
-    router: Optional[GridRouter] = None
-) -> Tuple[Optional[Tuple[List[Tuple[float, float, str]], List[Tuple[float, float]]]], float, Optional[Tuple[float, float]]]:
+    router: GridRouter | None = None,
+) -> tuple[tuple[list[tuple[float, float, str]], list[tuple[float, float]]] | None, float, tuple[float, float] | None]:
     """
     Try to route between two regions, attempting multiple track widths.
 
@@ -716,6 +689,7 @@ def _try_route_between_regions(
         Tuple of (route_result, track_width_used, open_space_via_if_used)
     """
     import time as _time
+
     _attempt_count = 0
     _total_route_time = 0.0
     _attempt_details = []
@@ -725,7 +699,8 @@ def _try_route_between_regions(
         nonlocal _attempt_count, _total_route_time
         _t0 = _time.time()
         result, used_iters = route_plane_connection_wide(
-            src, tgt,
+            src,
+            tgt,
             plane_layer_idx=plane_layer_idx,
             routing_layers=routing_layers,
             base_obstacles=base_obstacles,
@@ -734,7 +709,7 @@ def _try_route_between_regions(
             track_margin=margin,
             max_iterations=iters,
             verbose=verbose,
-            router=router
+            router=router,
         )
         _dt = _time.time() - _t0
         _attempt_count += 1
@@ -757,12 +732,10 @@ def _try_route_between_regions(
     base_iterations = 0  # iterations used by narrowest successful route
 
     # Step 1: Try minimum width first (both directions) with full budget
-    result, base_iterations = _try_route(
-        anchors_i, anchors_j, 0, max_iterations, f"w={min_track_width:.2f}mm A->B")
+    result, base_iterations = _try_route(anchors_i, anchors_j, 0, max_iterations, f"w={min_track_width:.2f}mm A->B")
 
     if result is None:
-        result, base_iterations = _try_route(
-            anchors_j, anchors_i, 0, max_iterations, f"w={min_track_width:.2f}mm B->A")
+        result, base_iterations = _try_route(anchors_j, anchors_i, 0, max_iterations, f"w={min_track_width:.2f}mm B->A")
 
     if result is None:
         # Can't route even at min width - try open-space fallback
@@ -801,14 +774,10 @@ def _try_route_between_regions(
             extra_margin_mm = (try_width - min_track_width) / 2
             track_margin = int(math.ceil(extra_margin_mm / config.grid_step))
 
-            wider, _ = _try_route(
-                anchors_i, anchors_j, track_margin, iter_budget,
-                f"w={try_width:.2f}mm A->B")
+            wider, _ = _try_route(anchors_i, anchors_j, track_margin, iter_budget, f"w={try_width:.2f}mm A->B")
 
             if wider is None:
-                wider, _ = _try_route(
-                    anchors_j, anchors_i, track_margin, iter_budget,
-                    f"w={try_width:.2f}mm B->A")
+                wider, _ = _try_route(anchors_j, anchors_i, track_margin, iter_budget, f"w={try_width:.2f}mm B->A")
 
             if wider is not None:
                 result = wider
@@ -817,7 +786,9 @@ def _try_route_between_regions(
                 break  # If this width fails, wider ones will too
 
     if verbose:
-        print(f"({_attempt_count} attempts, {_total_route_time:.1f}s: {'; '.join(_attempt_details)}) ", end="", flush=True)
+        print(
+            f"({_attempt_count} attempts, {_total_route_time:.1f}s: {'; '.join(_attempt_details)}) ", end="", flush=True
+        )
 
     return result, track_width, open_space_via
 
@@ -826,11 +797,11 @@ def route_disconnected_regions(
     net_id: int,
     net_name: str,
     plane_layer: str,
-    zone_bounds: Tuple[float, float, float, float],
+    zone_bounds: tuple[float, float, float, float],
     pcb_data: PCBData,
     config: GridRouteConfig,
     base_obstacles: GridObstacleMap,
-    layer_map: Dict[str, int],
+    layer_map: dict[str, int],
     zone_clearance: float = 0.2,
     max_track_width: float = 2.0,
     min_track_width: float = 0.2,
@@ -839,10 +810,10 @@ def route_disconnected_regions(
     analysis_grid_step: float = 0.5,
     max_iterations: int = 200000,
     verbose: bool = False,
-    zone_layers: Optional[Set[str]] = None,
+    zone_layers: set[str] | None = None,
     debug_connectivity: bool = False,
-    zone_clearances: Optional[Dict[str, float]] = None
-) -> Tuple[List[Dict], List[Dict], int, List[List[Tuple[float, float]]], List[Tuple[List[Tuple[float, float]], str]]]:
+    zone_clearances: dict[str, float] | None = None,
+) -> tuple[list[dict], list[dict], int, list[list[tuple[float, float]]], list[tuple[list[tuple[float, float]], str]]]:
     """
     Detect and route between disconnected zone regions.
 
@@ -874,9 +845,17 @@ def route_disconnected_regions(
     # Find disconnected regions (checking connectivity across all layers)
     routing_layers = list(layer_map.keys())
     region_anchors, region_cells, connectivity_paths = find_disconnected_zone_regions(
-        net_id, plane_layer, zone_bounds, pcb_data, config, zone_clearance,
-        analysis_grid_step, routing_layers, zone_layers, debug_connectivity,
-        zone_clearances=zone_clearances
+        net_id,
+        plane_layer,
+        zone_bounds,
+        pcb_data,
+        config,
+        zone_clearance,
+        analysis_grid_step,
+        routing_layers,
+        zone_layers,
+        debug_connectivity,
+        zone_clearances=zone_clearances,
     )
 
     n_regions = len(region_anchors)
@@ -904,18 +883,18 @@ def route_disconnected_regions(
     routing_layers = list(layer_map.keys())
 
     # Build list of existing vias and through-hole pads from this net (can be reused as layer transitions)
-    net_vias: List[Tuple[float, float]] = [(v.x, v.y) for v in pcb_data.vias if v.net_id == net_id]
+    net_vias: list[tuple[float, float]] = [(v.x, v.y) for v in pcb_data.vias if v.net_id == net_id]
     # Add through-hole pads from this net (they connect all layers like vias)
     if net_id in pcb_data.pads_by_net:
         for pad in pcb_data.pads_by_net[net_id]:
-            if '*.Cu' in pad.layers:  # Through-hole pad
+            if "*.Cu" in pad.layers:  # Through-hole pad
                 net_vias.append((pad.global_x, pad.global_y))
 
-    segments: List[Dict] = []
-    vias: List[Dict] = []
+    segments: list[dict] = []
+    vias: list[dict] = []
     routes_added = 0
     routes_failed = 0
-    previous_routes: List[List[Tuple[float, float]]] = []
+    previous_routes: list[list[tuple[float, float]]] = []
 
     # Create a single reusable router for all MST edges
     plane_router = GridRouter(
@@ -924,7 +903,7 @@ def route_disconnected_regions(
         turn_cost=config.turn_cost,
         via_proximity_cost=0,
         layer_costs=config.get_layer_costs(),
-        proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+        proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
     )
 
     for edge_idx, (region_i, region_j, point_i, point_j, dist) in enumerate(mst_edges):
@@ -933,11 +912,16 @@ def route_disconnected_regions(
         anchors_j = region_anchors[region_j]
 
         # Progress indicator
-        print(f"    [{edge_idx+1}/{len(mst_edges)}] Region {region_i} ({len(anchors_i)} anchors) <-> Region {region_j} ({len(anchors_j)} anchors)...", end=" ", flush=True)
+        print(
+            f"    [{edge_idx + 1}/{len(mst_edges)}] Region {region_i} ({len(anchors_i)} anchors) <-> Region {region_j} ({len(anchors_j)} anchors)...",
+            end=" ",
+            flush=True,
+        )
 
         # Try routing with multiple track widths using helper function
         result, track_width, open_space_via = _try_route_between_regions(
-            anchors_i, anchors_j,
+            anchors_i,
+            anchors_j,
             base_obstacles=base_obstacles,
             plane_layer_idx=plane_layer_idx,
             routing_layers=routing_layers,
@@ -948,14 +932,16 @@ def route_disconnected_regions(
             max_iterations=max_iterations,
             coord=coord,
             verbose=verbose,
-            router=plane_router
+            router=plane_router,
         )
 
         if result is None:
             print(f"{RED}FAILED{RESET}")
             routes_failed += 1
             if verbose:
-                print(f"      Tried {len(anchors_i)}x{len(anchors_j)} + {len(anchors_j)}x{len(anchors_i)} + open-space combinations, no path found")
+                print(
+                    f"      Tried {len(anchors_i)}x{len(anchors_j)} + {len(anchors_j)}x{len(anchors_i)} + open-space combinations, no path found"
+                )
             continue
 
         route_points, via_positions = result
@@ -964,7 +950,7 @@ def route_disconnected_regions(
         route_length = 0.0
         for k in range(len(route_points) - 1):
             p1, p2 = route_points[k], route_points[k + 1]
-            route_length += math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
+            route_length += math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
 
         # Count layers used
         layers_used = set(p[2] for p in route_points)
@@ -973,13 +959,21 @@ def route_disconnected_regions(
         via_info = f", {total_vias} via(s)" if total_vias > 0 else ""
         open_info = " (via open-space)" if open_space_via else ""
 
-        print(f"{GREEN}OK{RESET} width={track_width:.2f}mm, length={route_length:.1f}mm, {len(route_points)-1} seg(s){layer_info}{via_info}{open_info}")
+        print(
+            f"{GREEN}OK{RESET} width={track_width:.2f}mm, length={route_length:.1f}mm, {len(route_points) - 1} seg(s){layer_info}{via_info}{open_info}"
+        )
 
         # Incrementally add this route to base obstacles for subsequent routes
         add_route_to_obstacles(
-            base_obstacles, route_points, via_positions, layer_map,
-            track_width, config.clearance, track_via_clearance, config,
-            hole_to_hole_clearance
+            base_obstacles,
+            route_points,
+            via_positions,
+            layer_map,
+            track_width,
+            config.clearance,
+            track_via_clearance,
+            config,
+            hole_to_hole_clearance,
         )
 
         # Keep track of route for debug output
@@ -990,13 +984,15 @@ def route_disconnected_regions(
             p1, p2 = route_points[k], route_points[k + 1]
             # Only create segment if on same layer
             if p1[2] == p2[2]:
-                segments.append({
-                    'start': (p1[0], p1[1]),
-                    'end': (p2[0], p2[1]),
-                    'width': track_width,
-                    'layer': p1[2],
-                    'net_id': net_id
-                })
+                segments.append(
+                    {
+                        "start": (p1[0], p1[1]),
+                        "end": (p2[0], p2[1]),
+                        "width": track_width,
+                        "layer": p1[2],
+                        "net_id": net_id,
+                    }
+                )
 
         # Generate vias and add to net_vias for reuse by subsequent routes
         # Check against existing net_vias for both duplicates AND hole-to-hole clearance
@@ -1007,41 +1003,33 @@ def route_disconnected_regions(
         filtered_via_positions = []
         for vx, vy in via_positions:
             too_close_to_filtered = any(
-                math.sqrt((fx - vx)**2 + (fy - vy)**2) < min_via_distance
-                for fx, fy in filtered_via_positions
+                math.sqrt((fx - vx) ** 2 + (fy - vy) ** 2) < min_via_distance for fx, fy in filtered_via_positions
             )
             if not too_close_to_filtered:
                 filtered_via_positions.append((vx, vy))
 
         for vx, vy in filtered_via_positions:
-            too_close = any(
-                math.sqrt((ex - vx)**2 + (ey - vy)**2) < min_via_distance
-                for ex, ey in net_vias
-            )
+            too_close = any(math.sqrt((ex - vx) ** 2 + (ey - vy) ** 2) < min_via_distance for ex, ey in net_vias)
             if not too_close:
-                vias.append({
-                    'x': vx,
-                    'y': vy,
-                    'size': config.via_size,
-                    'drill': config.via_drill,
-                    'net_id': net_id
-                })
+                vias.append({"x": vx, "y": vy, "size": config.via_size, "drill": config.via_drill, "net_id": net_id})
                 net_vias.append((vx, vy))  # Available for reuse
 
         # Add open-space via if one was used and not too close to existing vias
         if open_space_via:
             too_close = any(
-                math.sqrt((ex - open_space_via[0])**2 + (ey - open_space_via[1])**2) < min_via_distance
+                math.sqrt((ex - open_space_via[0]) ** 2 + (ey - open_space_via[1]) ** 2) < min_via_distance
                 for ex, ey in net_vias
             )
             if not too_close:
-                vias.append({
-                    'x': open_space_via[0],
-                    'y': open_space_via[1],
-                    'size': config.via_size,
-                    'drill': config.via_drill,
-                    'net_id': net_id
-                })
+                vias.append(
+                    {
+                        "x": open_space_via[0],
+                        "y": open_space_via[1],
+                        "size": config.via_size,
+                        "drill": config.via_drill,
+                        "net_id": net_id,
+                    }
+                )
                 net_vias.append(open_space_via)
 
         routes_added += 1
@@ -1056,16 +1044,16 @@ def route_disconnected_regions(
 
 
 def build_base_obstacles(
-    exclude_net_ids: Set[int],
-    routing_layers: List[str],
+    exclude_net_ids: set[int],
+    routing_layers: list[str],
     pcb_data: PCBData,
     config: GridRouteConfig,
     track_width: float,
     track_via_clearance: float,
     hole_to_hole_clearance: float = 0.3,
     proximity_radius: float = 3.0,
-    proximity_cost: float = 2.0
-) -> Tuple[GridObstacleMap, Dict[str, int]]:
+    proximity_cost: float = 2.0,
+) -> tuple[GridObstacleMap, dict[str, int]]:
     """
     Build base obstacle map with all static obstacles, excluding specified nets.
 
@@ -1115,12 +1103,7 @@ def build_base_obstacles(
             all_other_vias.append((gx, gy))
 
     if all_other_vias:
-        obstacles.add_stub_proximity_costs_batch(
-            all_other_vias,
-            proximity_radius_grid,
-            proximity_cost_grid,
-            False
-        )
+        obstacles.add_stub_proximity_costs_batch(all_other_vias, proximity_radius_grid, proximity_cost_grid, False)
 
     # Block via placement near holes for hole-to-hole clearance
     hole_clearance_grid = max(1, coord.to_grid_dist(hole_to_hole_clearance + config.via_drill))
@@ -1135,12 +1118,14 @@ def build_base_obstacles(
     # Block via placement near ALL through-hole pad holes (including same-net)
     # Via reuse at pads is handled separately by snapping routes to pad positions
     # Group pads by clearance radius for batch processing
-    pad_centers_by_radius: Dict[int, List[Tuple[int, int]]] = {}
+    pad_centers_by_radius: dict[int, list[tuple[int, int]]] = {}
     for pad_net_id, pads in pcb_data.pads_by_net.items():
         for pad in pads:
-            if '*.Cu' in pad.layers and pad.drill > 0:  # Through-hole pad with drill
+            if "*.Cu" in pad.layers and pad.drill > 0:  # Through-hole pad with drill
                 gx, gy = coord.to_grid(pad.global_x, pad.global_y)
-                pad_hole_clearance_grid = max(1, coord.to_grid_dist(hole_to_hole_clearance + pad.drill / 2 + config.via_drill / 2))
+                pad_hole_clearance_grid = max(
+                    1, coord.to_grid_dist(hole_to_hole_clearance + pad.drill / 2 + config.via_drill / 2)
+                )
                 if pad_hole_clearance_grid not in pad_centers_by_radius:
                     pad_centers_by_radius[pad_hole_clearance_grid] = []
                 pad_centers_by_radius[pad_hole_clearance_grid].append((gx, gy))
@@ -1174,7 +1159,7 @@ def build_base_obstacles(
         for pad in pads:
             # Determine which layers this pad is on
             pad_layers_on = []
-            if '*.Cu' in pad.layers:
+            if "*.Cu" in pad.layers:
                 pad_layers_on = list(range(num_layers))
             else:
                 for pl in pad.layers:
@@ -1228,14 +1213,14 @@ def build_base_obstacles(
 
 def add_route_to_obstacles(
     obstacles: GridObstacleMap,
-    route_points: List[Tuple[float, float, str]],
-    via_positions: List[Tuple[float, float]],
-    layer_map: Dict[str, int],
+    route_points: list[tuple[float, float, str]],
+    via_positions: list[tuple[float, float]],
+    layer_map: dict[str, int],
     track_width: float,
     clearance: float,
     via_clearance: float,
     config: GridRouteConfig,
-    hole_to_hole_clearance: float = 0.3
+    hole_to_hole_clearance: float = 0.3,
 ):
     """Add a completed route (segments and vias) to the obstacle map for subsequent routes to avoid."""
     coord = GridCoord(config.grid_step)
@@ -1275,18 +1260,18 @@ def add_route_to_obstacles(
 
 
 def route_plane_connection_wide(
-    source_points: List[Tuple[float, float]],
-    target_points: List[Tuple[float, float]],
+    source_points: list[tuple[float, float]],
+    target_points: list[tuple[float, float]],
     plane_layer_idx: int,
-    routing_layers: List[str],
+    routing_layers: list[str],
     base_obstacles: GridObstacleMap,
     config: GridRouteConfig,
-    net_vias: List[Tuple[float, float]],
+    net_vias: list[tuple[float, float]],
     track_margin: int = 0,
     max_iterations: int = 200000,
     verbose: bool = False,
-    router: Optional[GridRouter] = None
-) -> Optional[Tuple[List[Tuple[float, float, str]], List[Tuple[float, float]]]]:
+    router: GridRouter | None = None,
+) -> tuple[list[tuple[float, float, str]], list[tuple[float, float]]] | None:
     """
     Route a wide trace between any source point and any target point.
 
@@ -1361,17 +1346,20 @@ def route_plane_connection_wide(
             turn_cost=config.turn_cost,
             via_proximity_cost=0,
             layer_costs=config.get_layer_costs(),
-            proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+            proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
         )
 
     path, iterations, _ = router.route_with_frontier(
-        obstacles, sources, targets, max_iterations,
+        obstacles,
+        sources,
+        targets,
+        max_iterations,
         False,  # collinear_vias
-        0,      # via_exclusion_radius
-        None,   # start_direction
-        None,   # end_direction
-        0,      # direction_steps
-        track_margin  # extra margin for wide tracks
+        0,  # via_exclusion_radius
+        None,  # start_direction
+        None,  # end_direction
+        0,  # direction_steps
+        track_margin,  # extra margin for wide tracks
     )
 
     if path is None:
@@ -1383,7 +1371,7 @@ def route_plane_connection_wide(
         print(f"    Route found in {iterations} iterations, {len(path)} points")
 
     # Convert path to float coordinates with layer info
-    route_points: List[Tuple[float, float, str]] = []
+    route_points: list[tuple[float, float, str]] = []
     for i, (gx, gy, layer_idx) in enumerate(path):
         x, y = coord.to_float(gx, gy)
         layer_name = routing_layers[layer_idx]
@@ -1392,11 +1380,11 @@ def route_plane_connection_wide(
     # Find layer transitions and add vias where needed
     # Routes can now start/end at existing vias on any layer, so we only need to add
     # new vias where the route transitions between layers at a new location
-    new_via_positions: List[Tuple[float, float]] = []
-    added_via_keys: Set[Tuple[float, float]] = set()
+    new_via_positions: list[tuple[float, float]] = []
+    added_via_keys: set[tuple[float, float]] = set()
 
     for i in range(1, len(route_points)):
-        if route_points[i][2] != route_points[i-1][2]:
+        if route_points[i][2] != route_points[i - 1][2]:
             # Layer transition - check if we need a new via
             via_x, via_y = route_points[i - 1][0], route_points[i - 1][1]
             via_key = (round(via_x, POSITION_DECIMALS), round(via_y, POSITION_DECIMALS))
@@ -1407,7 +1395,7 @@ def route_plane_connection_wide(
                 added_via_keys.add(via_key)
 
     # Remove duplicate consecutive points (same x,y) keeping layer transitions
-    cleaned_points: List[Tuple[float, float, str]] = []
+    cleaned_points: list[tuple[float, float, str]] = []
     for pt in route_points:
         if cleaned_points:
             last = cleaned_points[-1]
@@ -1419,11 +1407,7 @@ def route_plane_connection_wide(
 
 
 def _block_segment_obstacle(
-    obstacles: GridObstacleMap,
-    seg: Segment,
-    coord: GridCoord,
-    layer_idx: int,
-    expansion_grid: int
+    obstacles: GridObstacleMap, seg: Segment, coord: GridCoord, layer_idx: int, expansion_grid: int
 ):
     """Block cells along a segment in the obstacle map."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
@@ -1431,24 +1415,14 @@ def _block_segment_obstacle(
     _block_line_cells(obstacles, gx1, gy1, gx2, gy2, layer_idx, expansion_grid)
 
 
-def _block_segment_via_obstacle(
-    obstacles: GridObstacleMap,
-    seg: Segment,
-    coord: GridCoord,
-    expansion_grid: int
-):
+def _block_segment_via_obstacle(obstacles: GridObstacleMap, seg: Segment, coord: GridCoord, expansion_grid: int):
     """Block via placement along a segment (vias span all layers)."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
     _block_line_vias(obstacles, gx1, gy1, gx2, gy2, expansion_grid)
 
 
-def _block_line_vias(
-    obstacles: GridObstacleMap,
-    gx1: int, gy1: int,
-    gx2: int, gy2: int,
-    expansion_grid: int
-):
+def _block_line_vias(obstacles: GridObstacleMap, gx1: int, gy1: int, gx2: int, gy2: int, expansion_grid: int):
     """Block via placement along a line with given expansion radius."""
     radius_sq = expansion_grid * expansion_grid
     circle_offsets = _precompute_circle_offsets(radius_sq)
@@ -1457,11 +1431,7 @@ def _block_line_vias(
 
 
 def _block_line_cells(
-    obstacles: GridObstacleMap,
-    gx1: int, gy1: int,
-    gx2: int, gy2: int,
-    layer_idx: int,
-    expansion_grid: int
+    obstacles: GridObstacleMap, gx1: int, gy1: int, gx2: int, gy2: int, layer_idx: int, expansion_grid: int
 ):
     """Block cells along a line with given expansion radius."""
     radius_sq = expansion_grid * expansion_grid

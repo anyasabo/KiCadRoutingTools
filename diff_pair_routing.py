@@ -5,23 +5,26 @@ Routes differential pairs (P and N nets) together using centerline + offset appr
 """
 
 import math
-from typing import List, Optional, Tuple, Dict
+import os
 
-from kicad_parser import PCBData, Segment, Via
-from routing_config import GridRouteConfig, GridCoord, DiffPairNet
-from routing_utils import segment_length, build_layer_map
-from connectivity import (
-    find_connected_groups, find_stub_free_ends, get_stub_direction, get_net_endpoints,
-    get_stub_segments, get_stub_vias, calculate_stub_via_barrel_length
-)
-from obstacle_map import check_line_clearance
-from geometry_utils import simplify_path
 # Note: Layer switching is now done upfront in route.py, not during routing
-
 # Import Rust router
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+
+from connectivity import (
+    calculate_stub_via_barrel_length,
+    get_net_endpoints,
+    get_stub_direction,
+    get_stub_segments,
+    get_stub_vias,
+)
+from geometry_utils import simplify_path
+from kicad_parser import PCBData, Segment, Via
+from obstacle_map import check_line_clearance
+from routing_config import DiffPairNet, GridCoord, GridRouteConfig
+from routing_utils import build_layer_map, segment_length
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
 try:
     from grid_router import GridObstacleMap, GridRouter, PoseRouter
@@ -34,14 +37,14 @@ except ImportError:
 # Map direction (dx, dy) to theta_idx (0-7) for pose-based routing
 # DIRECTIONS in Rust: E(1,0)=0, NE(1,-1)=1, N(0,-1)=2, NW(-1,-1)=3, W(-1,0)=4, SW(-1,1)=5, S(0,1)=6, SE(1,1)=7
 DIRECTION_TO_THETA = {
-    (1, 0): 0,    # East
-    (1, -1): 1,   # NE
-    (0, -1): 2,   # North
+    (1, 0): 0,  # East
+    (1, -1): 1,  # NE
+    (0, -1): 2,  # North
     (-1, -1): 3,  # NW
-    (-1, 0): 4,   # West
-    (-1, 1): 5,   # SW
-    (0, 1): 6,    # South
-    (1, 1): 7,    # SE
+    (-1, 0): 4,  # West
+    (-1, 1): 5,  # SW
+    (0, 1): 6,  # South
+    (1, 1): 7,  # SE
 }
 
 
@@ -51,7 +54,7 @@ def direction_to_theta_idx(dx: float, dy: float) -> int:
         return 0  # Default to East if no direction
 
     # Normalize
-    length = math.sqrt(dx*dx + dy*dy)
+    length = math.sqrt(dx * dx + dy * dy)
     ndx = dx / length
     ndy = dy / length
 
@@ -63,13 +66,26 @@ def direction_to_theta_idx(dx: float, dy: float) -> int:
 
     # Map angle to theta_idx (each sector is 45 degrees = pi/4)
     # Add pi/8 to center each sector around the direction
-    theta_idx = int((angle + math.pi/8) / (math.pi/4)) % 8
+    theta_idx = int((angle + math.pi / 8) / (math.pi / 4)) % 8
     return theta_idx
 
 
-def _find_open_positions(center_x, center_y, dir_x, dir_y, layer_idx, setback,
-                         label, layer_names, spacing_mm, config, obstacles,
-                         connector_obstacles, coord, neighbor_stubs):
+def _find_open_positions(
+    center_x,
+    center_y,
+    dir_x,
+    dir_y,
+    layer_idx,
+    setback,
+    label,
+    layer_names,
+    spacing_mm,
+    config,
+    obstacles,
+    connector_obstacles,
+    coord,
+    neighbor_stubs,
+):
     """Find open position for setback, preferring 0° but angling away from nearby stubs if needed.
 
     Only angles away from 0° if the nearest unrouted stub is too close (within
@@ -86,11 +102,17 @@ def _find_open_positions(center_x, center_y, dir_x, dir_y, layer_idx, setback,
 
     # Generate angles: 0, then ±max/4, ±max/2, ±3*max/4, ±max
     max_angle = config.max_setback_angle
-    angles_deg = [0,
-                  max_angle / 4, -max_angle / 4,
-                  max_angle / 2, -max_angle / 2,
-                  3 * max_angle / 4, -3 * max_angle / 4,
-                  max_angle, -max_angle]
+    angles_deg = [
+        0,
+        max_angle / 4,
+        -max_angle / 4,
+        max_angle / 2,
+        -max_angle / 2,
+        3 * max_angle / 4,
+        -3 * max_angle / 4,
+        max_angle,
+        -max_angle,
+    ]
 
     def check_angle_valid(angle_deg):
         """Check if angle is valid (not blocked). Returns (gx, gy, dx, dy, x, y) or None."""
@@ -119,13 +141,13 @@ def _find_open_positions(center_x, center_y, dir_x, dir_y, layer_idx, setback,
 
     def find_nearest_stub(x, y):
         """Find nearest same-layer stub from position (x, y). Returns (dist, stub_x, stub_y) or (inf, None, None)."""
-        min_dist = float('inf')
+        min_dist = float("inf")
         closest = (None, None)
         if neighbor_stubs:
             for stub_x, stub_y, stub_layer in neighbor_stubs:
                 if stub_layer != current_layer:
                     continue
-                dist = math.sqrt((x - stub_x)**2 + (y - stub_y)**2)
+                dist = math.sqrt((x - stub_x) ** 2 + (y - stub_y) ** 2)
                 if dist < min_dist:
                     min_dist = dist
                     closest = (stub_x, stub_y)
@@ -152,14 +174,18 @@ def _find_open_positions(center_x, center_y, dir_x, dir_y, layer_idx, setback,
             # 0° is valid and has enough clearance - use it as primary
             if config.verbose:
                 if stub_x is not None:
-                    print(f"      {label} 0.0°: OK (nearest stub at ({stub_x:.1f},{stub_y:.1f}) dist={dist:.2f}mm >= {required_clearance:.2f}mm)")
+                    print(
+                        f"      {label} 0.0°: OK (nearest stub at ({stub_x:.1f},{stub_y:.1f}) dist={dist:.2f}mm >= {required_clearance:.2f}mm)"
+                    )
                 else:
                     print(f"      {label} 0.0°: OK (no nearby stubs on {current_layer})")
             return [(gx, gy, dx, dy, 0.0, dist)] + other_candidates
 
         # 0° is valid but too close to stub - need to angle away
         if config.verbose:
-            print(f"      {label} 0.0°: too close to stub at ({stub_x:.1f},{stub_y:.1f}) dist={dist:.2f}mm < {required_clearance:.2f}mm")
+            print(
+                f"      {label} 0.0°: too close to stub at ({stub_x:.1f},{stub_y:.1f}) dist={dist:.2f}mm < {required_clearance:.2f}mm"
+            )
 
         # Determine which direction to angle based on stub position
         # Cross product: positive means stub is on left (+angle side)
@@ -213,17 +239,24 @@ def _find_open_positions(center_x, center_y, dir_x, dir_y, layer_idx, setback,
     return valid_candidates
 
 
-def _collect_setback_blocked_cells(center_x, center_y, dir_x, dir_y, layer_idx, setback,
-                                    config, obstacles, connector_obstacles, coord):
+def _collect_setback_blocked_cells(
+    center_x, center_y, dir_x, dir_y, layer_idx, setback, config, obstacles, connector_obstacles, coord
+):
     """Collect blocked cells at setback positions for rip-up analysis.
     Called only after _find_open_positions returns empty list.
     """
     max_angle = config.max_setback_angle
-    angles_deg = [0,
-                  max_angle / 4, -max_angle / 4,
-                  max_angle / 2, -max_angle / 2,
-                  3 * max_angle / 4, -3 * max_angle / 4,
-                  max_angle, -max_angle]
+    angles_deg = [
+        0,
+        max_angle / 4,
+        -max_angle / 4,
+        max_angle / 2,
+        -max_angle / 2,
+        3 * max_angle / 4,
+        -3 * max_angle / 4,
+        max_angle,
+        -max_angle,
+    ]
     blocked = []
     step = config.grid_step / 2
 
@@ -244,7 +277,7 @@ def _collect_setback_blocked_cells(center_x, center_y, dir_x, dir_y, layer_idx, 
                 blocked.append((gx, gy, layer_idx))
 
         # Collect blocked cells along connector path
-        length = math.sqrt((x - center_x)**2 + (y - center_y)**2)
+        length = math.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
         if length > 0:
             path_dx = (x - center_x) / length
             path_dy = (y - center_y) / length
@@ -271,10 +304,9 @@ def _collect_setback_blocked_cells(center_x, center_y, dir_x, dir_y, layer_idx, 
     return blocked
 
 
-def _detect_polarity(simplified_path, coord,
-                     p_src_x, p_src_y, n_src_x, n_src_y,
-                     p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y,
-                     config):
+def _detect_polarity(
+    simplified_path, coord, p_src_x, p_src_y, n_src_x, n_src_y, p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y, config
+):
     """
     Detect which side of the centerline P should be on and whether polarity swap is needed.
 
@@ -323,7 +355,7 @@ def _detect_polarity(simplified_path, coord,
         last_gx2, last_gy2, _ = simplified_path[-1]
         last_cx1, last_cy1 = coord.to_float(last_gx1, last_gy1)
         last_cx2, last_cy2 = coord.to_float(last_gx2, last_gy2)
-        last_len = math.sqrt((last_cx2 - last_cx1)**2 + (last_cy2 - last_cy1)**2)
+        last_len = math.sqrt((last_cx2 - last_cx1) ** 2 + (last_cy2 - last_cy1) ** 2)
         if last_len > 0.001:
             tgt_path_dir_x = (last_cx2 - last_cx1) / last_len
             tgt_path_dir_y = (last_cy2 - last_cy1) / last_len
@@ -343,7 +375,7 @@ def _detect_polarity(simplified_path, coord,
     tgt_p_sign = +1 if tgt_cross >= 0 else -1
 
     # Check if polarity differs between source and target
-    polarity_swap_needed = (src_p_sign != tgt_p_sign)
+    polarity_swap_needed = src_p_sign != tgt_p_sign
 
     # Check if path has layer changes (vias)
     has_layer_change = False
@@ -357,7 +389,7 @@ def _detect_polarity(simplified_path, coord,
     # This preserves the P→P, N→N geometry and fixes polarity at the schematic level
     polarity_fixed = False
     if polarity_swap_needed and config.fix_polarity:
-        print(f"  Polarity swap needed - will swap target pad and stub nets in output")
+        print("  Polarity swap needed - will swap target pad and stub nets in output")
         polarity_fixed = True
 
     # Always use source polarity
@@ -446,7 +478,7 @@ def _create_gnd_vias(simplified_path, coord, config, layer_names, spacing_mm, gn
     # Calculate GND via perpendicular offset: track edge + clearance + via radius
     # Use max track width for clearance since track width varies by layer
     max_track_width = config.get_max_track_width()
-    gnd_via_perp_mm = spacing_mm + max_track_width/2 + config.clearance + config.via_size/2
+    gnd_via_perp_mm = spacing_mm + max_track_width / 2 + config.clearance + config.via_size / 2
     via_via_dist_mm = config.via_size + config.clearance
 
     # Track which layer change we're processing to get direction from gnd_via_dirs
@@ -465,7 +497,7 @@ def _create_gnd_vias(simplified_path, coord, config, layer_names, spacing_mm, gn
             next_cx, next_cy = coord.to_float(gx2, gy2)
             dx = next_cx - cx
             dy = next_cy - cy
-            length = math.sqrt(dx*dx + dy*dy)
+            length = math.sqrt(dx * dx + dy * dy)
             if length > 0.001:
                 dx /= length
                 dy /= length
@@ -476,7 +508,7 @@ def _create_gnd_vias(simplified_path, coord, config, layer_names, spacing_mm, gn
                     prev_cx, prev_cy = coord.to_float(prev_gx, prev_gy)
                     dx = cx - prev_cx
                     dy = cy - prev_cy
-                    length = math.sqrt(dx*dx + dy*dy)
+                    length = math.sqrt(dx * dx + dy * dy)
                     if length > 0.001:
                         dx /= length
                         dy /= length
@@ -500,53 +532,90 @@ def _create_gnd_vias(simplified_path, coord, config, layer_names, spacing_mm, gn
             gnd_n_y = cy - perp_y * gnd_via_perp_mm + dy * via_via_dist_mm * gnd_dir
 
             # Create GND vias (free=True prevents KiCad auto-assigning net)
-            gnd_vias.append(Via(
-                x=gnd_p_x, y=gnd_p_y,
-                size=config.via_size,
-                drill=config.via_drill,
-                layers=["F.Cu", "B.Cu"],  # Always through-hole
-                net_id=gnd_net_id,
-                free=True
-            ))
-            gnd_vias.append(Via(
-                x=gnd_n_x, y=gnd_n_y,
-                size=config.via_size,
-                drill=config.via_drill,
-                layers=["F.Cu", "B.Cu"],  # Always through-hole
-                net_id=gnd_net_id,
-                free=True
-            ))
+            gnd_vias.append(
+                Via(
+                    x=gnd_p_x,
+                    y=gnd_p_y,
+                    size=config.via_size,
+                    drill=config.via_drill,
+                    layers=["F.Cu", "B.Cu"],  # Always through-hole
+                    net_id=gnd_net_id,
+                    free=True,
+                )
+            )
+            gnd_vias.append(
+                Via(
+                    x=gnd_n_x,
+                    y=gnd_n_y,
+                    size=config.via_size,
+                    drill=config.via_drill,
+                    layers=["F.Cu", "B.Cu"],  # Always through-hole
+                    net_id=gnd_net_id,
+                    free=True,
+                )
+            )
 
     return gnd_vias
 
 
-def _make_route_data(pose_path, p_src_x, p_src_y, n_src_x, n_src_y,
-                     p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y,
-                     src_dir_x, src_dir_y, tgt_dir_x, tgt_dir_y,
-                     src_actual_dir, tgt_actual_dir,
-                     center_src_x, center_src_y, center_tgt_x, center_tgt_y,
-                     via_spacing, src_angle, tgt_angle, gnd_via_dirs=None):
+def _make_route_data(
+    pose_path,
+    p_src_x,
+    p_src_y,
+    n_src_x,
+    n_src_y,
+    p_tgt_x,
+    p_tgt_y,
+    n_tgt_x,
+    n_tgt_y,
+    src_dir_x,
+    src_dir_y,
+    tgt_dir_x,
+    tgt_dir_y,
+    src_actual_dir,
+    tgt_actual_dir,
+    center_src_x,
+    center_src_y,
+    center_tgt_x,
+    center_tgt_y,
+    via_spacing,
+    src_angle,
+    tgt_angle,
+    gnd_via_dirs=None,
+):
     """Build route_data dictionary with all routing result info."""
     return {
-        'pose_path': pose_path,
-        'p_src_x': p_src_x, 'p_src_y': p_src_y,
-        'n_src_x': n_src_x, 'n_src_y': n_src_y,
-        'p_tgt_x': p_tgt_x, 'p_tgt_y': p_tgt_y,
-        'n_tgt_x': n_tgt_x, 'n_tgt_y': n_tgt_y,
-        'src_dir_x': src_dir_x, 'src_dir_y': src_dir_y,
-        'tgt_dir_x': tgt_dir_x, 'tgt_dir_y': tgt_dir_y,
-        'src_actual_dir_x': src_actual_dir[0], 'src_actual_dir_y': src_actual_dir[1],
-        'tgt_actual_dir_x': tgt_actual_dir[0], 'tgt_actual_dir_y': tgt_actual_dir[1],
-        'center_src_x': center_src_x, 'center_src_y': center_src_y,
-        'center_tgt_x': center_tgt_x, 'center_tgt_y': center_tgt_y,
-        'via_spacing': via_spacing,
-        'best_src_angle': src_angle, 'best_tgt_angle': tgt_angle,
-        'gnd_via_dirs': gnd_via_dirs if gnd_via_dirs is not None else [],
+        "pose_path": pose_path,
+        "p_src_x": p_src_x,
+        "p_src_y": p_src_y,
+        "n_src_x": n_src_x,
+        "n_src_y": n_src_y,
+        "p_tgt_x": p_tgt_x,
+        "p_tgt_y": p_tgt_y,
+        "n_tgt_x": n_tgt_x,
+        "n_tgt_y": n_tgt_y,
+        "src_dir_x": src_dir_x,
+        "src_dir_y": src_dir_y,
+        "tgt_dir_x": tgt_dir_x,
+        "tgt_dir_y": tgt_dir_y,
+        "src_actual_dir_x": src_actual_dir[0],
+        "src_actual_dir_y": src_actual_dir[1],
+        "tgt_actual_dir_x": tgt_actual_dir[0],
+        "tgt_actual_dir_y": tgt_actual_dir[1],
+        "center_src_x": center_src_x,
+        "center_src_y": center_src_y,
+        "center_tgt_x": center_tgt_x,
+        "center_tgt_y": center_tgt_y,
+        "via_spacing": via_spacing,
+        "best_src_angle": src_angle,
+        "best_tgt_angle": tgt_angle,
+        "gnd_via_dirs": gnd_via_dirs if gnd_via_dirs is not None else [],
     }
 
 
-def _generate_debug_arrows(center_src_x, center_src_y, src_dir_x, src_dir_y,
-                           center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y):
+def _generate_debug_arrows(
+    center_src_x, center_src_y, src_dir_x, src_dir_y, center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y
+):
     """Generate stub direction arrows for debug visualization (User.4 layer).
 
     Returns list of ((start_x, start_y), (end_x, end_y)) line segments.
@@ -558,7 +627,7 @@ def _generate_debug_arrows(center_src_x, center_src_y, src_dir_x, src_dir_y,
 
     for mid_x, mid_y, dir_x, dir_y in [
         (center_src_x, center_src_y, src_dir_x, src_dir_y),
-        (center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y)
+        (center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y),
     ]:
         # Arrow shaft
         tip_x = mid_x + dir_x * arrow_length
@@ -578,9 +647,19 @@ def _generate_debug_arrows(center_src_x, center_src_y, src_dir_x, src_dir_y,
     return arrows
 
 
-def _float_path_to_geometry(float_path, net_id, original_start, original_end, sign,
-                            src_stub_dir, tgt_stub_dir, src_extension, tgt_extension,
-                            config, layer_names):
+def _float_path_to_geometry(
+    float_path,
+    net_id,
+    original_start,
+    original_end,
+    sign,
+    src_stub_dir,
+    tgt_stub_dir,
+    src_extension,
+    tgt_extension,
+    config,
+    layer_names,
+):
     """Convert floating-point path (x, y, layer) to segments and vias.
 
     Adds extension segments to ensure P and N connectors are parallel.
@@ -632,33 +711,45 @@ def _float_path_to_geometry(float_path, net_id, original_start, original_end, si
                 ext_x = orig_x + src_stub_dir[0] * src_extension
                 ext_y = orig_y + src_stub_dir[1] * src_extension
 
-                segs.append(Segment(
-                    start_x=orig_x, start_y=orig_y,
-                    end_x=ext_x, end_y=ext_y,
-                    width=config.track_width,
-                    layer=first_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=orig_x,
+                        start_y=orig_y,
+                        end_x=ext_x,
+                        end_y=ext_y,
+                        width=config.track_width,
+                        layer=first_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 # Connector from extension to route
-                segs.append(Segment(
-                    start_x=ext_x, start_y=ext_y,
-                    end_x=first_x, end_y=first_y,
-                    width=config.track_width,
-                    layer=first_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=ext_x,
+                        start_y=ext_y,
+                        end_x=first_x,
+                        end_y=first_y,
+                        width=config.track_width,
+                        layer=first_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 if config.debug_lines:
                     connector_lines.append(((orig_x, orig_y), (ext_x, ext_y)))
                     connector_lines.append(((ext_x, ext_y), (first_x, first_y)))
             else:
                 # No extension needed, direct connector
-                segs.append(Segment(
-                    start_x=orig_x, start_y=orig_y,
-                    end_x=first_x, end_y=first_y,
-                    width=config.track_width,
-                    layer=first_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=orig_x,
+                        start_y=orig_y,
+                        end_x=first_x,
+                        end_y=first_y,
+                        width=config.track_width,
+                        layer=first_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 if config.debug_lines:
                     connector_lines.append(((orig_x, orig_y), (first_x, first_y)))
 
@@ -669,23 +760,30 @@ def _float_path_to_geometry(float_path, net_id, original_start, original_end, si
 
         if layer1 != layer2:
             # Layer change - add via
-            vias.append(Via(
-                x=x1, y=y1,
-                size=config.via_size,
-                drill=config.via_drill,
-                layers=["F.Cu", "B.Cu"],  # Always through-hole
-                net_id=net_id
-            ))
+            vias.append(
+                Via(
+                    x=x1,
+                    y=y1,
+                    size=config.via_size,
+                    drill=config.via_drill,
+                    layers=["F.Cu", "B.Cu"],  # Always through-hole
+                    net_id=net_id,
+                )
+            )
         elif abs(x1 - x2) > 0.001 or abs(y1 - y2) > 0.001:
             # Always use actual layer for segment
             layer_name = layer_names[layer1]
-            segs.append(Segment(
-                start_x=x1, start_y=y1,
-                end_x=x2, end_y=y2,
-                width=config.get_track_width(layer_name),
-                layer=layer_name,
-                net_id=net_id
-            ))
+            segs.append(
+                Segment(
+                    start_x=x1,
+                    start_y=y1,
+                    end_x=x2,
+                    end_y=y2,
+                    width=config.get_track_width(layer_name),
+                    layer=layer_name,
+                    net_id=net_id,
+                )
+            )
 
     # Add connecting segment to original end if needed
     if original_end and len(float_path) > 0:
@@ -717,41 +815,54 @@ def _float_path_to_geometry(float_path, net_id, original_start, original_end, si
                 ext_y = orig_y + tgt_stub_dir[1] * tgt_extension
 
                 # Connector from route to extension point
-                segs.append(Segment(
-                    start_x=last_x, start_y=last_y,
-                    end_x=ext_x, end_y=ext_y,
-                    width=config.track_width,
-                    layer=last_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=last_x,
+                        start_y=last_y,
+                        end_x=ext_x,
+                        end_y=ext_y,
+                        width=config.track_width,
+                        layer=last_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 # Extension back to stub endpoint
-                segs.append(Segment(
-                    start_x=ext_x, start_y=ext_y,
-                    end_x=orig_x, end_y=orig_y,
-                    width=config.track_width,
-                    layer=last_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=ext_x,
+                        start_y=ext_y,
+                        end_x=orig_x,
+                        end_y=orig_y,
+                        width=config.track_width,
+                        layer=last_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 if config.debug_lines:
                     connector_lines.append(((last_x, last_y), (ext_x, ext_y)))
                     connector_lines.append(((ext_x, ext_y), (orig_x, orig_y)))
             else:
                 # No extension needed, direct connector
-                segs.append(Segment(
-                    start_x=last_x, start_y=last_y,
-                    end_x=orig_x, end_y=orig_y,
-                    width=config.track_width,
-                    layer=last_layer_name,
-                    net_id=net_id
-                ))
+                segs.append(
+                    Segment(
+                        start_x=last_x,
+                        start_y=last_y,
+                        end_x=orig_x,
+                        end_y=orig_y,
+                        width=config.track_width,
+                        layer=last_layer_name,
+                        net_id=net_id,
+                    )
+                )
                 if config.debug_lines:
                     connector_lines.append(((last_x, last_y), (orig_x, orig_y)))
 
     return segs, vias, connector_lines
 
 
-def get_diff_pair_endpoints(pcb_data: PCBData, p_net_id: int, n_net_id: int,
-                             config: GridRouteConfig) -> Tuple[List, List, str]:
+def get_diff_pair_endpoints(
+    pcb_data: PCBData, p_net_id: int, n_net_id: int, config: GridRouteConfig
+) -> tuple[list, list, str]:
     """
     Find source and target endpoints for a differential pair.
 
@@ -792,7 +903,7 @@ def get_diff_pair_endpoints(pcb_data: PCBData, p_net_id: int, n_net_id: int,
     def find_closest_pair(p_endpoints, n_endpoints):
         """Find the P and N endpoints that are closest to each other on same layer."""
         best_p, best_n = None, None
-        best_dist = float('inf')
+        best_dist = float("inf")
         for p in p_endpoints:
             p_gx, p_gy, p_layer = p[0], p[1], p[2]
             for n in n_endpoints:
@@ -823,21 +934,33 @@ def get_diff_pair_endpoints(pcb_data: PCBData, p_net_id: int, n_net_id: int,
         return [], [], "Could not find matching P and N target endpoints on same layer"
 
     # Build the paired source and target tuples
-    paired_sources = [(
-        p_src[0], p_src[1],  # P grid coords
-        n_src[0], n_src[1],  # N grid coords
-        p_src[2],  # layer
-        p_src[3], p_src[4],  # P original coords
-        n_src[3], n_src[4]  # N original coords
-    )]
+    paired_sources = [
+        (
+            p_src[0],
+            p_src[1],  # P grid coords
+            n_src[0],
+            n_src[1],  # N grid coords
+            p_src[2],  # layer
+            p_src[3],
+            p_src[4],  # P original coords
+            n_src[3],
+            n_src[4],  # N original coords
+        )
+    ]
 
-    paired_targets = [(
-        p_tgt[0], p_tgt[1],  # P grid coords
-        n_tgt[0], n_tgt[1],  # N grid coords
-        p_tgt[2],  # layer
-        p_tgt[3], p_tgt[4],  # P original coords
-        n_tgt[3], n_tgt[4]  # N original coords
-    )]
+    paired_targets = [
+        (
+            p_tgt[0],
+            p_tgt[1],  # P grid coords
+            n_tgt[0],
+            n_tgt[1],  # N grid coords
+            p_tgt[2],  # layer
+            p_tgt[3],
+            p_tgt[4],  # P original coords
+            n_tgt[3],
+            n_tgt[4],  # N original coords
+        )
+    ]
 
     return paired_sources, paired_targets, None
 
@@ -860,8 +983,7 @@ def create_parallel_path_float(centerline_path, coord, sign, spacing_mm=0.1, sta
         List of (x, y, layer) floating-point coordinates
     """
     if len(centerline_path) < 2:
-        return [(coord.to_float(p[0], p[1])[0], coord.to_float(p[0], p[1])[1], p[2])
-                for p in centerline_path]
+        return [(coord.to_float(p[0], p[1])[0], coord.to_float(p[0], p[1])[1], p[2]) for p in centerline_path]
 
     result = []
 
@@ -874,12 +996,12 @@ def create_parallel_path_float(centerline_path, coord, sign, spacing_mm=0.1, sta
             # First point: bisector between start_dir (if provided) and first segment
             next_x, next_y = coord.to_float(centerline_path[1][0], centerline_path[1][1])
             seg_dx, seg_dy = next_x - x, next_y - y
-            seg_len = math.sqrt(seg_dx*seg_dx + seg_dy*seg_dy) or 1
-            seg_dx, seg_dy = seg_dx/seg_len, seg_dy/seg_len
+            seg_len = math.sqrt(seg_dx * seg_dx + seg_dy * seg_dy) or 1
+            seg_dx, seg_dy = seg_dx / seg_len, seg_dy / seg_len
 
             if start_dir is not None:
                 # Normalize start_dir
-                dir_len = math.sqrt(start_dir[0]**2 + start_dir[1]**2) or 1
+                dir_len = math.sqrt(start_dir[0] ** 2 + start_dir[1] ** 2) or 1
                 norm_start_dx = start_dir[0] / dir_len
                 norm_start_dy = start_dir[1] / dir_len
                 # Bisector between start_dir and first segment direction
@@ -891,14 +1013,14 @@ def create_parallel_path_float(centerline_path, coord, sign, spacing_mm=0.1, sta
                 use_corner_scale = False  # Single segment, no corner scaling
         elif i == len(centerline_path) - 1:
             # Last point: bisector between last segment and end_dir (if provided)
-            prev_x, prev_y = coord.to_float(centerline_path[i-1][0], centerline_path[i-1][1])
+            prev_x, prev_y = coord.to_float(centerline_path[i - 1][0], centerline_path[i - 1][1])
             seg_dx, seg_dy = x - prev_x, y - prev_y
-            seg_len = math.sqrt(seg_dx*seg_dx + seg_dy*seg_dy) or 1
-            seg_dx, seg_dy = seg_dx/seg_len, seg_dy/seg_len
+            seg_len = math.sqrt(seg_dx * seg_dx + seg_dy * seg_dy) or 1
+            seg_dx, seg_dy = seg_dx / seg_len, seg_dy / seg_len
 
             if end_dir is not None:
                 # Normalize end_dir
-                dir_len = math.sqrt(end_dir[0]**2 + end_dir[1]**2) or 1
+                dir_len = math.sqrt(end_dir[0] ** 2 + end_dir[1] ** 2) or 1
                 norm_end_dx = end_dir[0] / dir_len
                 norm_end_dy = end_dir[1] / dir_len
                 # Bisector between last segment direction and end_dir
@@ -910,8 +1032,8 @@ def create_parallel_path_float(centerline_path, coord, sign, spacing_mm=0.1, sta
                 use_corner_scale = False  # Single segment, no corner scaling
         else:
             # Corner: use bisector of incoming and outgoing directions
-            prev = centerline_path[i-1]
-            next_pt = centerline_path[i+1]
+            prev = centerline_path[i - 1]
+            next_pt = centerline_path[i + 1]
 
             if prev[2] != layer or next_pt[2] != layer:
                 # Layer change - use incoming direction
@@ -924,19 +1046,19 @@ def create_parallel_path_float(centerline_path, coord, sign, spacing_mm=0.1, sta
                 dx_in, dy_in = x - prev_x, y - prev_y
                 dx_out, dy_out = next_x - x, next_y - y
 
-                len_in = math.sqrt(dx_in*dx_in + dy_in*dy_in) or 1
-                len_out = math.sqrt(dx_out*dx_out + dy_out*dy_out) or 1
+                len_in = math.sqrt(dx_in * dx_in + dy_in * dy_in) or 1
+                len_out = math.sqrt(dx_out * dx_out + dy_out * dy_out) or 1
 
                 # Bisector direction (sum of unit vectors)
-                dx = dx_in/len_in + dx_out/len_out
-                dy = dy_in/len_in + dy_out/len_out
+                dx = dx_in / len_in + dx_out / len_out
+                dy = dy_in / len_in + dy_out / len_out
 
                 if abs(dx) < 0.01 and abs(dy) < 0.01:
                     dx, dy = dx_in, dy_in
 
         # Normalize and compute perpendicular offset
-        length = math.sqrt(dx*dx + dy*dy) or 1
-        ndx, ndy = dx/length, dy/length
+        length = math.sqrt(dx * dx + dy * dy) or 1
+        ndx, ndy = dx / length, dy / length
 
         # Corner compensation: scale offset by 2/length to maintain perpendicular distance
         # When summing two unit vectors, length = 2*cos(theta/2) where theta is angle between them
@@ -985,12 +1107,12 @@ def create_parallel_path_from_float(centerline_path, sign, spacing_mm=0.1, start
             # First point: bisector between start_dir (if provided) and first segment
             next_x, next_y, _ = centerline_path[1]
             seg_dx, seg_dy = next_x - x, next_y - y
-            seg_len = math.sqrt(seg_dx*seg_dx + seg_dy*seg_dy) or 1
-            seg_dx, seg_dy = seg_dx/seg_len, seg_dy/seg_len
+            seg_len = math.sqrt(seg_dx * seg_dx + seg_dy * seg_dy) or 1
+            seg_dx, seg_dy = seg_dx / seg_len, seg_dy / seg_len
 
             if start_dir is not None:
                 # Normalize start_dir
-                dir_len = math.sqrt(start_dir[0]**2 + start_dir[1]**2) or 1
+                dir_len = math.sqrt(start_dir[0] ** 2 + start_dir[1] ** 2) or 1
                 norm_start_dx = start_dir[0] / dir_len
                 norm_start_dy = start_dir[1] / dir_len
                 # Bisector between start_dir and first segment direction
@@ -1002,14 +1124,14 @@ def create_parallel_path_from_float(centerline_path, sign, spacing_mm=0.1, start
                 use_corner_scale = False  # Single segment, no corner scaling
         elif i == len(centerline_path) - 1:
             # Last point: bisector between last segment and end_dir (if provided)
-            prev_x, prev_y, _ = centerline_path[i-1]
+            prev_x, prev_y, _ = centerline_path[i - 1]
             seg_dx, seg_dy = x - prev_x, y - prev_y
-            seg_len = math.sqrt(seg_dx*seg_dx + seg_dy*seg_dy) or 1
-            seg_dx, seg_dy = seg_dx/seg_len, seg_dy/seg_len
+            seg_len = math.sqrt(seg_dx * seg_dx + seg_dy * seg_dy) or 1
+            seg_dx, seg_dy = seg_dx / seg_len, seg_dy / seg_len
 
             if end_dir is not None:
                 # Normalize end_dir
-                dir_len = math.sqrt(end_dir[0]**2 + end_dir[1]**2) or 1
+                dir_len = math.sqrt(end_dir[0] ** 2 + end_dir[1] ** 2) or 1
                 norm_end_dx = end_dir[0] / dir_len
                 norm_end_dy = end_dir[1] / dir_len
                 # Bisector between last segment direction and end_dir
@@ -1021,8 +1143,8 @@ def create_parallel_path_from_float(centerline_path, sign, spacing_mm=0.1, start
                 use_corner_scale = False  # Single segment, no corner scaling
         else:
             # Corner: use bisector of incoming and outgoing directions
-            prev = centerline_path[i-1]
-            next_pt = centerline_path[i+1]
+            prev = centerline_path[i - 1]
+            next_pt = centerline_path[i + 1]
 
             if prev[2] != layer or next_pt[2] != layer:
                 # Layer change - use incoming direction
@@ -1035,19 +1157,19 @@ def create_parallel_path_from_float(centerline_path, sign, spacing_mm=0.1, start
                 dx_in, dy_in = x - prev_x, y - prev_y
                 dx_out, dy_out = next_x - x, next_y - y
 
-                len_in = math.sqrt(dx_in*dx_in + dy_in*dy_in) or 1
-                len_out = math.sqrt(dx_out*dx_out + dy_out*dy_out) or 1
+                len_in = math.sqrt(dx_in * dx_in + dy_in * dy_in) or 1
+                len_out = math.sqrt(dx_out * dx_out + dy_out * dy_out) or 1
 
                 # Bisector direction (sum of unit vectors)
-                dx = dx_in/len_in + dx_out/len_out
-                dy = dy_in/len_in + dy_out/len_out
+                dx = dx_in / len_in + dx_out / len_out
+                dy = dy_in / len_in + dy_out / len_out
 
                 if abs(dx) < 0.01 and abs(dy) < 0.01:
                     dx, dy = dx_in, dy_in
 
         # Normalize and compute perpendicular offset
-        length = math.sqrt(dx*dx + dy*dy) or 1
-        ndx, ndy = dx/length, dy/length
+        length = math.sqrt(dx * dx + dy * dy) or 1
+        ndx, ndy = dx / length, dy / length
 
         # Corner compensation: scale offset by 2/length to maintain perpendicular distance
         # When summing two unit vectors, length = 2*cos(theta/2) where theta is angle between them
@@ -1067,8 +1189,7 @@ def create_parallel_path_from_float(centerline_path, sign, spacing_mm=0.1, start
     return result
 
 
-def get_diff_pair_connector_regions(pcb_data: PCBData, diff_pair: DiffPairNet,
-                                     config: GridRouteConfig) -> Optional[dict]:
+def get_diff_pair_connector_regions(pcb_data: PCBData, diff_pair: DiffPairNet, config: GridRouteConfig) -> dict | None:
     """
     Compute connector region parameters for a differential pair.
 
@@ -1126,8 +1247,8 @@ def get_diff_pair_connector_regions(pcb_data: PCBData, diff_pair: DiffPairNet,
     tgt_dir_y = (p_tgt_dir[1] + n_tgt_dir[1]) / 2
 
     # Normalize
-    src_dir_len = math.sqrt(src_dir_x*src_dir_x + src_dir_y*src_dir_y)
-    tgt_dir_len = math.sqrt(tgt_dir_x*tgt_dir_x + tgt_dir_y*tgt_dir_y)
+    src_dir_len = math.sqrt(src_dir_x * src_dir_x + src_dir_y * src_dir_y)
+    tgt_dir_len = math.sqrt(tgt_dir_x * tgt_dir_x + tgt_dir_y * tgt_dir_y)
     if src_dir_len > 0:
         src_dir_x /= src_dir_len
         src_dir_y /= src_dir_len
@@ -1150,21 +1271,35 @@ def get_diff_pair_connector_regions(pcb_data: PCBData, diff_pair: DiffPairNet,
     tgt_setback = setback
 
     return {
-        'src_center': (center_src_x, center_src_y),
-        'src_dir': (src_dir_x, src_dir_y),
-        'src_setback': src_setback,
-        'tgt_center': (center_tgt_x, center_tgt_y),
-        'tgt_dir': (tgt_dir_x, tgt_dir_y),
-        'tgt_setback': tgt_setback,
-        'spacing_mm': spacing_mm,
+        "src_center": (center_src_x, center_src_y),
+        "src_dir": (src_dir_x, src_dir_y),
+        "src_setback": src_setback,
+        "tgt_center": (center_tgt_x, center_tgt_y),
+        "tgt_dir": (tgt_dir_x, tgt_dir_y),
+        "tgt_setback": tgt_setback,
+        "spacing_mm": spacing_mm,
     }
 
 
-def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
-                         coord, layer_names, spacing_mm, p_net_id, n_net_id,
-                         max_iterations_override=None, neighbor_stubs=None,
-                         preferred_angles=None, direction_label=None, is_backward=False,
-                         prox_h_cost=0):
+def _try_route_direction(
+    src,
+    tgt,
+    pcb_data,
+    config,
+    obstacles,
+    base_obstacles,
+    coord,
+    layer_names,
+    spacing_mm,
+    p_net_id,
+    n_net_id,
+    max_iterations_override=None,
+    neighbor_stubs=None,
+    preferred_angles=None,
+    direction_label=None,
+    is_backward=False,
+    prox_h_cost=0,
+):
     """
     Attempt to route a diff pair in one direction.
 
@@ -1198,7 +1333,9 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
     # We need to prevent centerline from returning near the via such that offset tracks would conflict
     # Use max track width for clearance since via connects layers with potentially different widths
     max_track_width = config.get_max_track_width()
-    track_via_clearance = (config.clearance + max_track_width / 2 + config.via_size / 2) * config.routing_clearance_margin
+    track_via_clearance = (
+        config.clearance + max_track_width / 2 + config.via_size / 2
+    ) * config.routing_clearance_margin
     min_via_spacing = config.via_size + config.clearance  # Minimum via center-to-center distance
     min_via_spacing_for_track = track_via_clearance - spacing_mm
     via_spacing = max(spacing_mm, min_via_spacing / 2, min_via_spacing_for_track)
@@ -1230,8 +1367,8 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
     tgt_dir_y = (p_tgt_dir[1] + n_tgt_dir[1]) / 2
 
     # Normalize the averaged directions
-    src_dir_len = math.sqrt(src_dir_x*src_dir_x + src_dir_y*src_dir_y)
-    tgt_dir_len = math.sqrt(tgt_dir_x*tgt_dir_x + tgt_dir_y*tgt_dir_y)
+    src_dir_len = math.sqrt(src_dir_x * src_dir_x + src_dir_y * src_dir_y)
+    tgt_dir_len = math.sqrt(tgt_dir_x * tgt_dir_x + tgt_dir_y * tgt_dir_y)
     if src_dir_len > 0:
         src_dir_x /= src_dir_len
         src_dir_y /= src_dir_len
@@ -1263,24 +1400,64 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
 
     # Get all valid setback positions for source and target, sorted by preference
     src_candidates = _find_open_positions(
-        center_src_x, center_src_y, src_dir_x, src_dir_y, src_layer, setback, "source",
-        layer_names, spacing_mm, config, obstacles, connector_obstacles, coord, neighbor_stubs
+        center_src_x,
+        center_src_y,
+        src_dir_x,
+        src_dir_y,
+        src_layer,
+        setback,
+        "source",
+        layer_names,
+        spacing_mm,
+        config,
+        obstacles,
+        connector_obstacles,
+        coord,
+        neighbor_stubs,
     )
     if not src_candidates:
         blocked = _collect_setback_blocked_cells(
-            center_src_x, center_src_y, src_dir_x, src_dir_y, src_layer, setback,
-            config, obstacles, connector_obstacles, coord
+            center_src_x,
+            center_src_y,
+            src_dir_x,
+            src_dir_y,
+            src_layer,
+            setback,
+            config,
+            obstacles,
+            connector_obstacles,
+            coord,
         )
         return None, 0, blocked, None
 
     tgt_candidates = _find_open_positions(
-        center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y, tgt_layer, setback, "target",
-        layer_names, spacing_mm, config, obstacles, connector_obstacles, coord, neighbor_stubs
+        center_tgt_x,
+        center_tgt_y,
+        tgt_dir_x,
+        tgt_dir_y,
+        tgt_layer,
+        setback,
+        "target",
+        layer_names,
+        spacing_mm,
+        config,
+        obstacles,
+        connector_obstacles,
+        coord,
+        neighbor_stubs,
     )
     if not tgt_candidates:
         blocked = _collect_setback_blocked_cells(
-            center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y, tgt_layer, setback,
-            config, obstacles, connector_obstacles, coord
+            center_tgt_x,
+            center_tgt_y,
+            tgt_dir_x,
+            tgt_dir_y,
+            tgt_layer,
+            setback,
+            config,
+            obstacles,
+            connector_obstacles,
+            coord,
         )
         return None, 0, blocked, None
 
@@ -1305,14 +1482,18 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
     gnd_via_perp_grid = 0
     gnd_via_along_grid = 0
     if config.gnd_via_enabled:
-        gnd_via_perp_mm = spacing_mm + max_track_width/2 + config.clearance + config.via_size/2
+        gnd_via_perp_mm = spacing_mm + max_track_width / 2 + config.clearance + config.via_size / 2
         via_via_dist_mm = config.via_size + config.clearance
         gnd_via_perp_grid = coord.to_grid_dist(gnd_via_perp_mm)
         gnd_via_along_grid = coord.to_grid_dist(via_via_dist_mm)
 
     # Calculate vertical attraction parameters
-    attraction_radius_grid = coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
-    attraction_bonus = int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    attraction_radius_grid = (
+        coord.to_grid_dist(config.vertical_attraction_radius) if config.vertical_attraction_radius > 0 else 0
+    )
+    attraction_bonus = (
+        int(config.vertical_attraction_cost * 1000 / config.grid_step) if config.vertical_attraction_cost > 0 else 0
+    )
 
     # prox_h_cost is now passed as a parameter (checked before endpoint exemptions are set)
 
@@ -1328,7 +1509,7 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
         gnd_via_along_offset=gnd_via_along_grid,
         vertical_attraction_radius=attraction_radius_grid,
         vertical_attraction_bonus=attraction_bonus,
-        proximity_heuristic_cost=prox_h_cost
+        proximity_heuristic_cost=prox_h_cost,
     )
 
     # Route using pose-based A* with Dubins heuristic
@@ -1360,12 +1541,29 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
     # Helper to build route_data dict (wraps module-level function with closure vars)
     def make_route_data(pose_path, src_actual_dir, tgt_actual_dir, src_angle, tgt_angle, gnd_via_dirs=None):
         return _make_route_data(
-            pose_path, p_src_x, p_src_y, n_src_x, n_src_y,
-            p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y,
-            src_dir_x, src_dir_y, tgt_dir_x, tgt_dir_y,
-            src_actual_dir, tgt_actual_dir,
-            center_src_x, center_src_y, center_tgt_x, center_tgt_y,
-            via_spacing, src_angle, tgt_angle, gnd_via_dirs
+            pose_path,
+            p_src_x,
+            p_src_y,
+            n_src_x,
+            n_src_y,
+            p_tgt_x,
+            p_tgt_y,
+            n_tgt_x,
+            n_tgt_y,
+            src_dir_x,
+            src_dir_y,
+            tgt_dir_x,
+            tgt_dir_y,
+            src_actual_dir,
+            tgt_actual_dir,
+            center_src_x,
+            center_src_y,
+            center_tgt_x,
+            center_tgt_y,
+            via_spacing,
+            src_angle,
+            tgt_angle,
+            gnd_via_dirs,
         )
 
     # Helper to setup and run a single route attempt
@@ -1390,9 +1588,17 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
         t_theta = direction_to_theta_idx(-t_dx, -t_dy)
 
         path, iters, blocked, gnd_via_dirs = pose_router.route_pose_with_frontier(
-            obstacles, s_gx, s_gy, src_layer, s_theta,
-            t_gx, t_gy, tgt_layer, t_theta,
-            max_iters, diff_pair_via_spacing=via_spacing_grid
+            obstacles,
+            s_gx,
+            s_gy,
+            src_layer,
+            s_theta,
+            t_gx,
+            t_gy,
+            tgt_layer,
+            t_theta,
+            max_iters,
+            diff_pair_via_spacing=via_spacing_grid,
         )
         return path, iters, blocked, (s_dx, s_dy), (t_dx, t_dy), s_ang, t_ang, gnd_via_dirs
 
@@ -1413,7 +1619,9 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
         best_first_iters = 0
         if len(src_combos) > 1:
             for src_cand in src_combos:
-                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(src_cand, tgt_combos[0], is_probe_attempt=True)
+                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(
+                    src_cand, tgt_combos[0], is_probe_attempt=True
+                )
                 total_iterations += iters
                 best_first_iters = max(best_first_iters, iters)
 
@@ -1433,10 +1641,17 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
             if not found_first:
                 # All source angles blocked - return probe_blocked state for rip-up
                 # Return best individual iteration count, not sum
-                return None, best_first_iters, first_blocked_cells, ('probe_blocked', 'first', selected_src, selected_tgt)
+                return (
+                    None,
+                    best_first_iters,
+                    first_blocked_cells,
+                    ("probe_blocked", "first", selected_src, selected_tgt),
+                )
         else:
             # Only one source option - still need to test it (don't assume it works)
-            path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(src_combos[0], tgt_combos[0], is_probe_attempt=True)
+            path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(
+                src_combos[0], tgt_combos[0], is_probe_attempt=True
+            )
             total_iterations += iters
             best_first_iters = iters
 
@@ -1450,7 +1665,7 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
                 if config.verbose:
                     print(f"    {first_label} {src_combos[0][4]:+.1f}° blocked ({iters} iters)")
                 first_blocked_cells.extend(blocked)
-                return None, iters, first_blocked_cells, ('probe_blocked', 'first', selected_src, selected_tgt)
+                return None, iters, first_blocked_cells, ("probe_blocked", "first", selected_src, selected_tgt)
 
         # Probe angles at the routing target (second endpoint)
         found_second = False
@@ -1458,12 +1673,19 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
         best_second_iters = 0
         if len(tgt_combos) > 1:
             for tgt_cand in tgt_combos:
-                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(selected_src, tgt_cand, is_probe_attempt=True)
+                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(
+                    selected_src, tgt_cand, is_probe_attempt=True
+                )
                 total_iterations += iters
                 best_second_iters = max(best_second_iters, iters)
 
                 if path is not None:
-                    return make_route_data(path, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs), best_first_iters + iters, [], None
+                    return (
+                        make_route_data(path, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs),
+                        best_first_iters + iters,
+                        [],
+                        None,
+                    )
                 if iters >= max_iters:
                     selected_tgt = tgt_cand
                     found_second = True
@@ -1478,16 +1700,28 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
             if not found_second:
                 # All target angles blocked - return probe_blocked state for rip-up
                 # Return best individual iteration count (min of source success and best target attempt)
-                return None, min(best_first_iters, best_second_iters), second_blocked_cells, ('probe_blocked', 'second', selected_src, selected_tgt)
+                return (
+                    None,
+                    min(best_first_iters, best_second_iters),
+                    second_blocked_cells,
+                    ("probe_blocked", "second", selected_src, selected_tgt),
+                )
         else:
             # Only one target option - if source had multiple combos, we need to test selected_src with this target
             if len(src_combos) > 1:
-                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(selected_src, tgt_combos[0], is_probe_attempt=True)
+                path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(
+                    selected_src, tgt_combos[0], is_probe_attempt=True
+                )
                 total_iterations += iters
                 best_second_iters = iters
 
                 if path is not None:
-                    return make_route_data(path, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs), best_first_iters + iters, [], None
+                    return (
+                        make_route_data(path, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs),
+                        best_first_iters + iters,
+                        [],
+                        None,
+                    )
                 if iters >= max_iters:
                     if config.verbose:
                         print(f"    {second_label} {tgt_combos[0][4]:+.1f}° OK ({iters} iters)")
@@ -1495,7 +1729,12 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
                     if config.verbose:
                         print(f"    {second_label} {tgt_combos[0][4]:+.1f}° blocked ({iters} iters)")
                     second_blocked_cells.extend(blocked)
-                    return None, min(best_first_iters, iters), second_blocked_cells, ('probe_blocked', 'second', selected_src, selected_tgt)
+                    return (
+                        None,
+                        min(best_first_iters, iters),
+                        second_blocked_cells,
+                        ("probe_blocked", "second", selected_src, selected_tgt),
+                    )
             else:
                 # Both source and target have only 1 option - we already tested this in source section
                 # best_first_iters already has the iteration count from that test
@@ -1525,7 +1764,9 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
 
     src_theta_idx = direction_to_theta_idx(src_actual_dir_x, src_actual_dir_y)
     tgt_theta_idx = direction_to_theta_idx(-tgt_actual_dir_x, -tgt_actual_dir_y)
-    print(f"  Pose routing: src_theta={src_theta_idx} ({src_actual_dir_x:.2f},{src_actual_dir_y:.2f}), tgt_theta={tgt_theta_idx} (arriving from {-tgt_actual_dir_x:.2f},{-tgt_actual_dir_y:.2f})")
+    print(
+        f"  Pose routing: src_theta={src_theta_idx} ({src_actual_dir_x:.2f},{src_actual_dir_y:.2f}), tgt_theta={tgt_theta_idx} (arriving from {-tgt_actual_dir_x:.2f},{-tgt_actual_dir_y:.2f})"
+    )
 
     path, iters, blocked, src_dir, tgt_dir, s_ang, t_ang, gnd_dirs = try_route(selected_src, selected_tgt)
     total_iterations += iters
@@ -1535,11 +1776,14 @@ def _try_route_direction(src, tgt, pcb_data, config, obstacles, base_obstacles,
     return None, total_iterations, blocked, None
 
 
-def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
-                                    config: GridRouteConfig,
-                                    obstacles: GridObstacleMap,
-                                    base_obstacles: GridObstacleMap = None,
-                                    unrouted_stubs: List[Tuple[float, float]] = None) -> Optional[dict]:
+def route_diff_pair_with_obstacles(
+    pcb_data: PCBData,
+    diff_pair: DiffPairNet,
+    config: GridRouteConfig,
+    obstacles: GridObstacleMap,
+    base_obstacles: GridObstacleMap = None,
+    unrouted_stubs: list[tuple[float, float]] = None,
+) -> dict | None:
     """
     Route a differential pair using centerline + offset approach.
 
@@ -1554,7 +1798,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     gnd_net_id = None
     if config.gnd_via_enabled:
         for net_id, net in pcb_data.nets.items():
-            if net.name.upper() == 'GND':
+            if net.name.upper() == "GND":
                 gnd_net_id = net_id
                 break
 
@@ -1565,7 +1809,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
         return None
 
     if not sources or not targets:
-        print(f"  No valid source/target endpoints found")
+        print("  No valid source/target endpoints found")
         return None
 
     coord = GridCoord(config.grid_step)
@@ -1584,21 +1828,25 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     n_src_prox = obstacles.get_stub_proximity_cost(n_src_gx, n_src_gy)
     p_tgt_prox = obstacles.get_stub_proximity_cost(p_tgt_gx, p_tgt_gy)
     n_tgt_prox = obstacles.get_stub_proximity_cost(n_tgt_gx, n_tgt_gy)
-    src_in_stub = (p_src_prox > 0 or n_src_prox > 0)
-    src_in_bga = (obstacles.is_in_bga_proximity(p_src_gx, p_src_gy) or
-                  obstacles.is_in_bga_proximity(n_src_gx, n_src_gy))
-    tgt_in_stub = (p_tgt_prox > 0 or n_tgt_prox > 0)
-    tgt_in_bga = (obstacles.is_in_bga_proximity(p_tgt_gx, p_tgt_gy) or
-                  obstacles.is_in_bga_proximity(n_tgt_gx, n_tgt_gy))
+    src_in_stub = p_src_prox > 0 or n_src_prox > 0
+    src_in_bga = obstacles.is_in_bga_proximity(p_src_gx, p_src_gy) or obstacles.is_in_bga_proximity(n_src_gx, n_src_gy)
+    tgt_in_stub = p_tgt_prox > 0 or n_tgt_prox > 0
+    tgt_in_bga = obstacles.is_in_bga_proximity(p_tgt_gx, p_tgt_gy) or obstacles.is_in_bga_proximity(n_tgt_gx, n_tgt_gy)
     # Diff pairs use 1/10th of the heuristic factor
     prox_h_cost = config.get_proximity_heuristic_for_zones(src_in_stub, src_in_bga, tgt_in_stub, tgt_in_bga) // 10
     if config.verbose:
         zones = []
-        if src_in_stub: zones.append("src:stub")
-        if src_in_bga: zones.append("src:bga")
-        if tgt_in_stub: zones.append("tgt:stub")
-        if tgt_in_bga: zones.append("tgt:bga")
-        print(f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}] (diff_pair 1/10th)")
+        if src_in_stub:
+            zones.append("src:stub")
+        if src_in_bga:
+            zones.append("src:bga")
+        if tgt_in_stub:
+            zones.append("tgt:stub")
+        if tgt_in_bga:
+            zones.append("tgt:bga")
+        print(
+            f"  proximity_heuristic_cost={prox_h_cost} zones=[{', '.join(zones) if zones else 'none'}] (diff_pair 1/10th)"
+        )
 
     # Set endpoint exempt positions for stub proximity costs
     # This allows routes to reach endpoints without being penalized by nearby stubs
@@ -1634,30 +1882,41 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
 
     # Probe first direction
     route_data, first_probe_iters, first_blocked, first_best_combo = _try_route_direction(
-        first_src, first_tgt, pcb_data, config, obstacles, base_obstacles,
-        coord, layer_names, spacing_mm, p_net_id, n_net_id,
-        max_iterations_override=probe_iterations, neighbor_stubs=unrouted_stubs,
-        direction_label=first_label, is_backward=(first_label == "backward"),
-        prox_h_cost=prox_h_cost
+        first_src,
+        first_tgt,
+        pcb_data,
+        config,
+        obstacles,
+        base_obstacles,
+        coord,
+        layer_names,
+        spacing_mm,
+        p_net_id,
+        n_net_id,
+        max_iterations_override=probe_iterations,
+        neighbor_stubs=unrouted_stubs,
+        direction_label=first_label,
+        is_backward=(first_label == "backward"),
+        prox_h_cost=prox_h_cost,
     )
 
     # Check if first probe was blocked (all angles failed)
-    if first_best_combo and isinstance(first_best_combo[0], str) and first_best_combo[0] == 'probe_blocked':
+    if first_best_combo and isinstance(first_best_combo[0], str) and first_best_combo[0] == "probe_blocked":
         # Map 'first'/'second' to physical 'source'/'target'
         blocked_endpoint = first_best_combo[1]  # 'first' or 'second'
-        if first_label == 'backward':
+        if first_label == "backward":
             # backward: first=target, second=source
-            physical_endpoint = 'target' if blocked_endpoint == 'first' else 'source'
+            physical_endpoint = "target" if blocked_endpoint == "first" else "source"
         else:
             # forward: first=source, second=target
-            physical_endpoint = 'source' if blocked_endpoint == 'first' else 'target'
+            physical_endpoint = "source" if blocked_endpoint == "first" else "target"
         print(f"  Probe {first_label} blocked at {physical_endpoint} after {first_probe_iters} iterations")
         return {
-            'probe_blocked': True,
-            'blocked_at': physical_endpoint,
-            'blocked_cells': first_blocked,
-            'iterations': first_probe_iters,
-            'direction': first_label,
+            "probe_blocked": True,
+            "blocked_at": physical_endpoint,
+            "blocked_cells": first_blocked,
+            "iterations": first_probe_iters,
+            "direction": first_label,
         }
 
     if route_data is not None:
@@ -1667,34 +1926,45 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
         second_blocked_cells = []
         second_iterations = 0
         total_iterations = first_probe_iters
-        routing_backwards = (first_label == "backward")
+        routing_backwards = first_label == "backward"
     else:
         # Probe second direction
         route_data, second_probe_iters, second_blocked, second_best_combo = _try_route_direction(
-            second_src, second_tgt, pcb_data, config, obstacles, base_obstacles,
-            coord, layer_names, spacing_mm, p_net_id, n_net_id,
-            max_iterations_override=probe_iterations, neighbor_stubs=unrouted_stubs,
-            direction_label=second_label, is_backward=(second_label == "backward"),
-            prox_h_cost=prox_h_cost
+            second_src,
+            second_tgt,
+            pcb_data,
+            config,
+            obstacles,
+            base_obstacles,
+            coord,
+            layer_names,
+            spacing_mm,
+            p_net_id,
+            n_net_id,
+            max_iterations_override=probe_iterations,
+            neighbor_stubs=unrouted_stubs,
+            direction_label=second_label,
+            is_backward=(second_label == "backward"),
+            prox_h_cost=prox_h_cost,
         )
 
         # Check if second probe was blocked (all angles failed)
-        if second_best_combo and isinstance(second_best_combo[0], str) and second_best_combo[0] == 'probe_blocked':
+        if second_best_combo and isinstance(second_best_combo[0], str) and second_best_combo[0] == "probe_blocked":
             # Map 'first'/'second' to physical 'source'/'target'
             blocked_endpoint = second_best_combo[1]  # 'first' or 'second'
-            if second_label == 'backward':
+            if second_label == "backward":
                 # backward: first=target, second=source
-                physical_endpoint = 'target' if blocked_endpoint == 'first' else 'source'
+                physical_endpoint = "target" if blocked_endpoint == "first" else "source"
             else:
                 # forward: first=source, second=target
-                physical_endpoint = 'source' if blocked_endpoint == 'first' else 'target'
+                physical_endpoint = "source" if blocked_endpoint == "first" else "target"
             print(f"  Probe {second_label} blocked at {physical_endpoint} after {second_probe_iters} iterations")
             return {
-                'probe_blocked': True,
-                'blocked_at': physical_endpoint,
-                'blocked_cells': second_blocked,
-                'iterations': first_probe_iters + second_probe_iters,
-                'direction': second_label,
+                "probe_blocked": True,
+                "blocked_at": physical_endpoint,
+                "blocked_cells": second_blocked,
+                "iterations": first_probe_iters + second_probe_iters,
+                "direction": second_label,
             }
 
         if route_data is not None:
@@ -1704,7 +1974,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
             second_blocked_cells = []
             second_iterations = second_probe_iters
             total_iterations = first_probe_iters + second_probe_iters
-            routing_backwards = (second_label == "backward")
+            routing_backwards = second_label == "backward"
         else:
             # Both probes failed - only try full search if BOTH probes reached max iterations
             first_reached_max = first_probe_iters >= probe_iterations
@@ -1713,18 +1983,24 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
             if not (first_reached_max and second_reached_max):
                 # At least one probe didn't reach max - that direction is stuck, skip full search
                 if not first_reached_max and not second_reached_max:
-                    print(f"  Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})")
+                    print(
+                        f"  Both directions stuck ({first_label}={first_probe_iters}, {second_label}={second_probe_iters} < {probe_iterations})"
+                    )
                 elif not first_reached_max:
-                    print(f"  {first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}")
+                    print(
+                        f"  {first_label} stuck ({first_probe_iters} < {probe_iterations}), {second_label}={second_probe_iters}"
+                    )
                 else:
-                    print(f"  {second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}")
+                    print(
+                        f"  {second_label} stuck ({second_probe_iters} < {probe_iterations}), {first_label}={first_probe_iters}"
+                    )
                 return {
-                    'failed': True,
-                    'iterations': first_probe_iters + second_probe_iters,
-                    'blocked_cells_forward': first_blocked if first_label == "forward" else second_blocked,
-                    'blocked_cells_backward': second_blocked if first_label == "forward" else first_blocked,
-                    'iterations_forward': first_probe_iters if first_label == "forward" else second_probe_iters,
-                    'iterations_backward': second_probe_iters if first_label == "forward" else first_probe_iters,
+                    "failed": True,
+                    "iterations": first_probe_iters + second_probe_iters,
+                    "blocked_cells_forward": first_blocked if first_label == "forward" else second_blocked,
+                    "blocked_cells_backward": second_blocked if first_label == "forward" else first_blocked,
+                    "iterations_forward": first_probe_iters if first_label == "forward" else second_probe_iters,
+                    "iterations_backward": second_probe_iters if first_label == "forward" else first_probe_iters,
                 }
 
             # Both probes reached max - do full search on first direction
@@ -1734,7 +2010,9 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
             fallback_probe_iters, fallback_blocked = second_probe_iters, second_blocked
             promising_best_combo, fallback_best_combo = first_best_combo, second_best_combo
 
-            print(f"  Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {promising_label} with full iterations...")
+            print(
+                f"  Probe: {first_label}={first_probe_iters}, {second_label}={second_probe_iters} iters, trying {promising_label} with full iterations..."
+            )
 
             # Mix best angles from both probes:
             # - Forward probe's selected_src is best angle at physical source
@@ -1750,11 +2028,22 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
 
             # Full search on promising direction with best angles from probe
             route_data, full_iters, blocked_cells, _ = _try_route_direction(
-                promising_src, promising_tgt, pcb_data, config, obstacles, base_obstacles,
-                coord, layer_names, spacing_mm, p_net_id, n_net_id,
-                neighbor_stubs=unrouted_stubs, preferred_angles=preferred,
-                direction_label=None, is_backward=(promising_label == "backward"),
-                prox_h_cost=prox_h_cost
+                promising_src,
+                promising_tgt,
+                pcb_data,
+                config,
+                obstacles,
+                base_obstacles,
+                coord,
+                layer_names,
+                spacing_mm,
+                p_net_id,
+                n_net_id,
+                neighbor_stubs=unrouted_stubs,
+                preferred_angles=preferred,
+                direction_label=None,
+                is_backward=(promising_label == "backward"),
+                prox_h_cost=prox_h_cost,
             )
             total_iterations = first_probe_iters + second_probe_iters + full_iters
 
@@ -1769,7 +2058,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
                     first_iterations = fallback_probe_iters
                     second_blocked_cells = []
                     second_iterations = promising_probe_iters + full_iters
-                routing_backwards = (promising_label == "backward")
+                routing_backwards = promising_label == "backward"
             else:
                 # Promising direction failed, try fallback (we know both reached max, so fallback is worth trying)
                 print(f"  No route found after {full_iters} iterations ({promising_label}), trying {fallback_label}...")
@@ -1781,11 +2070,22 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
                 else:
                     fallback_preferred = None
                 route_data, fallback_full_iters, fallback_full_blocked, _ = _try_route_direction(
-                    fallback_src, fallback_tgt, pcb_data, config, obstacles, base_obstacles,
-                    coord, layer_names, spacing_mm, p_net_id, n_net_id,
-                    neighbor_stubs=unrouted_stubs, preferred_angles=fallback_preferred,
-                    direction_label=None, is_backward=(fallback_label == "backward"),
-                    prox_h_cost=prox_h_cost
+                    fallback_src,
+                    fallback_tgt,
+                    pcb_data,
+                    config,
+                    obstacles,
+                    base_obstacles,
+                    coord,
+                    layer_names,
+                    spacing_mm,
+                    p_net_id,
+                    n_net_id,
+                    neighbor_stubs=unrouted_stubs,
+                    preferred_angles=fallback_preferred,
+                    direction_label=None,
+                    is_backward=(fallback_label == "backward"),
+                    prox_h_cost=prox_h_cost,
                 )
                 total_iterations += fallback_full_iters
 
@@ -1800,7 +2100,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
                         first_iterations = promising_probe_iters + full_iters
                         second_blocked_cells = []
                         second_iterations = fallback_probe_iters + fallback_full_iters
-                    routing_backwards = (fallback_label == "backward")
+                    routing_backwards = fallback_label == "backward"
                 else:
                     # Both full searches failed
                     if promising_label == first_label:
@@ -1817,28 +2117,28 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     if route_data is None:
         print(f"  No route found after {total_iterations} iterations (both directions)")
         return {
-            'failed': True,
-            'iterations': total_iterations,
-            'blocked_cells_forward': first_blocked_cells if first_label == "forward" else second_blocked_cells,
-            'blocked_cells_backward': second_blocked_cells if first_label == "forward" else first_blocked_cells,
-            'iterations_forward': first_iterations if first_label == "forward" else second_iterations,
-            'iterations_backward': second_iterations if first_label == "forward" else first_iterations,
+            "failed": True,
+            "iterations": total_iterations,
+            "blocked_cells_forward": first_blocked_cells if first_label == "forward" else second_blocked_cells,
+            "blocked_cells_backward": second_blocked_cells if first_label == "forward" else first_blocked_cells,
+            "iterations_forward": first_iterations if first_label == "forward" else second_iterations,
+            "iterations_backward": second_iterations if first_label == "forward" else first_iterations,
         }
 
     # Extract route data
-    pose_path = route_data['pose_path']
-    p_src_x, p_src_y = route_data['p_src_x'], route_data['p_src_y']
-    n_src_x, n_src_y = route_data['n_src_x'], route_data['n_src_y']
-    p_tgt_x, p_tgt_y = route_data['p_tgt_x'], route_data['p_tgt_y']
-    n_tgt_x, n_tgt_y = route_data['n_tgt_x'], route_data['n_tgt_y']
-    src_dir_x, src_dir_y = route_data['src_dir_x'], route_data['src_dir_y']
-    tgt_dir_x, tgt_dir_y = route_data['tgt_dir_x'], route_data['tgt_dir_y']
-    src_actual_dir_x, src_actual_dir_y = route_data['src_actual_dir_x'], route_data['src_actual_dir_y']
-    tgt_actual_dir_x, tgt_actual_dir_y = route_data['tgt_actual_dir_x'], route_data['tgt_actual_dir_y']
-    center_src_x, center_src_y = route_data['center_src_x'], route_data['center_src_y']
-    center_tgt_x, center_tgt_y = route_data['center_tgt_x'], route_data['center_tgt_y']
-    via_spacing = route_data['via_spacing']
-    gnd_via_dirs = route_data.get('gnd_via_dirs', [])
+    pose_path = route_data["pose_path"]
+    p_src_x, p_src_y = route_data["p_src_x"], route_data["p_src_y"]
+    n_src_x, n_src_y = route_data["n_src_x"], route_data["n_src_y"]
+    p_tgt_x, p_tgt_y = route_data["p_tgt_x"], route_data["p_tgt_y"]
+    n_tgt_x, n_tgt_y = route_data["n_tgt_x"], route_data["n_tgt_y"]
+    src_dir_x, src_dir_y = route_data["src_dir_x"], route_data["src_dir_y"]
+    tgt_dir_x, tgt_dir_y = route_data["tgt_dir_x"], route_data["tgt_dir_y"]
+    src_actual_dir_x, src_actual_dir_y = route_data["src_actual_dir_x"], route_data["src_actual_dir_y"]
+    tgt_actual_dir_x, tgt_actual_dir_y = route_data["tgt_actual_dir_x"], route_data["tgt_actual_dir_y"]
+    center_src_x, center_src_y = route_data["center_src_x"], route_data["center_src_y"]
+    center_tgt_x, center_tgt_y = route_data["center_tgt_x"], route_data["center_tgt_y"]
+    via_spacing = route_data["via_spacing"]
+    gnd_via_dirs = route_data.get("gnd_via_dirs", [])
 
     # Convert pose path (gx, gy, theta_idx, layer) to grid path (gx, gy, layer)
     # Filter out in-place turns (same position, different theta)
@@ -1851,20 +2151,19 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
 
     # Simplify path by removing collinear points
     simplified_path = simplify_path(path)
-    print(f"Route found in {total_iterations} iterations, path: {len(pose_path)} poses -> {len(path)} points -> {len(simplified_path)} simplified")
+    print(
+        f"Route found in {total_iterations} iterations, path: {len(pose_path)} poses -> {len(path)} points -> {len(simplified_path)} simplified"
+    )
 
     # Store paths for debug output (converted to float coordinates)
-    raw_astar_path = [(coord.to_float(gx, gy)[0], coord.to_float(gx, gy)[1], layer)
-                      for gx, gy, layer in path]
-    simplified_path_float = [(coord.to_float(gx, gy)[0], coord.to_float(gx, gy)[1], layer)
-                             for gx, gy, layer in simplified_path]
+    raw_astar_path = [(coord.to_float(gx, gy)[0], coord.to_float(gx, gy)[1], layer) for gx, gy, layer in path]
+    simplified_path_float = [
+        (coord.to_float(gx, gy)[0], coord.to_float(gx, gy)[1], layer) for gx, gy, layer in simplified_path
+    ]
 
     # Detect polarity (which side of centerline P should be on)
     p_sign, polarity_fixed, polarity_swap_needed, has_layer_change = _detect_polarity(
-        simplified_path, coord,
-        p_src_x, p_src_y, n_src_x, n_src_y,
-        p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y,
-        config
+        simplified_path, coord, p_src_x, p_src_y, n_src_x, n_src_y, p_tgt_x, p_tgt_y, n_tgt_x, n_tgt_y, config
     )
     n_sign = -p_sign
 
@@ -1873,15 +2172,16 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     # proper spacing along the connector segments (especially when setback angle is used)
     start_stub_dir = (src_actual_dir_x, src_actual_dir_y)
     end_stub_dir = (-tgt_actual_dir_x, -tgt_actual_dir_y)  # Negate because we arrive at target stubs
-    p_float_path = create_parallel_path_float(simplified_path, coord, sign=p_sign, spacing_mm=spacing_mm,
-                                               start_dir=start_stub_dir, end_dir=end_stub_dir)
-    n_float_path = create_parallel_path_float(simplified_path, coord, sign=n_sign, spacing_mm=spacing_mm,
-                                               start_dir=start_stub_dir, end_dir=end_stub_dir)
+    p_float_path = create_parallel_path_float(
+        simplified_path, coord, sign=p_sign, spacing_mm=spacing_mm, start_dir=start_stub_dir, end_dir=end_stub_dir
+    )
+    n_float_path = create_parallel_path_float(
+        simplified_path, coord, sign=n_sign, spacing_mm=spacing_mm, start_dir=start_stub_dir, end_dir=end_stub_dir
+    )
 
     # Process via positions
     p_float_path, n_float_path = _process_via_positions(
-        simplified_path, p_float_path, n_float_path, coord, config,
-        p_sign, n_sign, spacing_mm
+        simplified_path, p_float_path, n_float_path, coord, config, p_sign, n_sign, spacing_mm
     )
 
     # Convert floating-point paths to segments and vias
@@ -1911,23 +2211,29 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     p_src_route = p_float_path[0][:2] if p_float_path else p_start
     n_src_route = n_float_path[0][:2] if n_float_path else n_start
     src_p_ext, src_n_ext = _calculate_parallel_extension(
-        p_start, n_start, p_src_route, n_src_route,
-        src_stub_dir_tuple, p_sign
+        p_start, n_start, p_src_route, n_src_route, src_stub_dir_tuple, p_sign
     )
 
     # Target end
     p_tgt_route = p_float_path[-1][:2] if p_float_path else p_end
     n_tgt_route = n_float_path[-1][:2] if n_float_path else n_end
     tgt_p_ext, tgt_n_ext = _calculate_parallel_extension(
-        p_end, n_end, p_tgt_route, n_tgt_route,
-        tgt_stub_dir_tuple, p_sign
+        p_end, n_end, p_tgt_route, n_tgt_route, tgt_stub_dir_tuple, p_sign
     )
 
     # Convert P path
     p_segs, p_vias, p_conn_lines = _float_path_to_geometry(
-        p_float_path, p_net_id, p_start, p_end, p_sign,
-        src_stub_dir_tuple, tgt_stub_dir_tuple, src_p_ext, tgt_p_ext,
-        config, layer_names
+        p_float_path,
+        p_net_id,
+        p_start,
+        p_end,
+        p_sign,
+        src_stub_dir_tuple,
+        tgt_stub_dir_tuple,
+        src_p_ext,
+        tgt_p_ext,
+        config,
+        layer_names,
     )
     new_segments.extend(p_segs)
     new_vias.extend(p_vias)
@@ -1935,32 +2241,35 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
 
     # Convert N path
     n_segs, n_vias, n_conn_lines = _float_path_to_geometry(
-        n_float_path, n_net_id, n_start, n_end, n_sign,
-        src_stub_dir_tuple, tgt_stub_dir_tuple, src_n_ext, tgt_n_ext,
-        config, layer_names
+        n_float_path,
+        n_net_id,
+        n_start,
+        n_end,
+        n_sign,
+        src_stub_dir_tuple,
+        tgt_stub_dir_tuple,
+        src_n_ext,
+        tgt_n_ext,
+        config,
+        layer_names,
     )
     new_segments.extend(n_segs)
     new_vias.extend(n_vias)
     debug_connector_lines.extend(n_conn_lines)
 
     # Create GND vias at layer changes if enabled
-    gnd_vias = _create_gnd_vias(
-        simplified_path, coord, config, layer_names, spacing_mm, gnd_net_id, gnd_via_dirs
-    )
+    gnd_vias = _create_gnd_vias(simplified_path, coord, config, layer_names, spacing_mm, gnd_net_id, gnd_via_dirs)
     new_vias.extend(gnd_vias)
 
     # Convert float paths back to grid format for return value
-    p_path = [(coord.to_grid(x, y)[0], coord.to_grid(x, y)[1], layer)
-              for x, y, layer in p_float_path]
-    n_path = [(coord.to_grid(x, y)[0], coord.to_grid(x, y)[1], layer)
-              for x, y, layer in n_float_path]
+    p_path = [(coord.to_grid(x, y)[0], coord.to_grid(x, y)[1], layer) for x, y, layer in p_float_path]
+    n_path = [(coord.to_grid(x, y)[0], coord.to_grid(x, y)[1], layer) for x, y, layer in n_float_path]
 
     # Build stub direction arrows for debug visualization (User.4)
     debug_stub_arrows = []
     if config.debug_lines:
         debug_stub_arrows = _generate_debug_arrows(
-            center_src_x, center_src_y, src_dir_x, src_dir_y,
-            center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y
+            center_src_x, center_src_y, src_dir_x, src_dir_y, center_tgt_x, center_tgt_y, tgt_dir_x, tgt_dir_y
         )
 
     # Calculate source and target stub lengths for each net
@@ -1990,7 +2299,7 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
     n_tgt_stub_length = sum(segment_length(s) for s in n_tgt_stub_segs) + n_tgt_via_len
 
     if config.verbose:
-        print(f"  Stub via barrel lengths (stub_layer->pad):")
+        print("  Stub via barrel lengths (stub_layer->pad):")
         print(f"    P_src ({src_layer_name}): {len(p_src_stub_vias)} vias = {p_src_via_len:.3f}mm")
         print(f"    P_tgt ({tgt_layer_name}): {len(p_tgt_stub_vias)} vias = {p_tgt_via_len:.3f}mm")
         print(f"    N_src ({src_layer_name}): {len(n_src_stub_vias)} vias = {n_src_via_len:.3f}mm")
@@ -1998,50 +2307,50 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
 
     # Build result with polarity fix info
     result = {
-        'new_segments': new_segments,
-        'new_vias': new_vias,
-        'iterations': total_iterations,
-        'path_length': len(simplified_path),
-        'p_path': p_path,
-        'n_path': n_path,
-        'raw_astar_path': raw_astar_path,
-        'simplified_path': simplified_path_float,
-        'debug_connector_lines': debug_connector_lines,  # For User.3 layer
-        'debug_stub_arrows': debug_stub_arrows,  # For User.4 layer
+        "new_segments": new_segments,
+        "new_vias": new_vias,
+        "iterations": total_iterations,
+        "path_length": len(simplified_path),
+        "p_path": p_path,
+        "n_path": n_path,
+        "raw_astar_path": raw_astar_path,
+        "simplified_path": simplified_path_float,
+        "debug_connector_lines": debug_connector_lines,  # For User.3 layer
+        "debug_stub_arrows": debug_stub_arrows,  # For User.4 layer
         # Additional data for length matching meander regeneration
-        'is_diff_pair': True,
-        'centerline_path_grid': simplified_path,  # Grid coords for meander insertion
-        'p_sign': p_sign,
-        'n_sign': n_sign,
-        'spacing_mm': spacing_mm,
-        'start_stub_dir': start_stub_dir,
-        'end_stub_dir': end_stub_dir,
-        'p_net_id': p_net_id,
-        'n_net_id': n_net_id,
+        "is_diff_pair": True,
+        "centerline_path_grid": simplified_path,  # Grid coords for meander insertion
+        "p_sign": p_sign,
+        "n_sign": n_sign,
+        "spacing_mm": spacing_mm,
+        "start_stub_dir": start_stub_dir,
+        "end_stub_dir": end_stub_dir,
+        "p_net_id": p_net_id,
+        "n_net_id": n_net_id,
         # Connector segment data for regeneration
-        'p_start': p_start,
-        'n_start': n_start,
-        'p_end': p_end,
-        'n_end': n_end,
-        'src_stub_dir': src_stub_dir_tuple,
-        'tgt_stub_dir': tgt_stub_dir_tuple,
-        'layer_names': layer_names,
+        "p_start": p_start,
+        "n_start": n_start,
+        "p_end": p_end,
+        "n_end": n_end,
+        "src_stub_dir": src_stub_dir_tuple,
+        "tgt_stub_dir": tgt_stub_dir_tuple,
+        "layer_names": layer_names,
         # Stub layer names for length matching (original source/target, not affected by routing direction)
-        'src_layer_name': layer_names[original_src[4]],
-        'tgt_layer_name': layer_names[original_tgt[4]],
+        "src_layer_name": layer_names[original_src[4]],
+        "tgt_layer_name": layer_names[original_tgt[4]],
         # Pre-calculated stub lengths for intra-pair matching (based on original positions, not affected by polarity swap)
-        'p_src_stub_length': p_src_stub_length,
-        'p_tgt_stub_length': p_tgt_stub_length,
-        'n_src_stub_length': n_src_stub_length,
-        'n_tgt_stub_length': n_tgt_stub_length,
+        "p_src_stub_length": p_src_stub_length,
+        "p_tgt_stub_length": p_tgt_stub_length,
+        "n_src_stub_length": n_src_stub_length,
+        "n_tgt_stub_length": n_tgt_stub_length,
         # GND via data for regeneration after length matching
-        'gnd_net_id': gnd_net_id,
-        'gnd_via_dirs': gnd_via_dirs,
+        "gnd_net_id": gnd_net_id,
+        "gnd_via_dirs": gnd_via_dirs,
     }
 
     # If polarity was fixed, include info about which target pads need net swaps
     if polarity_fixed:
-        result['polarity_fixed'] = True
+        result["polarity_fixed"] = True
         # The pads to swap are at the ROUTING target end
         # When routing forward: routing target = original target (targets[0])
         # When routing backward: routing target = original source (sources[0])
@@ -2053,18 +2362,17 @@ def route_diff_pair_with_obstacles(pcb_data: PCBData, diff_pair: DiffPairNet,
             routing_tgt_end = targets[0]
         orig_p_tgt = (routing_tgt_end[5], routing_tgt_end[6])
         orig_n_tgt = (routing_tgt_end[7], routing_tgt_end[8])
-        result['swap_target_pads'] = {
-            'p_pos': orig_p_tgt,  # P target stub position (routing target end)
-            'n_pos': orig_n_tgt,  # N target stub position (routing target end)
-            'p_net_id': p_net_id,  # P net ID to find target pad
-            'n_net_id': n_net_id,  # N net ID to find target pad
+        result["swap_target_pads"] = {
+            "p_pos": orig_p_tgt,  # P target stub position (routing target end)
+            "n_pos": orig_n_tgt,  # N target stub position (routing target end)
+            "p_net_id": p_net_id,  # P net ID to find target pad
+            "n_net_id": n_net_id,  # N net ID to find target pad
         }
 
     return result
 
 
-def _process_via_positions(simplified_path, p_float_path, n_float_path, coord, config,
-                           p_sign, n_sign, spacing_mm):
+def _process_via_positions(simplified_path, p_float_path, n_float_path, coord, config, p_sign, n_sign, spacing_mm):
     """
     Process via positions at layer changes to be perpendicular to centerline direction.
 
@@ -2074,7 +2382,9 @@ def _process_via_positions(simplified_path, p_float_path, n_float_path, coord, c
     min_via_spacing = config.via_size + config.clearance  # Minimum center-to-center distance
     # Use max track width for clearance since via connects layers with potentially different widths
     max_track_width = config.get_max_track_width()
-    track_via_clearance = (config.clearance + max_track_width / 2 + config.via_size / 2) * config.routing_clearance_margin
+    track_via_clearance = (
+        config.clearance + max_track_width / 2 + config.via_size / 2
+    ) * config.routing_clearance_margin
 
     if not p_float_path or not n_float_path or len(simplified_path) < 2:
         return p_float_path, n_float_path
@@ -2146,9 +2456,9 @@ def _process_via_positions(simplified_path, p_float_path, n_float_path, coord, c
         # Determine which via is on the "inner" side of a turn (if any)
         cross = in_dir_x * out_dir_y - in_dir_y * out_dir_x
         if cross < 0:
-            inner_is_p = (p_sign < 0)
+            inner_is_p = p_sign < 0
         else:
-            inner_is_p = (p_sign > 0)
+            inner_is_p = p_sign > 0
 
         if inner_is_p:
             inner_via_x, inner_via_y = p_via_x, p_via_y

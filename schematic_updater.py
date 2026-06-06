@@ -7,22 +7,21 @@ updates the corresponding .kicad_sch files to keep schematics in sync with PCB.
 
 import os
 import re
-from typing import List, Dict, Optional, Tuple
 
 
-def find_schematic_files(schematic_dir: str) -> List[str]:
+def find_schematic_files(schematic_dir: str) -> list[str]:
     """Find all .kicad_sch files in a directory (non-recursive)."""
     if not os.path.isdir(schematic_dir):
         return []
 
     sch_files = []
     for filename in os.listdir(schematic_dir):
-        if filename.endswith('.kicad_sch'):
+        if filename.endswith(".kicad_sch"):
             sch_files.append(os.path.join(schematic_dir, filename))
     return sch_files
 
 
-def find_all_schematics_for_component(schematic_dir: str, component_ref: str) -> List[str]:
+def find_all_schematics_for_component(schematic_dir: str, component_ref: str) -> list[str]:
     """
     Find all .kicad_sch files containing a component reference.
 
@@ -42,26 +41,24 @@ def find_all_schematics_for_component(schematic_dir: str, component_ref: str) ->
 
     # Pattern to find symbol instances with matching Reference property
     # Look for: (property "Reference" "U3" ...) within a (symbol ...) block
-    ref_pattern = re.compile(
-        r'\(property\s+"Reference"\s+"' + re.escape(component_ref) + r'"',
-        re.IGNORECASE
-    )
+    ref_pattern = re.compile(r'\(property\s+"Reference"\s+"' + re.escape(component_ref) + r'"', re.IGNORECASE)
 
     for sch_path in sch_files:
         try:
-            with open(sch_path, 'r', encoding='utf-8') as f:
+            with open(sch_path, encoding="utf-8") as f:
                 content = f.read()
 
             if ref_pattern.search(content):
                 matching_files.append(sch_path)
-        except (IOError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             continue
 
     return matching_files
 
 
-def swap_pins_in_schematic(schematic_path: str, component_ref: str,
-                           pad1: str, pad2: str, verbose: bool = False) -> bool:
+def swap_pins_in_schematic(
+    schematic_path: str, component_ref: str, pad1: str, pad2: str, verbose: bool = False
+) -> bool:
     """
     Swap two pin numbers for a component in a schematic file.
 
@@ -79,9 +76,9 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
         True if swap was successful, False otherwise
     """
     try:
-        with open(schematic_path, 'r', encoding='utf-8') as f:
+        with open(schematic_path, encoding="utf-8") as f:
             content = f.read()
-    except (IOError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError) as e:
         if verbose:
             print(f"    Error reading {schematic_path}: {e}")
         return False
@@ -90,10 +87,7 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
     # Symbol instances look like: (symbol (lib_id "Library:SymbolName") ... (property "Reference" "U3") ...)
 
     # Find symbol instance with matching Reference
-    symbol_instance_pattern = re.compile(
-        r'\(symbol\s*\n?\s*\(lib_id\s+"([^"]+)"\)',
-        re.DOTALL
-    )
+    symbol_instance_pattern = re.compile(r'\(symbol\s*\n?\s*\(lib_id\s+"([^"]+)"\)', re.DOTALL)
 
     lib_id = None
     for match in symbol_instance_pattern.finditer(content):
@@ -102,9 +96,9 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
         depth = 0
         end_pos = start_pos
         for i, c in enumerate(content[start_pos:]):
-            if c == '(':
+            if c == "(":
                 depth += 1
-            elif c == ')':
+            elif c == ")":
                 depth -= 1
                 if depth == 0:
                     end_pos = start_pos + i + 1
@@ -113,10 +107,7 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
         symbol_block = content[start_pos:end_pos]
 
         # Check if this symbol has our Reference
-        ref_match = re.search(
-            r'\(property\s+"Reference"\s+"' + re.escape(component_ref) + r'"',
-            symbol_block
-        )
+        ref_match = re.search(r'\(property\s+"Reference"\s+"' + re.escape(component_ref) + r'"', symbol_block)
         if ref_match:
             lib_id = match.group(1)
             break
@@ -130,10 +121,7 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
     # lib_symbols format: (lib_symbols (symbol "Library:SymbolName" ...pin definitions...))
 
     # The symbol name in lib_symbols matches the lib_id
-    lib_symbol_pattern = re.compile(
-        r'\(symbol\s+"' + re.escape(lib_id) + r'"',
-        re.DOTALL
-    )
+    lib_symbol_pattern = re.compile(r'\(symbol\s+"' + re.escape(lib_id) + r'"', re.DOTALL)
 
     lib_symbol_match = lib_symbol_pattern.search(content)
     if not lib_symbol_match:
@@ -146,9 +134,9 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
     depth = 0
     end_pos = start_pos
     for i, c in enumerate(content[start_pos:]):
-        if c == '(':
+        if c == "(":
             depth += 1
-        elif c == ')':
+        elif c == ")":
             depth -= 1
             if depth == 0:
                 end_pos = start_pos + i + 1
@@ -184,44 +172,33 @@ def swap_pins_in_schematic(schematic_path: str, component_ref: str,
 
     # Replace pad1 with placeholder
     new_lib_symbol_block = re.sub(
-        r'\(number\s+"' + re.escape(pad1) + r'"',
-        f'(number "{placeholder1}"',
-        new_lib_symbol_block
+        r'\(number\s+"' + re.escape(pad1) + r'"', f'(number "{placeholder1}"', new_lib_symbol_block
     )
 
     # Replace pad2 with placeholder
     new_lib_symbol_block = re.sub(
-        r'\(number\s+"' + re.escape(pad2) + r'"',
-        f'(number "{placeholder2}"',
-        new_lib_symbol_block
+        r'\(number\s+"' + re.escape(pad2) + r'"', f'(number "{placeholder2}"', new_lib_symbol_block
     )
 
     # Now replace placeholders with swapped values
-    new_lib_symbol_block = new_lib_symbol_block.replace(
-        f'(number "{placeholder1}"',
-        f'(number "{pad2}"'
-    )
-    new_lib_symbol_block = new_lib_symbol_block.replace(
-        f'(number "{placeholder2}"',
-        f'(number "{pad1}"'
-    )
+    new_lib_symbol_block = new_lib_symbol_block.replace(f'(number "{placeholder1}"', f'(number "{pad2}"')
+    new_lib_symbol_block = new_lib_symbol_block.replace(f'(number "{placeholder2}"', f'(number "{pad1}"')
 
     # Replace the lib_symbol block in the content
     new_content = content[:start_pos] + new_lib_symbol_block + content[end_pos:]
 
     # Write the modified content back
     try:
-        with open(schematic_path, 'w', encoding='utf-8') as f:
+        with open(schematic_path, "w", encoding="utf-8") as f:
             f.write(new_content)
         return True
-    except IOError as e:
+    except OSError as e:
         if verbose:
             print(f"    Error writing {schematic_path}: {e}")
         return False
 
 
-def apply_swaps_to_schematics(schematic_dir: str, swap_list: List[Dict],
-                               verbose: bool = False) -> Tuple[int, int]:
+def apply_swaps_to_schematics(schematic_dir: str, swap_list: list[dict], verbose: bool = False) -> tuple[int, int]:
     """
     Apply all swaps to schematic files.
 
@@ -249,22 +226,20 @@ def apply_swaps_to_schematics(schematic_dir: str, swap_list: List[Dict],
     swaps_failed = 0
 
     # Group swaps by component to find schematics efficiently
-    component_swaps: Dict[str, List[Dict]] = {}
+    component_swaps: dict[str, list[dict]] = {}
     for swap in swap_list:
-        comp = swap['component_ref']
+        comp = swap["component_ref"]
         if comp not in component_swaps:
             component_swaps[comp] = []
         component_swaps[comp].append(swap)
 
     # Cache of component -> list of candidate schematic files
-    component_to_schematics: Dict[str, List[str]] = {}
+    component_to_schematics: dict[str, list[str]] = {}
 
     for component_ref, swaps in component_swaps.items():
         # Find all schematic files that contain this component
         if component_ref not in component_to_schematics:
-            component_to_schematics[component_ref] = find_all_schematics_for_component(
-                schematic_dir, component_ref
-            )
+            component_to_schematics[component_ref] = find_all_schematics_for_component(schematic_dir, component_ref)
 
         candidate_files = component_to_schematics[component_ref]
 
@@ -274,8 +249,8 @@ def apply_swaps_to_schematics(schematic_dir: str, swap_list: List[Dict],
             continue
 
         for swap in swaps:
-            pad1 = swap['pad1']
-            pad2 = swap['pad2']
+            pad1 = swap["pad1"]
+            pad2 = swap["pad2"]
 
             # Update ALL candidate files that have the lib_symbol with these pins
             # (the same lib_symbol definition is embedded in every schematic file
@@ -295,7 +270,7 @@ def apply_swaps_to_schematics(schematic_dir: str, swap_list: List[Dict],
     return (swaps_applied, swaps_failed)
 
 
-def collect_swaps_from_state(state) -> List[Dict]:
+def collect_swaps_from_state(state) -> list[dict]:
     """
     Collect all swaps from a RoutingState into a unified format.
 
@@ -308,69 +283,57 @@ def collect_swaps_from_state(state) -> List[Dict]:
     swaps = []
 
     # Single-ended target swaps
-    if hasattr(state, 'single_ended_target_swap_info'):
+    if hasattr(state, "single_ended_target_swap_info"):
         for info in state.single_ended_target_swap_info:
-            if 'n1_pad' in info and 'n2_pad' in info:
-                pad1 = info['n1_pad']
-                pad2 = info['n2_pad']
+            if "n1_pad" in info and "n2_pad" in info:
+                pad1 = info["n1_pad"]
+                pad2 = info["n2_pad"]
                 # Only add if same component (typical case)
                 if pad1.component_ref == pad2.component_ref:
-                    swaps.append({
-                        'component_ref': pad1.component_ref,
-                        'pad1': pad1.pad_number,
-                        'pad2': pad2.pad_number
-                    })
+                    swaps.append(
+                        {"component_ref": pad1.component_ref, "pad1": pad1.pad_number, "pad2": pad2.pad_number}
+                    )
                 else:
                     # Different components - add both
-                    swaps.append({
-                        'component_ref': pad1.component_ref,
-                        'pad1': pad1.pad_number,
-                        'pad2': pad2.pad_number
-                    })
-                    swaps.append({
-                        'component_ref': pad2.component_ref,
-                        'pad1': pad2.pad_number,
-                        'pad2': pad1.pad_number
-                    })
+                    swaps.append(
+                        {"component_ref": pad1.component_ref, "pad1": pad1.pad_number, "pad2": pad2.pad_number}
+                    )
+                    swaps.append(
+                        {"component_ref": pad2.component_ref, "pad1": pad2.pad_number, "pad2": pad1.pad_number}
+                    )
 
     # Diff pair target swaps
-    if hasattr(state, 'target_swap_info'):
+    if hasattr(state, "target_swap_info"):
         for info in state.target_swap_info:
             # Each diff pair swap involves 4 pads: p1_p, p1_n, p2_p, p2_n
             # The P pads swap with each other, and N pads swap with each other
-            if all(k in info for k in ['p1_p_pad', 'p2_p_pad', 'p1_n_pad', 'p2_n_pad']):
-                p1_p = info['p1_p_pad']
-                p2_p = info['p2_p_pad']
-                p1_n = info['p1_n_pad']
-                p2_n = info['p2_n_pad']
+            if all(k in info for k in ["p1_p_pad", "p2_p_pad", "p1_n_pad", "p2_n_pad"]):
+                p1_p = info["p1_p_pad"]
+                p2_p = info["p2_p_pad"]
+                p1_n = info["p1_n_pad"]
+                p2_n = info["p2_n_pad"]
 
                 # P pads swap
                 if p1_p.component_ref == p2_p.component_ref:
-                    swaps.append({
-                        'component_ref': p1_p.component_ref,
-                        'pad1': p1_p.pad_number,
-                        'pad2': p2_p.pad_number
-                    })
+                    swaps.append(
+                        {"component_ref": p1_p.component_ref, "pad1": p1_p.pad_number, "pad2": p2_p.pad_number}
+                    )
 
                 # N pads swap
                 if p1_n.component_ref == p2_n.component_ref:
-                    swaps.append({
-                        'component_ref': p1_n.component_ref,
-                        'pad1': p1_n.pad_number,
-                        'pad2': p2_n.pad_number
-                    })
+                    swaps.append(
+                        {"component_ref": p1_n.component_ref, "pad1": p1_n.pad_number, "pad2": p2_n.pad_number}
+                    )
 
     # Polarity swaps (uses pad_p/pad_n keys)
-    if hasattr(state, 'pad_swaps'):
+    if hasattr(state, "pad_swaps"):
         for swap_info in state.pad_swaps:
-            if 'pad_p' in swap_info and 'pad_n' in swap_info:
-                pad_p = swap_info['pad_p']
-                pad_n = swap_info['pad_n']
+            if "pad_p" in swap_info and "pad_n" in swap_info:
+                pad_p = swap_info["pad_p"]
+                pad_n = swap_info["pad_n"]
                 if pad_p.component_ref == pad_n.component_ref:
-                    swaps.append({
-                        'component_ref': pad_p.component_ref,
-                        'pad1': pad_p.pad_number,
-                        'pad2': pad_n.pad_number
-                    })
+                    swaps.append(
+                        {"component_ref": pad_p.component_ref, "pad1": pad_p.pad_number, "pad2": pad_n.pad_number}
+                    )
 
     return swaps

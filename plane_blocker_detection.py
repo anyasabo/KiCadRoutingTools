@@ -5,29 +5,25 @@ Identifies which nets are blocking via placement or routing,
 and provides rip-up functionality to remove blockers.
 """
 
+import os
+import sys
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional, Set
 
 import numpy as np
 
-from kicad_parser import PCBData, Pad
-from routing_config import GridRouteConfig, GridCoord
-from routing_utils import iter_pad_blocked_cells
 from bresenham_utils import walk_line
-from pcb_modification import remove_net_from_pcb_data, restore_net_to_pcb_data
+from kicad_parser import Pad, PCBData
 from obstacle_cache import ViaPlacementObstacleData, precompute_via_placement_obstacles
+from pcb_modification import remove_net_from_pcb_data, restore_net_to_pcb_data
+from routing_config import GridCoord, GridRouteConfig
+from routing_utils import iter_pad_blocked_cells
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 from grid_router import GridObstacleMap
 
 
 def _re_add_pad_obstacles_for_net(
-    pcb_data: PCBData,
-    net_id: int,
-    config: GridRouteConfig,
-    routing_obstacles_cache: Dict[str, GridObstacleMap]
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, routing_obstacles_cache: dict[str, GridObstacleMap]
 ):
     """
     Re-add pad obstacles for a net after its segments were removed.
@@ -52,14 +48,16 @@ def _re_add_pad_obstacles_for_net(
             half_height = pad.size_y / 2
             margin = config.track_width / 2 + config.clearance
             # Corner radius based on pad shape
-            if pad.shape in ('circle', 'oval'):
+            if pad.shape in ("circle", "oval"):
                 corner_radius = min(half_width, half_height)
-            elif pad.shape == 'roundrect':
+            elif pad.shape == "roundrect":
                 corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
             else:
                 corner_radius = 0
 
-            for cell_gx, cell_gy in iter_pad_blocked_cells(gx, gy, half_width, half_height, margin, config.grid_step, corner_radius):
+            for cell_gx, cell_gy in iter_pad_blocked_cells(
+                gx, gy, half_width, half_height, margin, config.grid_step, corner_radius
+            ):
                 obstacles.add_blocked_cell(cell_gx, cell_gy, 0)  # layer_idx=0 for single-layer maps
 
 
@@ -87,8 +85,8 @@ def find_via_position_blocker(
     pcb_data: PCBData,
     config: GridRouteConfig,
     exclude_net_id: int,
-    protected_net_ids: Optional[Set[int]] = None
-) -> Optional[int]:
+    protected_net_ids: set[int] | None = None,
+) -> int | None:
     """
     Find the net that is blocking via placement at a specific position.
 
@@ -106,9 +104,9 @@ def find_via_position_blocker(
         Net ID of the closest non-protected blocker, or None if no blocker found
     """
     best_blocker = None
-    best_dist_sq = float('inf')
+    best_dist_sq = float("inf")
     best_protected_blocker = None
-    best_protected_dist_sq = float('inf')
+    best_protected_dist_sq = float("inf")
     protected = protected_net_ids or set()
 
     # Check segments
@@ -117,7 +115,7 @@ def find_via_position_blocker(
             continue
         dist_sq = _point_to_segment_dist_sq(via_x, via_y, seg.start_x, seg.start_y, seg.end_x, seg.end_y)
         clearance_needed = config.via_size / 2 + seg.width / 2 + config.clearance
-        if dist_sq < clearance_needed ** 2:
+        if dist_sq < clearance_needed**2:
             if seg.net_id in protected:
                 if dist_sq < best_protected_dist_sq:
                     best_protected_dist_sq = dist_sq
@@ -134,7 +132,7 @@ def find_via_position_blocker(
         dy = via.y - via_y
         dist_sq = dx * dx + dy * dy
         clearance_needed = config.via_size / 2 + via.size / 2 + config.clearance
-        if dist_sq < clearance_needed ** 2:
+        if dist_sq < clearance_needed**2:
             if via.net_id in protected:
                 if dist_sq < best_protected_dist_sq:
                     best_protected_dist_sq = dist_sq
@@ -153,12 +151,12 @@ def find_via_position_blocker(
 
 
 def find_route_blocker_from_frontier(
-    blocked_cells: List[Tuple[int, int, int]],
+    blocked_cells: list[tuple[int, int, int]],
     pcb_data: PCBData,
     config: GridRouteConfig,
     exclude_net_id: int,
-    protected_net_ids: Optional[Set[int]] = None
-) -> Optional[int]:
+    protected_net_ids: set[int] | None = None,
+) -> int | None:
     """
     Find the net most responsible for blocking a route based on frontier data.
 
@@ -183,7 +181,7 @@ def find_route_blocker_from_frontier(
     protected = protected_net_ids or set()
 
     # Count how many blocked cells each net is responsible for (including protected)
-    net_block_count: Dict[int, int] = {}
+    net_block_count: dict[int, int] = {}
 
     # Check segments
     # expansion = existing_track_half + clearance + routing_track_half
@@ -261,8 +259,8 @@ def find_best_via_position_with_blocker(
     max_search_radius: float,
     pcb_data: PCBData,
     config: GridRouteConfig,
-    exclude_net_id: int
-) -> Tuple[Optional[Tuple[float, float]], Optional[int]]:
+    exclude_net_id: int,
+) -> tuple[tuple[float, float] | None, int | None]:
     """
     Find the best (closest) via position near a pad, and identify blocker if blocked.
 
@@ -282,7 +280,7 @@ def find_best_via_position_with_blocker(
 
     # Search outward for valid position
     max_radius_grid = coord.to_grid_dist(max_search_radius)
-    best_dist_sq = float('inf')
+    best_dist_sq = float("inf")
     best_pos = None
 
     for radius in range(1, max_radius_grid + 1):
@@ -312,10 +310,11 @@ def find_best_via_position_with_blocker(
 @dataclass
 class ViaPlacementResult:
     """Result of via placement attempt with potential rip-up."""
+
     success: bool
-    via_pos: Optional[Tuple[float, float]]
-    segments: List[Dict]
-    ripped_net_ids: List[int]  # Nets that were ripped up to achieve success
+    via_pos: tuple[float, float] | None
+    segments: list[dict]
+    ripped_net_ids: list[int]  # Nets that were ripped up to achieve success
     via_at_pad_center: bool
 
 
@@ -329,20 +328,20 @@ def try_place_via_with_ripup(
     max_search_radius: float,
     max_rip_nets: int,
     obstacles: GridObstacleMap,
-    routing_obstacles: Optional[GridObstacleMap],
-    via_obstacle_cache: Dict[int, ViaPlacementObstacleData],
-    routing_obstacles_cache: Dict[str, GridObstacleMap],
-    all_copper_layers: List[str],
+    routing_obstacles: GridObstacleMap | None,
+    via_obstacle_cache: dict[int, ViaPlacementObstacleData],
+    routing_obstacles_cache: dict[str, GridObstacleMap],
+    all_copper_layers: list[str],
     via_blocked: bool,  # True if via placement failed, False if routing failed
-    blocked_cells: Optional[List[Tuple[int, int, int]]] = None,  # Frontier from failed route
-    new_vias: List[Dict] = None,  # Previously placed vias to re-block after rebuild
+    blocked_cells: list[tuple[int, int, int]] | None = None,  # Frontier from failed route
+    new_vias: list[dict] = None,  # Previously placed vias to re-block after rebuild
     hole_to_hole_clearance: float = 0.2,
     via_drill: float = 0.4,
-    protected_net_ids: Optional[Set[int]] = None,  # Nets that should never be ripped up
+    protected_net_ids: set[int] | None = None,  # Nets that should never be ripped up
     verbose: bool = False,
     find_via_position_fn=None,  # Function to find via position
     route_via_to_pad_fn=None,  # Function to route via to pad
-    pending_pads: Optional[List[Dict]] = None  # Pads that still need vias (for exclusion zones)
+    pending_pads: list[dict] | None = None,  # Pads that still need vias (for exclusion zones)
 ) -> ViaPlacementResult:
     """
     Try to place a via and route to pad, ripping up blockers as needed.
@@ -359,7 +358,7 @@ def try_place_via_with_ripup(
     """
     ripped_net_ids = []
     ripped_data = []  # Store (blocker_id, removed_segs, removed_vias) for restoration on failure
-    failed_route_positions: Set[Tuple[int, int]] = set()  # Track positions where routing failed
+    failed_route_positions: set[tuple[int, int]] = set()  # Track positions where routing failed
 
     for attempt in range(max_rip_nets):
         if attempt == 0:
@@ -380,23 +379,28 @@ def try_place_via_with_ripup(
                 break  # Can't continue without find_via_position
 
             via_pos = find_via_position_fn(
-                pad, obstacles, coord, max_search_radius,
+                pad,
+                obstacles,
+                coord,
+                max_search_radius,
                 routing_obstacles=routing_obstacles,
                 config=config,
                 pad_layer=pad_layer,
                 net_id=net_id,
                 verbose=False,
                 failed_route_positions=failed_route_positions,
-                pending_pads=pending_pads
+                pending_pads=pending_pads,
             )
 
             if via_pos:
-                via_at_pad_center = (abs(via_pos[0] - pad.global_x) < 0.001 and
-                                     abs(via_pos[1] - pad.global_y) < 0.001)
+                via_at_pad_center = abs(via_pos[0] - pad.global_x) < 0.001 and abs(via_pos[1] - pad.global_y) < 0.001
                 if via_at_pad_center or not pad_layer:
                     return ViaPlacementResult(
-                        success=True, via_pos=via_pos, segments=[],
-                        ripped_net_ids=ripped_net_ids, via_at_pad_center=via_at_pad_center
+                        success=True,
+                        via_pos=via_pos,
+                        segments=[],
+                        ripped_net_ids=ripped_net_ids,
+                        via_at_pad_center=via_at_pad_center,
                     )
 
                 # Try routing
@@ -404,15 +408,16 @@ def try_place_via_with_ripup(
                     break  # Can't continue without route_via_to_pad
 
                 route_result = route_via_to_pad_fn(
-                    via_pos, pad, pad_layer, net_id,
-                    routing_obstacles, config,
-                    verbose=False, return_blocked_cells=True
+                    via_pos, pad, pad_layer, net_id, routing_obstacles, config, verbose=False, return_blocked_cells=True
                 )
 
                 if route_result.success:
                     return ViaPlacementResult(
-                        success=True, via_pos=via_pos, segments=route_result.segments,
-                        ripped_net_ids=ripped_net_ids, via_at_pad_center=False
+                        success=True,
+                        via_pos=via_pos,
+                        segments=route_result.segments,
+                        ripped_net_ids=ripped_net_ids,
+                        via_at_pad_center=False,
                     )
 
                 # Routing failed - find blocker from frontier
@@ -462,7 +467,7 @@ def try_place_via_with_ripup(
         if pending_pads is not None:
             ripped_pads = pcb_data.pads_by_net.get(blocker, [])
             for rp in ripped_pads:
-                pending_pads.append({'pad': rp, 'needs_via': True})
+                pending_pads.append({"pad": rp, "needs_via": True})
 
     # Failed - restore all ripped nets to pcb_data and obstacles
     if ripped_data:
@@ -480,7 +485,9 @@ def try_place_via_with_ripup(
         print("(restored) ", end="")
 
     return ViaPlacementResult(
-        success=False, via_pos=None, segments=[],
+        success=False,
+        via_pos=None,
+        segments=[],
         ripped_net_ids=[],  # Empty since we restored them
-        via_at_pad_center=False
+        via_at_pad_center=False,
     )

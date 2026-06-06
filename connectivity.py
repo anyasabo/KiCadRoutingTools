@@ -6,13 +6,12 @@ and tracking segment connectivity.
 """
 
 import math
-from typing import List, Optional, Tuple, Dict, Set
 
-from kicad_parser import PCBData, Segment, Via, Pad, Zone
-from routing_config import GridRouteConfig, GridCoord
-from routing_utils import pos_key, segment_length, POSITION_DECIMALS, build_layer_map
 from geometry_utils import UnionFind
+from kicad_parser import Pad, PCBData, Segment, Via, Zone
+from routing_config import GridCoord, GridRouteConfig
 from routing_constants import BGA_DEFAULT_EDGE_TOLERANCE, BGA_EDGE_DETECTION_TOLERANCE
+from routing_utils import POSITION_DECIMALS, build_layer_map, pos_key, segment_length
 
 
 class _EndpointStub:
@@ -21,8 +20,20 @@ class _EndpointStub:
     Used by check_multipoint_net when a stub endpoint (not an actual pad)
     needs to participate in zone-connectivity checks that access .layers etc.
     """
-    __slots__ = ('x', 'y', 'global_x', 'global_y', 'layer', 'layers',
-                 'drill', 'size_x', 'size_y', 'pad_number', 'net_id')
+
+    __slots__ = (
+        "x",
+        "y",
+        "global_x",
+        "global_y",
+        "layer",
+        "layers",
+        "drill",
+        "size_x",
+        "size_y",
+        "pad_number",
+        "net_id",
+    )
 
     def __init__(self, x: float, y: float, layer: str):
         self.x = x
@@ -34,26 +45,26 @@ class _EndpointStub:
         self.drill = 0
         self.size_x = 0
         self.size_y = 0
-        self.pad_number = ''
+        self.pad_number = ""
         self.net_id = 0
 
 
-def _make_endpoint_stub(x: float, y: float, layer: str) -> '_EndpointStub':
+def _make_endpoint_stub(x: float, y: float, layer: str) -> "_EndpointStub":
     """Create a pad-like object for a stub free-end position."""
     return _EndpointStub(x, y, layer)
 
 
-def _get_pad_coords(p) -> Tuple[float, float]:
+def _get_pad_coords(p) -> tuple[float, float]:
     """Get x, y coordinates from Pad object or dict."""
-    if hasattr(p, 'global_x'):
+    if hasattr(p, "global_x"):
         return p.global_x, p.global_y
     elif isinstance(p, dict):
-        return p['x'], p['y']
+        return p["x"], p["y"]
     else:
         raise ValueError(f"Unknown pad type: {type(p)}")
 
 
-def find_farthest_pad_pair(pads) -> Tuple[int, int]:
+def find_farthest_pad_pair(pads) -> tuple[int, int]:
     """
     Find the two farthest pads/endpoints by Manhattan distance.
 
@@ -85,11 +96,8 @@ def find_farthest_pad_pair(pads) -> Tuple[int, int]:
 
 
 def find_closest_point_on_segments(
-    segments: List[Segment],
-    target_x: float,
-    target_y: float,
-    target_layers: List[str]
-) -> Tuple[float, float, str, float]:
+    segments: list[Segment], target_x: float, target_y: float, target_layers: list[str]
+) -> tuple[float, float, str, float]:
     """
     Find the closest point on any segment to a target location.
 
@@ -109,7 +117,7 @@ def find_closest_point_on_segments(
         return None
 
     best_point = None
-    best_dist = float('inf')
+    best_dist = float("inf")
     best_layer = None
 
     for seg in segments:
@@ -171,7 +179,7 @@ def calculate_stub_length(pcb_data, net_id: int) -> float:
     return total
 
 
-def is_edge_stub(pad_x: float, pad_y: float, bga_zones: List) -> bool:
+def is_edge_stub(pad_x: float, pad_y: float, bga_zones: list) -> bool:
     """Check if a pad is on the outer row/column of any BGA zone.
 
     Args:
@@ -189,8 +197,12 @@ def is_edge_stub(pad_x: float, pad_y: float, bga_zones: List) -> bool:
         edge_tolerance = zone[4] if len(zone) > 4 else BGA_DEFAULT_EDGE_TOLERANCE
         # Check if pad is INSIDE this zone (with small tolerance for floating point)
         inside_tolerance = BGA_EDGE_DETECTION_TOLERANCE
-        if (pad_x >= min_x - inside_tolerance and pad_x <= max_x + inside_tolerance and
-            pad_y >= min_y - inside_tolerance and pad_y <= max_y + inside_tolerance):
+        if (
+            pad_x >= min_x - inside_tolerance
+            and pad_x <= max_x + inside_tolerance
+            and pad_y >= min_y - inside_tolerance
+            and pad_y <= max_y + inside_tolerance
+        ):
             # Check if it's on an edge (within tolerance of min/max)
             on_left = abs(pad_x - min_x) <= edge_tolerance
             on_right = abs(pad_x - max_x) <= edge_tolerance
@@ -201,8 +213,9 @@ def is_edge_stub(pad_x: float, pad_y: float, bga_zones: List) -> bool:
     return False
 
 
-def find_connected_groups(segments: List[Segment], tolerance: float = 0.01,
-                          layer_aware: bool = True, vias: List = None) -> List[List[Segment]]:
+def find_connected_groups(
+    segments: list[Segment], tolerance: float = 0.01, layer_aware: bool = True, vias: list = None
+) -> list[list[Segment]]:
     """Find groups of connected segments using union-find with spatial hashing.
 
     Uses O(n) spatial hashing instead of O(n²) pairwise comparison.
@@ -233,7 +246,7 @@ def find_connected_groups(segments: List[Segment], tolerance: float = 0.01,
     # Spatial hash: map rounded coordinates to (segment_index, x, y, layer) tuples
     # Use tolerance-based grid cells
     inv_tol = 1.0 / tolerance
-    endpoint_map: Dict[Tuple[int, int], List[Tuple[int, float, float, str]]] = {}
+    endpoint_map: dict[tuple[int, int], list[tuple[int, float, float, str]]] = {}
 
     # First pass: build spatial hash with actual coordinates
     for i, seg in enumerate(segments):
@@ -264,7 +277,7 @@ def find_connected_groups(segments: List[Segment], tolerance: float = 0.01,
                                     uf.union(i, j)
 
     # Group segments by their root
-    groups: Dict[int, List[Segment]] = {}
+    groups: dict[int, list[Segment]] = {}
     for i in range(n):
         root = uf.find(i)
         if root not in groups:
@@ -274,7 +287,7 @@ def find_connected_groups(segments: List[Segment], tolerance: float = 0.01,
     return list(groups.values())
 
 
-def _point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) -> bool:
+def _point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> bool:
     """Check if a point (x, y) is inside a polygon using ray casting algorithm."""
     n = len(polygon)
     if n < 3:
@@ -292,12 +305,8 @@ def _point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) ->
 
 
 def get_zone_connected_pad_groups(
-    segments: List[Segment],
-    vias: List[Via],
-    pads: List[Pad],
-    zones: List[Zone],
-    routing_layers: List[str] = None
-) -> Dict[int, int]:
+    segments: list[Segment], vias: list[Via], pads: list[Pad], zones: list[Zone], routing_layers: list[str] = None
+) -> dict[int, int]:
     """
     Get connected component membership for each pad based on zone/plane connectivity.
 
@@ -324,27 +333,27 @@ def get_zone_connected_pad_groups(
     # Detect all copper layers
     copper_layers = set()
     for seg in segments:
-        if seg.layer.endswith('.Cu'):
+        if seg.layer.endswith(".Cu"):
             copper_layers.add(seg.layer)
     for via in vias:
         if via.layers:
             for layer in via.layers:
-                if layer.endswith('.Cu'):
+                if layer.endswith(".Cu"):
                     copper_layers.add(layer)
     for zone in zones:
-        if zone.layer.endswith('.Cu'):
+        if zone.layer.endswith(".Cu"):
             copper_layers.add(zone.layer)
     if routing_layers:
         copper_layers.update(routing_layers)
     if not copper_layers:
-        copper_layers = {'F.Cu', 'B.Cu'}
+        copper_layers = {"F.Cu", "B.Cu"}
 
     all_copper_layers = sorted(copper_layers)
 
     # Collect all points with pad index tracking
     all_points = []  # (x, y, layer, point_id)
     point_id = 0
-    pad_point_ids: Dict[int, List[int]] = {}  # pad_index -> list of point_ids
+    pad_point_ids: dict[int, list[int]] = {}  # pad_index -> list of point_ids
 
     # Add segment endpoints
     for seg in segments:
@@ -358,7 +367,11 @@ def get_zone_connected_pad_groups(
 
     # Add vias
     for via in vias:
-        via_layers = all_copper_layers if (via.layers and 'F.Cu' in via.layers and 'B.Cu' in via.layers) else (via.layers or all_copper_layers)
+        via_layers = (
+            all_copper_layers
+            if (via.layers and "F.Cu" in via.layers and "B.Cu" in via.layers)
+            else (via.layers or all_copper_layers)
+        )
         via_ids = []
         for layer in via_layers:
             all_points.append((via.x, via.y, layer, point_id))
@@ -409,7 +422,9 @@ def get_zone_connected_pad_groups(
     return pad_components
 
 
-def find_stub_free_ends(segments: List[Segment], pads: List[Pad], tolerance: float = 0.05) -> List[Tuple[float, float, str]]:
+def find_stub_free_ends(
+    segments: list[Segment], pads: list[Pad], tolerance: float = 0.05
+) -> list[tuple[float, float, str]]:
     """
     Find the free ends of a segment group (endpoints not connected to other segments or pads).
 
@@ -425,7 +440,7 @@ def find_stub_free_ends(segments: List[Segment], pads: List[Pad], tolerance: flo
         return []
 
     # Count how many times each endpoint appears
-    endpoint_counts: Dict[Tuple[float, float, str], int] = {}
+    endpoint_counts: dict[tuple[float, float, str], int] = {}
     for seg in segments:
         key_start = (round(seg.start_x, POSITION_DECIMALS), round(seg.start_y, POSITION_DECIMALS), seg.layer)
         key_end = (round(seg.end_x, POSITION_DECIMALS), round(seg.end_y, POSITION_DECIMALS), seg.layer)
@@ -451,8 +466,9 @@ def find_stub_free_ends(segments: List[Segment], pads: List[Pad], tolerance: flo
     return free_ends
 
 
-def get_stub_direction(segments: List[Segment], stub_x: float, stub_y: float, stub_layer: str,
-                       tolerance: float = 0.05) -> Tuple[float, float]:
+def get_stub_direction(
+    segments: list[Segment], stub_x: float, stub_y: float, stub_layer: str, tolerance: float = 0.05
+) -> tuple[float, float]:
     """
     Find the direction a stub is pointing (from pad toward free end).
 
@@ -475,7 +491,7 @@ def get_stub_direction(segments: List[Segment], stub_x: float, stub_y: float, st
             # Direction from end to start (toward the free end)
             dx = seg.start_x - seg.end_x
             dy = seg.start_y - seg.end_y
-            length = math.sqrt(dx*dx + dy*dy)
+            length = math.sqrt(dx * dx + dy * dy)
             if length > 0:
                 return (dx / length, dy / length)
             return (0, 0)
@@ -485,7 +501,7 @@ def get_stub_direction(segments: List[Segment], stub_x: float, stub_y: float, st
             # Direction from start to end (toward the free end)
             dx = seg.end_x - seg.start_x
             dy = seg.end_y - seg.start_y
-            length = math.sqrt(dx*dx + dy*dy)
+            length = math.sqrt(dx * dx + dy * dy)
             if length > 0:
                 return (dx / length, dy / length)
             return (0, 0)
@@ -494,8 +510,9 @@ def get_stub_direction(segments: List[Segment], stub_x: float, stub_y: float, st
     return (0, 0)
 
 
-def get_stub_segments(pcb_data: PCBData, net_id: int, stub_x: float, stub_y: float,
-                      stub_layer: str, tolerance: float = 0.05) -> List[Segment]:
+def get_stub_segments(
+    pcb_data: PCBData, net_id: int, stub_x: float, stub_y: float, stub_layer: str, tolerance: float = 0.05
+) -> list[Segment]:
     """
     Get all segments that form a stub (from free end back to pad).
 
@@ -560,8 +577,7 @@ def get_stub_segments(pcb_data: PCBData, net_id: int, stub_x: float, stub_y: flo
     return result
 
 
-def get_stub_vias(pcb_data: PCBData, net_id: int, stub_segments: List[Segment],
-                  tolerance: float = 0.05) -> List:
+def get_stub_vias(pcb_data: PCBData, net_id: int, stub_segments: list[Segment], tolerance: float = 0.05) -> list:
     """
     Get vias that are part of a stub (e.g., pad vias from layer switching).
 
@@ -598,7 +614,7 @@ def get_stub_vias(pcb_data: PCBData, net_id: int, stub_segments: List[Segment],
     return stub_vias
 
 
-def calculate_stub_via_barrel_length(stub_vias: List, stub_layer: str, pcb_data) -> float:
+def calculate_stub_via_barrel_length(stub_vias: list, stub_layer: str, pcb_data) -> float:
     """
     Calculate via barrel length for stub vias, using the stub layer as one endpoint.
 
@@ -613,7 +629,7 @@ def calculate_stub_via_barrel_length(stub_vias: List, stub_layer: str, pcb_data)
     Returns:
         Total via barrel length in mm
     """
-    if not stub_vias or not pcb_data or not hasattr(pcb_data, 'get_via_barrel_length'):
+    if not stub_vias or not pcb_data or not hasattr(pcb_data, "get_via_barrel_length"):
         return 0.0
 
     total = 0.0
@@ -628,7 +644,7 @@ def calculate_stub_via_barrel_length(stub_vias: List, stub_layer: str, pcb_data)
             if abs(pad.global_x - via.x) < 0.05 and abs(pad.global_y - via.y) < 0.05:
                 # Find copper layer from pad's layers (filter out mask/paste layers and wildcards)
                 for layer in pad.layers:
-                    if layer.endswith('.Cu') and not layer.startswith('*'):
+                    if layer.endswith(".Cu") and not layer.startswith("*"):
                         pad_layer = layer
                         break
                 break
@@ -644,8 +660,9 @@ def calculate_stub_via_barrel_length(stub_vias: List, stub_layer: str, pcb_data)
     return total
 
 
-def get_net_endpoints(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
-                      use_stub_free_ends: bool = False) -> Tuple[List, List, str]:
+def get_net_endpoints(
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, use_stub_free_ends: bool = False
+) -> tuple[list, list, str]:
     """
     Find source and target endpoints for a net, considering segments, pads, and existing vias.
 
@@ -833,11 +850,7 @@ def get_net_endpoints(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
     return [], [], f"Cannot determine endpoints: {len(net_segments)} segments, {len(net_pads)} pads"
 
 
-def get_multipoint_net_pads(
-    pcb_data: PCBData,
-    net_id: int,
-    config: GridRouteConfig
-) -> Optional[List[Tuple]]:
+def get_multipoint_net_pads(pcb_data: PCBData, net_id: int, config: GridRouteConfig) -> list[tuple] | None:
     """
     Check if a net has 3+ unconnected endpoints (multi-point net) and return stub endpoints.
 
@@ -902,14 +915,16 @@ def get_multipoint_net_pads(
                     layer_idx = layer_map.get(layer)
                     if layer_idx is not None:
                         # Create a simple object to hold endpoint info
-                        endpoint_info.append((
-                            coord.to_grid(x, y)[0],
-                            coord.to_grid(x, y)[1],
-                            layer_idx,
-                            x,
-                            y,
-                            _make_endpoint_stub(x, y, layer)
-                        ))
+                        endpoint_info.append(
+                            (
+                                coord.to_grid(x, y)[0],
+                                coord.to_grid(x, y)[1],
+                                layer_idx,
+                                x,
+                                y,
+                                _make_endpoint_stub(x, y, layer),
+                            )
+                        )
             return endpoint_info if len(endpoint_info) >= 3 else None
 
     # Case 3: Segment group(s) + unconnected pads totaling 3+ endpoints
@@ -946,14 +961,16 @@ def get_multipoint_net_pads(
                     x, y, layer = free_ends[0]
                     layer_idx = layer_map.get(layer)
                     if layer_idx is not None:
-                        endpoint_info.append((
-                            coord.to_grid(x, y)[0],
-                            coord.to_grid(x, y)[1],
-                            layer_idx,
-                            x,
-                            y,
-                            _make_endpoint_stub(x, y, layer)
-                        ))
+                        endpoint_info.append(
+                            (
+                                coord.to_grid(x, y)[0],
+                                coord.to_grid(x, y)[1],
+                                layer_idx,
+                                x,
+                                y,
+                                _make_endpoint_stub(x, y, layer),
+                            )
+                        )
 
             # Add unconnected pads
             for pad in unconnected_pads:
@@ -973,12 +990,7 @@ def get_multipoint_net_pads(
     return None
 
 
-def normalize_endpoints_by_component(
-    pcb_data: PCBData,
-    sources: List,
-    targets: List,
-    net_id: int
-) -> Tuple[List, List]:
+def normalize_endpoints_by_component(pcb_data: PCBData, sources: list, targets: list, net_id: int) -> tuple[list, list]:
     """
     Normalize source/target endpoints so that source is always from the
     alphabetically-first component. This ensures consistent ordering across
@@ -1021,7 +1033,7 @@ def normalize_endpoints_by_component(
     return sources, targets
 
 
-def get_stub_endpoints(pcb_data: PCBData, net_ids: List[int]) -> List[Tuple[float, float, str]]:
+def get_stub_endpoints(pcb_data: PCBData, net_ids: list[int]) -> list[tuple[float, float, str]]:
     """Get free end positions of unrouted net stubs for proximity avoidance.
 
     Returns list of (x, y, layer) tuples - includes layer for same-layer filtering.
@@ -1045,7 +1057,7 @@ def get_stub_endpoints(pcb_data: PCBData, net_ids: List[int]) -> List[Tuple[floa
     return stubs
 
 
-def get_net_stub_centroids(pcb_data: PCBData, net_id: int) -> List[Tuple[float, float]]:
+def get_net_stub_centroids(pcb_data: PCBData, net_id: int) -> list[tuple[float, float]]:
     """
     Get centroids of each connected stub group for a net.
     Returns list of (x, y) centroids, typically 2 for a 2-point net.
@@ -1071,12 +1083,14 @@ def get_net_stub_centroids(pcb_data: PCBData, net_id: int) -> List[Tuple[float, 
     return centroids
 
 
-def segments_intersect(a1: Tuple[float, float], a2: Tuple[float, float],
-                       b1: Tuple[float, float], b2: Tuple[float, float]) -> bool:
+def segments_intersect(
+    a1: tuple[float, float], a2: tuple[float, float], b1: tuple[float, float], b2: tuple[float, float]
+) -> bool:
     """Check if line segment a1-a2 intersects line segment b1-b2.
 
     Uses the counter-clockwise orientation test for robust intersection detection.
     """
+
     def ccw(A, B, C):
         return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
 
@@ -1090,7 +1104,7 @@ def segments_intersect(a1: Tuple[float, float], a2: Tuple[float, float],
     return (ccw(a1, b1, b2) != ccw(a2, b1, b2)) and (ccw(a1, a2, b1) != ccw(a1, a2, b2))
 
 
-def compute_mst_edges(points: List[Tuple[float, float]], use_manhattan: bool = False) -> List[Tuple[int, int, float]]:
+def compute_mst_edges(points: list[tuple[float, float]], use_manhattan: bool = False) -> list[tuple[int, int, float]]:
     """Compute minimum spanning tree edges between points using Prim's algorithm.
 
     Args:
@@ -1107,14 +1121,14 @@ def compute_mst_edges(points: List[Tuple[float, float]], use_manhattan: bool = F
         if use_manhattan:
             dist = abs(points[0][0] - points[1][0]) + abs(points[0][1] - points[1][1])
         else:
-            dist = math.sqrt((points[0][0] - points[1][0])**2 + (points[0][1] - points[1][1])**2)
+            dist = math.sqrt((points[0][0] - points[1][0]) ** 2 + (points[0][1] - points[1][1]) ** 2)
         return [(0, 1, dist)]
 
     # Prim's algorithm with min_dist array - O(n^2) instead of O(n^3)
     n = len(points)
     in_tree = [False] * n
     # min_dist[j] = minimum distance from any tree node to j
-    min_dist = [float('inf')] * n
+    min_dist = [float("inf")] * n
     # nearest[j] = the tree node closest to j
     nearest = [0] * n
     edges = []
@@ -1126,13 +1140,12 @@ def compute_mst_edges(points: List[Tuple[float, float]], use_manhattan: bool = F
         if use_manhattan:
             min_dist[j] = abs(points[0][0] - points[j][0]) + abs(points[0][1] - points[j][1])
         else:
-            min_dist[j] = math.sqrt((points[0][0] - points[j][0])**2 +
-                                    (points[0][1] - points[j][1])**2)
+            min_dist[j] = math.sqrt((points[0][0] - points[j][0]) ** 2 + (points[0][1] - points[j][1]) ** 2)
 
     for _ in range(n - 1):
         # Find non-tree node with minimum distance to tree
         best_j = -1
-        best_dist = float('inf')
+        best_dist = float("inf")
         for j in range(n):
             if not in_tree[j] and min_dist[j] < best_dist:
                 best_dist = min_dist[j]
@@ -1150,8 +1163,7 @@ def compute_mst_edges(points: List[Tuple[float, float]], use_manhattan: bool = F
                 if use_manhattan:
                     d = abs(points[best_j][0] - points[j][0]) + abs(points[best_j][1] - points[j][1])
                 else:
-                    d = math.sqrt((points[best_j][0] - points[j][0])**2 +
-                                  (points[best_j][1] - points[j][1])**2)
+                    d = math.sqrt((points[best_j][0] - points[j][0]) ** 2 + (points[best_j][1] - points[j][1]) ** 2)
                 if d < min_dist[j]:
                     min_dist[j] = d
                     nearest[j] = best_j
@@ -1159,7 +1171,7 @@ def compute_mst_edges(points: List[Tuple[float, float]], use_manhattan: bool = F
     return edges
 
 
-def compute_mst_segments(points: List[Tuple[float, float]]) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def compute_mst_segments(points: list[tuple[float, float]]) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Compute minimum spanning tree segments between points using Prim's algorithm.
 
     Returns list of (point1, point2) tuples representing MST edges.
@@ -1169,7 +1181,7 @@ def compute_mst_segments(points: List[Tuple[float, float]]) -> List[Tuple[Tuple[
     return [(points[e[0]], points[e[1]]) for e in edges]
 
 
-def get_net_mst_segments(pcb_data: PCBData, net_id: int) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def get_net_mst_segments(pcb_data: PCBData, net_id: int) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Get MST segments representing the routing path for a net.
 
     For 2-pad nets: returns single segment between pads.
@@ -1210,7 +1222,7 @@ def get_net_mst_segments(pcb_data: PCBData, net_id: int) -> List[Tuple[Tuple[flo
     return []
 
 
-def get_net_routing_endpoints(pcb_data: PCBData, net_id: int) -> List[Tuple[float, float]]:
+def get_net_routing_endpoints(pcb_data: PCBData, net_id: int) -> list[tuple[float, float]]:
     """
     Get the two routing endpoints for a net, for MPS conflict detection.
 
@@ -1288,9 +1300,9 @@ def get_net_routing_endpoints(pcb_data: PCBData, net_id: int) -> List[Tuple[floa
     return []
 
 
-def find_connected_segment_positions(pcb_data: PCBData, start_x: float, start_y: float,
-                                      net_id: int, tolerance: float = 0.1,
-                                      layer: str = None) -> set:
+def find_connected_segment_positions(
+    pcb_data: PCBData, start_x: float, start_y: float, net_id: int, tolerance: float = 0.1, layer: str = None
+) -> set:
     """
     Find all segment endpoint positions connected to a starting position for a given net.
 
@@ -1337,8 +1349,7 @@ def find_connected_segment_positions(pcb_data: PCBData, start_x: float, start_y:
     return visited
 
 
-def find_connected_segments(pcb_data: PCBData, start_x: float, start_y: float,
-                            net_id: int) -> List:
+def find_connected_segments(pcb_data: PCBData, start_x: float, start_y: float, net_id: int) -> list:
     """
     Find all segments connected to a starting position for a given net.
 
@@ -1383,7 +1394,11 @@ def find_connected_segments(pcb_data: PCBData, start_x: float, start_y: float,
             visited_segments.add(id(seg))
 
             # Add the other endpoint of this segment to the queue
-            other_end = pos_key(seg.end_x, seg.end_y) if pos_key(seg.start_x, seg.start_y) == pos else pos_key(seg.start_x, seg.start_y)
+            other_end = (
+                pos_key(seg.end_x, seg.end_y)
+                if pos_key(seg.start_x, seg.start_y) == pos
+                else pos_key(seg.start_x, seg.start_y)
+            )
             if other_end not in visited_positions:
                 queue.append(other_end)
 

@@ -6,14 +6,12 @@ source and target stubs are on different layers.
 """
 
 import math
-from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass
 
+from connectivity import get_stub_direction, get_stub_segments
+from geometry_utils import point_to_segment_distance_seg, segments_intersect_2d
 from kicad_parser import PCBData, Segment, Via
 from routing_config import GridRouteConfig
-from connectivity import get_stub_segments, get_stub_direction
-from geometry_utils import segments_intersect_2d, point_to_segment_distance_seg
-from typing import Set
 
 # Layer swap tolerance constants
 STUB_OVERLAP_Y_TOLERANCE = 0.2  # mm - Y tolerance for bounding box overlap checks
@@ -24,18 +22,25 @@ SEGMENT_MATCH_TOLERANCE = 0.001  # mm - tolerance for segment coordinate matchin
 @dataclass
 class StubInfo:
     """Information about a stub endpoint."""
+
     net_id: int
     x: float
     y: float
     layer: str
-    segments: List[Segment]
+    segments: list[Segment]
     pad_x: float
     pad_y: float
     has_pad_via: bool  # True if pad already has via to other layers
 
 
-def get_stub_info(pcb_data: PCBData, net_id: int, stub_x: float, stub_y: float,
-                  stub_layer: str, tolerance: float = STUB_POSITION_TOLERANCE) -> Optional[StubInfo]:
+def get_stub_info(
+    pcb_data: PCBData,
+    net_id: int,
+    stub_x: float,
+    stub_y: float,
+    stub_layer: str,
+    tolerance: float = STUB_POSITION_TOLERANCE,
+) -> StubInfo | None:
     """
     Gather information about a stub for layer switching analysis.
 
@@ -141,7 +146,7 @@ def get_stub_info(pcb_data: PCBData, net_id: int, stub_x: float, stub_y: float,
         segments=segments,
         pad_x=pad_x,
         pad_y=pad_y,
-        has_pad_via=has_pad_via
+        has_pad_via=has_pad_via,
     )
 
 
@@ -156,13 +161,14 @@ def needs_pad_via_for_switch(stub: StubInfo) -> bool:
     Returns:
         True if pad via needed for layer switch
     """
-    if stub.layer != 'F.Cu':
+    if stub.layer != "F.Cu":
         return False  # Already has via from pad to stub layer
     return not stub.has_pad_via
 
 
-def apply_stub_layer_switch(pcb_data: PCBData, stub: StubInfo, new_layer: str,
-                             config: GridRouteConfig, debug: bool = True) -> Tuple[List[Via], List[Dict]]:
+def apply_stub_layer_switch(
+    pcb_data: PCBData, stub: StubInfo, new_layer: str, config: GridRouteConfig, debug: bool = True
+) -> tuple[list[Via], list[dict]]:
     """
     Switch a stub to a new layer by modifying segment layers.
 
@@ -192,8 +198,9 @@ def apply_stub_layer_switch(pcb_data: PCBData, stub: StubInfo, new_layer: str,
         if id(seg) in segments_to_switch:
             continue
         # Check if segment connects to pad position
-        if (abs(seg.start_x - stub.pad_x) < tolerance and abs(seg.start_y - stub.pad_y) < tolerance) or \
-           (abs(seg.end_x - stub.pad_x) < tolerance and abs(seg.end_y - stub.pad_y) < tolerance):
+        if (abs(seg.start_x - stub.pad_x) < tolerance and abs(seg.start_y - stub.pad_y) < tolerance) or (
+            abs(seg.end_x - stub.pad_x) < tolerance and abs(seg.end_y - stub.pad_y) < tolerance
+        ):
             segments_to_switch.add(id(seg))
 
     # Get actual segment objects
@@ -211,16 +218,20 @@ def apply_stub_layer_switch(pcb_data: PCBData, stub: StubInfo, new_layer: str,
     for seg in all_segments:
         old_layer = seg.layer
         if debug:
-            print(f"          ({seg.start_x:.2f},{seg.start_y:.2f})->({seg.end_x:.2f},{seg.end_y:.2f}) {old_layer} -> {new_layer}")
+            print(
+                f"          ({seg.start_x:.2f},{seg.start_y:.2f})->({seg.end_x:.2f},{seg.end_y:.2f}) {old_layer} -> {new_layer}"
+            )
 
         # Record modification for file writing
-        segment_mods.append({
-            'start': (seg.start_x, seg.start_y),
-            'end': (seg.end_x, seg.end_y),
-            'net_id': seg.net_id,
-            'old_layer': old_layer,
-            'new_layer': new_layer
-        })
+        segment_mods.append(
+            {
+                "start": (seg.start_x, seg.start_y),
+                "end": (seg.end_x, seg.end_y),
+                "net_id": seg.net_id,
+                "old_layer": old_layer,
+                "new_layer": new_layer,
+            }
+        )
 
         # Modify in memory
         seg.layer = new_layer
@@ -232,8 +243,8 @@ def apply_stub_layer_switch(pcb_data: PCBData, stub: StubInfo, new_layer: str,
             y=stub.pad_y,
             size=config.via_size,
             drill=config.via_drill,
-            layers=['F.Cu', 'B.Cu'],  # Through-hole via
-            net_id=stub.net_id
+            layers=["F.Cu", "B.Cu"],  # Through-hole via
+            net_id=stub.net_id,
         )
         new_vias.append(via)
         pcb_data.vias.append(via)
@@ -241,7 +252,7 @@ def apply_stub_layer_switch(pcb_data: PCBData, stub: StubInfo, new_layer: str,
     return new_vias, segment_mods
 
 
-def revert_stub_layer_switch(pcb_data: 'PCBData', segment_mods: List[Dict], new_vias: List) -> None:
+def revert_stub_layer_switch(pcb_data: "PCBData", segment_mods: list[dict], new_vias: list) -> None:
     """
     Revert a previously applied stub layer switch.
 
@@ -253,13 +264,15 @@ def revert_stub_layer_switch(pcb_data: 'PCBData', segment_mods: List[Dict], new_
     # Restore segment layers from modification records
     for mod in segment_mods:
         for seg in pcb_data.segments:
-            if (seg.net_id == mod['net_id'] and
-                abs(seg.start_x - mod['start'][0]) < SEGMENT_MATCH_TOLERANCE and
-                abs(seg.start_y - mod['start'][1]) < SEGMENT_MATCH_TOLERANCE and
-                abs(seg.end_x - mod['end'][0]) < SEGMENT_MATCH_TOLERANCE and
-                abs(seg.end_y - mod['end'][1]) < SEGMENT_MATCH_TOLERANCE and
-                seg.layer == mod['new_layer']):
-                seg.layer = mod['old_layer']
+            if (
+                seg.net_id == mod["net_id"]
+                and abs(seg.start_x - mod["start"][0]) < SEGMENT_MATCH_TOLERANCE
+                and abs(seg.start_y - mod["start"][1]) < SEGMENT_MATCH_TOLERANCE
+                and abs(seg.end_x - mod["end"][0]) < SEGMENT_MATCH_TOLERANCE
+                and abs(seg.end_y - mod["end"][1]) < SEGMENT_MATCH_TOLERANCE
+                and seg.layer == mod["new_layer"]
+            ):
+                seg.layer = mod["old_layer"]
                 break
 
     # Remove added vias
@@ -268,8 +281,9 @@ def revert_stub_layer_switch(pcb_data: 'PCBData', segment_mods: List[Dict], new_
             pcb_data.vias.remove(via)
 
 
-def check_segments_overlap(segments: List[Segment], other_segments: List[Segment],
-                           y_tolerance: float = STUB_OVERLAP_Y_TOLERANCE) -> bool:
+def check_segments_overlap(
+    segments: list[Segment], other_segments: list[Segment], y_tolerance: float = STUB_OVERLAP_Y_TOLERANCE
+) -> bool:
     """
     Check if any segment bounding boxes overlap.
 
@@ -303,10 +317,14 @@ def check_segments_overlap(segments: List[Segment], other_segments: List[Segment
     return False
 
 
-def validate_stub_no_overlap(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
-                              all_stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]],
-                              pcb_data: PCBData,
-                              swap_partner_name: Optional[str] = None) -> Tuple[bool, str]:
+def validate_stub_no_overlap(
+    stub_p: StubInfo,
+    stub_n: StubInfo,
+    dest_layer: str,
+    all_stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]],
+    pcb_data: PCBData,
+    swap_partner_name: str | None = None,
+) -> tuple[bool, str]:
     """
     Check that swapped stubs won't overlap with other stubs on destination layer.
 
@@ -340,19 +358,29 @@ def validate_stub_no_overlap(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str
                 continue
             # Check if the 2D line segments actually intersect
             if segments_intersect_2d(
-                (our_seg.start_x, our_seg.start_y), (our_seg.end_x, our_seg.end_y),
-                (other.start_x, other.start_y), (other.end_x, other.end_y)
+                (our_seg.start_x, our_seg.start_y),
+                (our_seg.end_x, our_seg.end_y),
+                (other.start_x, other.start_y),
+                (other.end_x, other.end_y),
             ):
                 net = pcb_data.nets.get(other.net_id)
                 net_name = net.name if net else f"net {other.net_id}"
-                return False, f"stub ({our_seg.start_x:.1f},{our_seg.start_y:.1f})-({our_seg.end_x:.1f},{our_seg.end_y:.1f}) overlaps {net_name} at ({other.start_x:.1f},{other.start_y:.1f})-({other.end_x:.1f},{other.end_y:.1f}) on {dest_layer}"
+                return (
+                    False,
+                    f"stub ({our_seg.start_x:.1f},{our_seg.start_y:.1f})-({our_seg.end_x:.1f},{our_seg.end_y:.1f}) overlaps {net_name} at ({other.start_x:.1f},{other.start_y:.1f})-({other.end_x:.1f},{other.end_y:.1f}) on {dest_layer}",
+                )
 
     return True, ""
 
 
-def validate_setback_clear(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
-                           pcb_data: PCBData, config: GridRouteConfig,
-                           exclude_net_ids: Set[int] = None) -> Tuple[bool, str]:
+def validate_setback_clear(
+    stub_p: StubInfo,
+    stub_n: StubInfo,
+    dest_layer: str,
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    exclude_net_ids: set[int] = None,
+) -> tuple[bool, str]:
     """
     Check that at least one setback position is clear on the destination layer.
 
@@ -402,11 +430,17 @@ def validate_setback_clear(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
 
     # Generate 9 angles, preferring small angles first: 0, ±max/4, ±max/2, ±3*max/4, ±max
     max_angle = config.max_setback_angle
-    angles_deg = [0,
-                  max_angle / 4, -max_angle / 4,
-                  max_angle / 2, -max_angle / 2,
-                  3 * max_angle / 4, -3 * max_angle / 4,
-                  max_angle, -max_angle]
+    angles_deg = [
+        0,
+        max_angle / 4,
+        -max_angle / 4,
+        max_angle / 2,
+        -max_angle / 2,
+        3 * max_angle / 4,
+        -3 * max_angle / 4,
+        max_angle,
+        -max_angle,
+    ]
 
     for angle_deg in angles_deg:
         angle_rad = math.radians(angle_deg)
@@ -440,10 +474,14 @@ def validate_setback_clear(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
     return False, f"all setback angles blocked on {dest_layer}"
 
 
-def validate_stub_endpoint_proximity(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
-                                      stub_endpoints_by_layer: Dict[str, List[Tuple[str, List[Tuple[float, float]]]]],
-                                      config: GridRouteConfig,
-                                      swap_partner_name: Optional[str] = None) -> Tuple[bool, str]:
+def validate_stub_endpoint_proximity(
+    stub_p: StubInfo,
+    stub_n: StubInfo,
+    dest_layer: str,
+    stub_endpoints_by_layer: dict[str, list[tuple[str, list[tuple[float, float]]]]],
+    config: GridRouteConfig,
+    swap_partner_name: str | None = None,
+) -> tuple[bool, str]:
     """
     Check that stub endpoints won't be too close to other stub endpoints on destination layer.
 
@@ -474,17 +512,25 @@ def validate_stub_endpoint_proximity(stub_p: StubInfo, stub_n: StubInfo, dest_la
             for other_x, other_y in other_endpoints:
                 dist = math.sqrt((our_x - other_x) ** 2 + (our_y - other_y) ** 2)
                 if dist < min_distance:
-                    return False, f"stub endpoint too close to {pair_name} on {dest_layer} (dist={dist:.3f}mm < {min_distance:.3f}mm)"
+                    return (
+                        False,
+                        f"stub endpoint too close to {pair_name} on {dest_layer} (dist={dist:.3f}mm < {min_distance:.3f}mm)",
+                    )
 
     return True, ""
 
 
-def validate_swap(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
-                  all_stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]],
-                  pcb_data: PCBData, config: GridRouteConfig,
-                  swap_partner_name: Optional[str] = None,
-                  swap_partner_net_ids: Set[int] = None,
-                  stub_endpoints_by_layer: Dict[str, List[Tuple[str, List[Tuple[float, float]]]]] = None) -> Tuple[bool, str]:
+def validate_swap(
+    stub_p: StubInfo,
+    stub_n: StubInfo,
+    dest_layer: str,
+    all_stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]],
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    swap_partner_name: str | None = None,
+    swap_partner_net_ids: set[int] = None,
+    stub_endpoints_by_layer: dict[str, list[tuple[str, list[tuple[float, float]]]]] = None,
+) -> tuple[bool, str]:
     """
     Validate that a stub layer swap is safe to apply.
 
@@ -523,17 +569,16 @@ def validate_swap(stub_p: StubInfo, stub_n: StubInfo, dest_layer: str,
 
     # Check 3: Setback is clear on dest layer
     exclude_nets = swap_partner_net_ids if swap_partner_net_ids else set()
-    setback_valid, setback_reason = validate_setback_clear(
-        stub_p, stub_n, dest_layer, pcb_data, config, exclude_nets
-    )
+    setback_valid, setback_reason = validate_setback_clear(stub_p, stub_n, dest_layer, pcb_data, config, exclude_nets)
     if not setback_valid:
         return False, setback_reason
 
     return True, ""
 
 
-def collect_stubs_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict,
-                           config: GridRouteConfig) -> Dict[str, List[Tuple[str, List[Segment]]]]:
+def collect_stubs_by_layer(
+    pcb_data: PCBData, all_pair_layer_info: dict, config: GridRouteConfig
+) -> dict[str, list[tuple[str, list[Segment]]]]:
     """
     Pre-collect all stub segments grouped by layer for efficient overlap checking.
 
@@ -545,14 +590,12 @@ def collect_stubs_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict,
     Returns:
         Dict mapping layer_name -> list of (pair_name, [p_segments + n_segments])
     """
-    stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]] = {}
+    stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]] = {}
 
     for pair_name, (src_layer, tgt_layer, sources, targets, pair) in all_pair_layer_info.items():
         # Collect source stubs
-        src_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                    sources[0][5], sources[0][6], src_layer)
-        src_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                    sources[0][7], sources[0][8], src_layer)
+        src_p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+        src_n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
         if src_p_stub and src_n_stub:
             segments = src_p_stub.segments + src_n_stub.segments
             if src_layer not in stubs_by_layer:
@@ -560,10 +603,8 @@ def collect_stubs_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict,
             stubs_by_layer[src_layer].append((pair_name, segments))
 
         # Collect target stubs
-        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                    targets[0][5], targets[0][6], tgt_layer)
-        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                    targets[0][7], targets[0][8], tgt_layer)
+        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
         if tgt_p_stub and tgt_n_stub:
             segments = tgt_p_stub.segments + tgt_n_stub.segments
             if tgt_layer not in stubs_by_layer:
@@ -573,8 +614,9 @@ def collect_stubs_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict,
     return stubs_by_layer
 
 
-def collect_stub_endpoints_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict,
-                                     config: GridRouteConfig) -> Dict[str, List[Tuple[str, List[Tuple[float, float]]]]]:
+def collect_stub_endpoints_by_layer(
+    pcb_data: PCBData, all_pair_layer_info: dict, config: GridRouteConfig
+) -> dict[str, list[tuple[str, list[tuple[float, float]]]]]:
     """
     Pre-collect all stub endpoint positions grouped by layer for proximity checking.
 
@@ -586,7 +628,7 @@ def collect_stub_endpoints_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict
     Returns:
         Dict mapping layer_name -> list of (pair_name, [(p_x, p_y), (n_x, n_y)])
     """
-    endpoints_by_layer: Dict[str, List[Tuple[str, List[Tuple[float, float]]]]] = {}
+    endpoints_by_layer: dict[str, list[tuple[str, list[tuple[float, float]]]]] = {}
 
     for pair_name, (src_layer, tgt_layer, sources, targets, pair) in all_pair_layer_info.items():
         # Collect source stub endpoints
@@ -608,11 +650,15 @@ def collect_stub_endpoints_by_layer(pcb_data: PCBData, all_pair_layer_info: Dict
 # Single-ended net layer switching functions
 # ============================================================================
 
-def validate_single_stub_no_overlap(stub: StubInfo, dest_layer: str,
-                                     all_stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]],
-                                     pcb_data: PCBData,
-                                     swap_partner_name: Optional[str] = None,
-                                     swap_partner_net_ids: Set[int] = None) -> Tuple[bool, str]:
+
+def validate_single_stub_no_overlap(
+    stub: StubInfo,
+    dest_layer: str,
+    all_stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]],
+    pcb_data: PCBData,
+    swap_partner_name: str | None = None,
+    swap_partner_net_ids: set[int] = None,
+) -> tuple[bool, str]:
     """
     Check that a single swapped stub won't overlap with other stubs on destination layer.
 
@@ -670,9 +716,9 @@ def validate_single_stub_no_overlap(stub: StubInfo, dest_layer: str,
     return True, ""
 
 
-def validate_single_setback_clear(stub: StubInfo, dest_layer: str,
-                                   pcb_data: PCBData, config: GridRouteConfig,
-                                   exclude_net_ids: Set[int] = None) -> Tuple[bool, str]:
+def validate_single_setback_clear(
+    stub: StubInfo, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] = None
+) -> tuple[bool, str]:
     """
     Check that at least one setback position is clear for a single-ended stub.
 
@@ -714,11 +760,17 @@ def validate_single_setback_clear(stub: StubInfo, dest_layer: str,
 
     # Generate 9 angles, preferring small angles first: 0, ±max/4, ±max/2, ±3*max/4, ±max
     max_angle = config.max_setback_angle
-    angles_deg = [0,
-                  max_angle / 4, -max_angle / 4,
-                  max_angle / 2, -max_angle / 2,
-                  3 * max_angle / 4, -3 * max_angle / 4,
-                  max_angle, -max_angle]
+    angles_deg = [
+        0,
+        max_angle / 4,
+        -max_angle / 4,
+        max_angle / 2,
+        -max_angle / 2,
+        3 * max_angle / 4,
+        -3 * max_angle / 4,
+        max_angle,
+        -max_angle,
+    ]
 
     for angle_deg in angles_deg:
         angle_rad = math.radians(angle_deg)
@@ -752,11 +804,15 @@ def validate_single_setback_clear(stub: StubInfo, dest_layer: str,
     return False, f"all setback angles blocked on {dest_layer}"
 
 
-def validate_single_swap(stub: StubInfo, dest_layer: str,
-                          all_stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]],
-                          pcb_data: PCBData, config: GridRouteConfig,
-                          swap_partner_name: Optional[str] = None,
-                          swap_partner_net_ids: Set[int] = None) -> Tuple[bool, str]:
+def validate_single_swap(
+    stub: StubInfo,
+    dest_layer: str,
+    all_stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]],
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    swap_partner_name: str | None = None,
+    swap_partner_net_ids: set[int] = None,
+) -> tuple[bool, str]:
     """
     Validate that a single-ended stub layer swap is safe to apply.
 
@@ -785,17 +841,16 @@ def validate_single_swap(stub: StubInfo, dest_layer: str,
 
     # Check 2: Setback is clear on dest layer
     exclude_nets = swap_partner_net_ids if swap_partner_net_ids else set()
-    setback_valid, setback_reason = validate_single_setback_clear(
-        stub, dest_layer, pcb_data, config, exclude_nets
-    )
+    setback_valid, setback_reason = validate_single_setback_clear(stub, dest_layer, pcb_data, config, exclude_nets)
     if not setback_valid:
         return False, setback_reason
 
     return True, ""
 
 
-def collect_single_ended_stubs_by_layer(pcb_data: PCBData, single_net_layer_info: Dict,
-                                         config: GridRouteConfig) -> Dict[str, List[Tuple[str, List[Segment]]]]:
+def collect_single_ended_stubs_by_layer(
+    pcb_data: PCBData, single_net_layer_info: dict, config: GridRouteConfig
+) -> dict[str, list[tuple[str, list[Segment]]]]:
     """
     Pre-collect all single-ended stub segments grouped by layer for efficient overlap checking.
 
@@ -807,7 +862,7 @@ def collect_single_ended_stubs_by_layer(pcb_data: PCBData, single_net_layer_info
     Returns:
         Dict mapping layer_name -> list of (net_name, [stub_segments])
     """
-    stubs_by_layer: Dict[str, List[Tuple[str, List[Segment]]]] = {}
+    stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]] = {}
 
     for net_name, (src_layer, tgt_layer, sources, targets, net_id) in single_net_layer_info.items():
         # Collect source stub

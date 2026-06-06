@@ -11,16 +11,16 @@ Renders the A* search progression in real-time using the Rust router with:
 """
 
 import sys
-from typing import List, Tuple, Optional, Set
+from typing import List, Optional, Set, Tuple
 
 try:
     import pygame
-    from pygame import Surface, Rect
+    from pygame import Rect, Surface
 except ImportError:
     print("PyGame not installed. Install with: pip install pygame")
     sys.exit(1)
 
-from .config import VisualizerConfig, LayerColors, SearchColors
+from .config import LayerColors, SearchColors, VisualizerConfig
 
 
 class Camera:
@@ -40,13 +40,13 @@ class Camera:
         self.drag_start = (0, 0)
         self.drag_offset_start = (0.0, 0.0)
 
-    def world_to_screen(self, wx: float, wy: float) -> Tuple[int, int]:
+    def world_to_screen(self, wx: float, wy: float) -> tuple[int, int]:
         """Convert world coordinates to screen coordinates."""
         sx = int((wx + self.offset_x) * self.zoom)
         sy = int((wy + self.offset_y) * self.zoom)
         return (sx, sy)
 
-    def screen_to_world(self, sx: int, sy: int) -> Tuple[float, float]:
+    def screen_to_world(self, sx: int, sy: int) -> tuple[float, float]:
         """Convert screen coordinates to world coordinates."""
         wx = sx / self.zoom - self.offset_x
         wy = sy / self.zoom - self.offset_y
@@ -109,25 +109,22 @@ class RoutingVisualizer:
         pygame.init()
         pygame.display.set_caption(self.config.title)
 
-        self.screen = pygame.display.set_mode(
-            (self.config.window_width, self.config.window_height),
-            pygame.RESIZABLE
-        )
+        self.screen = pygame.display.set_mode((self.config.window_width, self.config.window_height), pygame.RESIZABLE)
         self.clock = pygame.time.Clock()
         self.camera = Camera(self.config.window_width, self.config.window_height)
 
         # Fonts
-        self.font = pygame.font.SysFont('consolas', 14)
-        self.font_large = pygame.font.SysFont('consolas', 18)
+        self.font = pygame.font.SysFont("consolas", 14)
+        self.font_large = pygame.font.SysFont("consolas", 18)
 
         # State
         self.running = True
         self.paused = False
         self.step_mode = False
-        self.restart_requested = False      # R = restart current net
+        self.restart_requested = False  # R = restart current net
         self.restart_all_requested = False  # Ctrl+R = restart all nets
-        self.next_net_requested = False     # N = advance to next net
-        self.backwards_requested = False    # B = try backwards direction
+        self.next_net_requested = False  # N = advance to next net
+        self.backwards_requested = False  # B = try backwards direction
         self.iterations_per_frame = self.config.iterations_per_frame
 
         # Current net info for display
@@ -138,41 +135,41 @@ class RoutingVisualizer:
 
         # Routing data (from Rust)
         self.rust_obstacles = None  # GridObstacleMap from Rust
-        self.sources: List[Tuple[int, int, int]] = []
-        self.targets: List[Tuple[int, int, int]] = []
+        self.sources: list[tuple[int, int, int]] = []
+        self.targets: list[tuple[int, int, int]] = []
         self.grid_step: float = 0.1
-        self.bounds: Tuple[float, float, float, float] = (0, 0, 100, 100)
+        self.bounds: tuple[float, float, float, float] = (0, 0, 100, 100)
 
         # BGA zones for display
-        self.bga_zones: List[Tuple[int, int, int, int]] = []
+        self.bga_zones: list[tuple[int, int, int, int]] = []
 
         # Current search snapshot (from Rust VisualRouter)
         self.snapshot = None
 
         # Pre-rendered surfaces
-        self._obstacle_surface: Optional[Surface] = None
+        self._obstacle_surface: Surface | None = None
         self._obstacle_dirty = True
         self._obstacle_offset = (0, 0)
         self._obstacle_cell_size = self.config.cell_size  # Cell size used for obstacle surface
 
         # Blocked cells cache for rendering (from Python obstacle building)
-        self._blocked_cells_cache: List[Set[Tuple[int, int]]] = []
-        self._blocked_vias_cache: Set[Tuple[int, int]] = set()
+        self._blocked_cells_cache: list[set[tuple[int, int]]] = []
+        self._blocked_vias_cache: set[tuple[int, int]] = set()
 
         # Completed routes from previous nets
         # Each entry is a dict with 'path' (list of (gx, gy, layer)) and 'vias' (list of (gx, gy))
-        self.completed_routes: List[dict] = []
+        self.completed_routes: list[dict] = []
 
     def set_routing_context(
         self,
         rust_obstacles,  # GridObstacleMap from Rust module
-        sources: List[Tuple[int, int, int]],
-        targets: List[Tuple[int, int, int]],
+        sources: list[tuple[int, int, int]],
+        targets: list[tuple[int, int, int]],
         grid_step: float = 0.1,
-        bounds: Tuple[float, float, float, float] = None,
-        bga_zones: List[Tuple[int, int, int, int]] = None,
-        blocked_cells: List[Set[Tuple[int, int]]] = None,
-        blocked_vias: Set[Tuple[int, int]] = None,
+        bounds: tuple[float, float, float, float] = None,
+        bga_zones: list[tuple[int, int, int, int]] = None,
+        blocked_cells: list[set[tuple[int, int]]] = None,
+        blocked_vias: set[tuple[int, int]] = None,
     ):
         """Set the routing context."""
         self.rust_obstacles = rust_obstacles
@@ -191,10 +188,7 @@ class RoutingVisualizer:
             max_gx = int(bounds[2] / grid_step)
             max_gy = int(bounds[3] / grid_step)
             cell_size = self.config.cell_size
-            self.camera.fit_to_bounds(
-                min_gx * cell_size, min_gy * cell_size,
-                max_gx * cell_size, max_gy * cell_size
-            )
+            self.camera.fit_to_bounds(min_gx * cell_size, min_gy * cell_size, max_gx * cell_size, max_gy * cell_size)
 
     def update_snapshot(self, snapshot):
         """Update the current search snapshot from Rust VisualRouter."""
@@ -218,12 +212,9 @@ class RoutingVisualizer:
         min_gy = min(p[1] for p in all_points) - 20
         max_gy = max(p[1] for p in all_points) + 20
         cell_size = self.config.cell_size
-        self.camera.fit_to_bounds(
-            min_gx * cell_size, min_gy * cell_size,
-            max_gx * cell_size, max_gy * cell_size
-        )
+        self.camera.fit_to_bounds(min_gx * cell_size, min_gy * cell_size, max_gx * cell_size, max_gy * cell_size)
 
-    def add_completed_route(self, path: List[Tuple[int, int, int]]):
+    def add_completed_route(self, path: list[tuple[int, int, int]]):
         """
         Add a completed route to be drawn persistently.
 
@@ -241,10 +232,12 @@ class RoutingVisualizer:
             if layer1 != layer2:
                 vias.append((gx1, gy1))
 
-        self.completed_routes.append({
-            'path': list(path),
-            'vias': vias,
-        })
+        self.completed_routes.append(
+            {
+                "path": list(path),
+                "vias": vias,
+            }
+        )
 
     def clear_completed_routes(self):
         """Clear all completed routes (for restart all)."""
@@ -255,16 +248,16 @@ class RoutingVisualizer:
         if self.completed_routes:
             self.completed_routes.pop()
 
-    def grid_to_screen(self, gx: int, gy: int) -> Tuple[int, int]:
+    def grid_to_screen(self, gx: int, gy: int) -> tuple[int, int]:
         """Convert grid coordinates to screen coordinates."""
         cell_size = self.config.cell_size
         wx = gx * cell_size
         wy = gy * cell_size
         return self.camera.world_to_screen(wx, wy)
 
-    def _render_route_with_layer_colors(self, path: List[Tuple[int, int, int]],
-                                         line_width: int, via_radius: int,
-                                         alpha_factor: float = 1.0):
+    def _render_route_with_layer_colors(
+        self, path: list[tuple[int, int, int]], line_width: int, via_radius: int, alpha_factor: float = 1.0
+    ):
         """
         Render a route path with each segment colored by its layer.
 
@@ -303,11 +296,11 @@ class RoutingVisualizer:
                 via_color = (255, 255, 255) if alpha_factor >= 1.0 else (180, 180, 180)
                 pygame.draw.circle(self.screen, via_color, (sx1, sy1), via_radius)
 
-    def _get_completed_route_cells(self) -> Set[Tuple[int, int]]:
+    def _get_completed_route_cells(self) -> set[tuple[int, int]]:
         """Get set of all grid cells covered by completed routes."""
         cells = set()
         for route_info in self.completed_routes:
-            path = route_info['path']
+            path = route_info["path"]
             for gx, gy, layer in path:
                 cells.add((gx, gy))
         return cells
@@ -319,11 +312,11 @@ class RoutingVisualizer:
         old_via_radius = max(2, int(3 * self.camera.zoom))
 
         for route_info in self.completed_routes:
-            path = route_info['path']
+            path = route_info["path"]
             # Use full brightness (alpha_factor=1.0) for previous routes
             self._render_route_with_layer_colors(path, old_line_width, old_via_radius, alpha_factor=1.0)
 
-    def _render_obstacles_to_surface(self, skip_cells: Set[Tuple[int, int]] = None) -> Optional[Surface]:
+    def _render_obstacles_to_surface(self, skip_cells: set[tuple[int, int]] = None) -> Surface | None:
         """Pre-render obstacles to a surface for efficiency.
 
         Args:
@@ -352,15 +345,19 @@ class RoutingVisualizer:
             # Calculate minimum cell_size to fit within hard limit
             min_cell_size = max(1, hard_limit // max(grid_width, grid_height))
             if min_cell_size < 1:
-                print(f"[VIS WARNING] Board too large to render obstacles "
-                      f"({grid_width}x{grid_height} grid cells). Skipping obstacle layer.")
+                print(
+                    f"[VIS WARNING] Board too large to render obstacles "
+                    f"({grid_width}x{grid_height} grid cells). Skipping obstacle layer."
+                )
                 return None
             cell_size = min_cell_size
             width = grid_width * cell_size
             height = grid_height * cell_size
-            if not hasattr(self, '_size_warning_shown'):
-                print(f"[VIS WARNING] Large board - reduced obstacle detail "
-                      f"(cell_size {self.config.cell_size} -> {cell_size})")
+            if not hasattr(self, "_size_warning_shown"):
+                print(
+                    f"[VIS WARNING] Large board - reduced obstacle detail "
+                    f"(cell_size {self.config.cell_size} -> {cell_size})"
+                )
                 self._size_warning_shown = True
         elif max_dim > soft_limit:
             # Reduce cell_size to stay under soft limit for better performance
@@ -385,11 +382,7 @@ class RoutingVisualizer:
                 if (gx, gy) in skip_cells:
                     continue  # Skip cells with completed routes
                 if min_gx <= gx <= max_gx and min_gy <= gy <= max_gy:
-                    rect = Rect(
-                        (gx - min_gx) * cell_size,
-                        (gy - min_gy) * cell_size,
-                        cell_size, cell_size
-                    )
+                    rect = Rect((gx - min_gx) * cell_size, (gy - min_gy) * cell_size, cell_size, cell_size)
                     pygame.draw.rect(surface, blocked_cell_color, rect, 1)  # Outline only
         else:
             for layer in range(num_layers):
@@ -397,11 +390,7 @@ class RoutingVisualizer:
                     if (gx, gy) in skip_cells:
                         continue  # Skip cells with completed routes
                     if min_gx <= gx <= max_gx and min_gy <= gy <= max_gy:
-                        rect = Rect(
-                            (gx - min_gx) * cell_size,
-                            (gy - min_gy) * cell_size,
-                            cell_size, cell_size
-                        )
+                        rect = Rect((gx - min_gx) * cell_size, (gy - min_gy) * cell_size, cell_size, cell_size)
                         pygame.draw.rect(surface, blocked_cell_color, rect, 1)  # Outline only
 
         # Render blocked vias as small X marks (gray), skip cells with routes
@@ -413,10 +402,8 @@ class RoutingVisualizer:
                 x = (gx - min_gx) * cell_size
                 y = (gy - min_gy) * cell_size
                 # Draw X (two diagonal lines)
-                pygame.draw.line(surface, via_blocked_color,
-                               (x + 1, y + 1), (x + cell_size - 2, y + cell_size - 2), 1)
-                pygame.draw.line(surface, via_blocked_color,
-                               (x + cell_size - 2, y + 1), (x + 1, y + cell_size - 2), 1)
+                pygame.draw.line(surface, via_blocked_color, (x + 1, y + 1), (x + cell_size - 2, y + cell_size - 2), 1)
+                pygame.draw.line(surface, via_blocked_color, (x + cell_size - 2, y + 1), (x + 1, y + cell_size - 2), 1)
 
         # Render BGA zones as lighter gray outline (on top of blocked cells)
         bga_zone_color = (120, 120, 120)  # Lighter gray for BGA zones
@@ -426,7 +413,7 @@ class RoutingVisualizer:
                 (zmin_gx - min_gx) * cell_size,
                 (zmin_gy - min_gy) * cell_size,
                 (zmax_gx - zmin_gx + 1) * cell_size,
-                (zmax_gy - zmin_gy + 1) * cell_size
+                (zmax_gy - zmin_gy + 1) * cell_size,
             )
             pygame.draw.rect(surface, bga_zone_color, rect, 2)  # Outline only, width=2
 
@@ -455,7 +442,7 @@ class RoutingVisualizer:
             scale_factor = (cell_size / self._obstacle_cell_size) * self.camera.zoom
             scaled_size = (
                 int(self._obstacle_surface.get_width() * scale_factor),
-                int(self._obstacle_surface.get_height() * scale_factor)
+                int(self._obstacle_surface.get_height() * scale_factor),
             )
             if scaled_size[0] > 0 and scaled_size[1] > 0:
                 scaled = pygame.transform.scale(self._obstacle_surface, scaled_size)
@@ -516,14 +503,12 @@ class RoutingVisualizer:
         for gx, gy, _ in self.sources:
             sx, sy = self.grid_to_screen(gx, gy)
             size = max(4, int(cell_size * self.camera.zoom))
-            pygame.draw.circle(self.screen, SearchColors.SOURCE,
-                             (sx + size // 2, sy + size // 2), size // 2 + 2)
+            pygame.draw.circle(self.screen, SearchColors.SOURCE, (sx + size // 2, sy + size // 2), size // 2 + 2)
 
         for gx, gy, _ in self.targets:
             sx, sy = self.grid_to_screen(gx, gy)
             size = max(4, int(cell_size * self.camera.zoom))
-            pygame.draw.circle(self.screen, SearchColors.TARGET,
-                             (sx + size // 2, sy + size // 2), size // 2 + 2)
+            pygame.draw.circle(self.screen, SearchColors.TARGET, (sx + size // 2, sy + size // 2), size // 2 + 2)
 
         self._render_ui()
         pygame.display.flip()
@@ -585,7 +570,7 @@ class RoutingVisualizer:
                 indicator = " *" if self.config.current_layer == i else ""
                 if self.config.current_layer < 0:
                     indicator = ""
-                text = self.font.render(f"  {i+1}: {layer_name}{indicator}", True, color)
+                text = self.font.render(f"  {i + 1}: {layer_name}{indicator}", True, color)
                 self.screen.blit(text, (10, y_offset))
                 y_offset += 16
 
@@ -671,8 +656,7 @@ class RoutingVisualizer:
 
         # Current route - thick line
         y_center = y_offset + 2 + swatch_size // 2
-        pygame.draw.line(self.screen, layer_color,
-                        (x_offset + 5, y_center), (x_offset + 5 + swatch_size, y_center), 4)
+        pygame.draw.line(self.screen, layer_color, (x_offset + 5, y_center), (x_offset + 5 + swatch_size, y_center), 4)
         text = self.font.render("Current route", True, (200, 200, 200))
         self.screen.blit(text, (x_offset + swatch_size + 12, y_offset))
         y_offset += line_height
@@ -680,8 +664,7 @@ class RoutingVisualizer:
         # Previous route - thin line
         y_center = y_offset + 2 + swatch_size // 2
         dimmed_color = tuple(int(c * 0.6) for c in layer_color)
-        pygame.draw.line(self.screen, dimmed_color,
-                        (x_offset + 5, y_center), (x_offset + 5 + swatch_size, y_center), 2)
+        pygame.draw.line(self.screen, dimmed_color, (x_offset + 5, y_center), (x_offset + 5 + swatch_size, y_center), 2)
         text = self.font.render("Previous routes", True, (200, 200, 200))
         self.screen.blit(text, (x_offset + swatch_size + 12, y_offset))
         y_offset += line_height
@@ -795,16 +778,10 @@ class RoutingVisualizer:
                     self.snapshot = None
                 elif event.key == pygame.K_PLUS or event.key == pygame.K_EQUALS:
                     # 2x speed increase
-                    self.iterations_per_frame = min(
-                        self.config.max_speed,
-                        self.iterations_per_frame * 2
-                    )
+                    self.iterations_per_frame = min(self.config.max_speed, self.iterations_per_frame * 2)
                 elif event.key == pygame.K_MINUS:
                     # 2x speed decrease (halve)
-                    self.iterations_per_frame = max(
-                        self.config.min_speed,
-                        self.iterations_per_frame // 2
-                    )
+                    self.iterations_per_frame = max(self.config.min_speed, self.iterations_per_frame // 2)
                 elif event.key == pygame.K_g:
                     self.config.show_grid_lines = not self.config.show_grid_lines
                     self._obstacle_dirty = True

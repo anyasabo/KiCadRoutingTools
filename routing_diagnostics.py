@@ -8,16 +8,15 @@ short, actionable bullet strings the GUI can append to its completion
 dialog.
 """
 
-from typing import Dict, List, Any
+from typing import Any
 
 
-def _g(config: Dict[str, Any], key: str, default=None):
+def _g(config: dict[str, Any], key: str, default=None):
     """Config getter that tolerates missing keys."""
     return config.get(key, default) if config else default
 
 
-def suggest_route_adjustments(failed: int, total: int,
-                              config: Dict[str, Any]) -> List[str]:
+def suggest_route_adjustments(failed: int, total: int, config: dict[str, Any]) -> list[str]:
     """Suggestions for the Route tab (batch_route) when routes fail.
 
     Args:
@@ -32,16 +31,16 @@ def suggest_route_adjustments(failed: int, total: int,
     if failed <= 0:
         return []
 
-    suggestions: List[str] = []
+    suggestions: list[str] = []
     severity = failed / total if total > 0 else 1.0
 
-    clearance = _g(config, 'clearance')
-    track_width = _g(config, 'track_width')
-    max_ripup = _g(config, 'max_ripup')
-    max_iter = _g(config, 'max_iterations')
-    heur = _g(config, 'heuristic_weight')
-    via_size = _g(config, 'via_size')
-    layers = _g(config, 'layers') or []
+    clearance = _g(config, "clearance")
+    track_width = _g(config, "track_width")
+    max_ripup = _g(config, "max_ripup")
+    max_iter = _g(config, "max_iterations")
+    heur = _g(config, "heuristic_weight")
+    via_size = _g(config, "via_size")
+    layers = _g(config, "layers") or []
 
     # Rip-up is the single highest-leverage fix for "blocker" failures.
     if max_ripup is not None and max_ripup < 3:
@@ -69,8 +68,7 @@ def suggest_route_adjustments(failed: int, total: int,
     # Iteration budget: hard routes need more time.
     if max_iter is not None and max_iter < 200_000:
         suggestions.append(
-            f"Increase Max Iterations (currently {int(max_iter):,}) to "
-            f"200,000-1,000,000 for hard-to-find paths."
+            f"Increase Max Iterations (currently {int(max_iter):,}) to 200,000-1,000,000 for hard-to-find paths."
         )
 
     # Heuristic weight: high values trade quality for speed and can wall off
@@ -107,8 +105,7 @@ def suggest_route_adjustments(failed: int, total: int,
     return suggestions
 
 
-def suggest_plane_adjustments(failed_pads: int, total_pads: int,
-                              config: Dict[str, Any]) -> List[str]:
+def suggest_plane_adjustments(failed_pads: int, total_pads: int, config: dict[str, Any]) -> list[str]:
     """Suggestions for the Planes tab when stitching vias couldn't be placed.
 
     Args:
@@ -119,20 +116,19 @@ def suggest_plane_adjustments(failed_pads: int, total_pads: int,
     if failed_pads <= 0:
         return []
 
-    suggestions: List[str] = []
+    suggestions: list[str] = []
     severity = failed_pads / total_pads if total_pads > 0 else 1.0
 
-    clearance = _g(config, 'clearance')
-    via_size = _g(config, 'via_size')
-    via_drill = _g(config, 'via_drill')
-    hole_to_hole = _g(config, 'hole_to_hole_clearance')
-    rip_blocker = _g(config, 'rip_blocker_nets')
-    max_search = _g(config, 'max_search_radius')
+    clearance = _g(config, "clearance")
+    via_size = _g(config, "via_size")
+    via_drill = _g(config, "via_drill")
+    hole_to_hole = _g(config, "hole_to_hole_clearance")
+    rip_blocker = _g(config, "rip_blocker_nets")
+    max_search = _g(config, "max_search_radius")
 
     if rip_blocker is False:
         suggestions.append(
-            "Enable 'Rip up blocking nets' - lets plane creation remove "
-            "obstructing nets and retry placing the via."
+            "Enable 'Rip up blocking nets' - lets plane creation remove obstructing nets and retry placing the via."
         )
 
     if clearance is not None and clearance > 0.15:
@@ -144,14 +140,11 @@ def suggest_plane_adjustments(failed_pads: int, total_pads: int,
 
     if via_size is not None and via_size > 0.5:
         suggestions.append(
-            f"Try smaller Via Size (currently {via_size:.2f} mm) - smaller "
-            f"vias fit between dense pads/tracks."
+            f"Try smaller Via Size (currently {via_size:.2f} mm) - smaller vias fit between dense pads/tracks."
         )
 
     if via_drill is not None and via_drill > 0.3:
-        suggestions.append(
-            f"Try smaller Via Drill (currently {via_drill:.2f} mm)."
-        )
+        suggestions.append(f"Try smaller Via Drill (currently {via_drill:.2f} mm).")
 
     if hole_to_hole is not None and hole_to_hole > 0.2:
         suggestions.append(
@@ -174,8 +167,7 @@ def suggest_plane_adjustments(failed_pads: int, total_pads: int,
     return suggestions
 
 
-def suggest_diff_pair_adjustments(failed: int, total: int,
-                                  config: Dict[str, Any]) -> List[str]:
+def suggest_diff_pair_adjustments(failed: int, total: int, config: dict[str, Any]) -> list[str]:
     """Suggestions for the Differential tab when pairs fail to route.
 
     Differential pairs are tighter than single-ended nets - small changes
@@ -184,15 +176,15 @@ def suggest_diff_pair_adjustments(failed: int, total: int,
     if failed <= 0:
         return []
 
-    suggestions: List[str] = []
+    suggestions: list[str] = []
     severity = failed / total if total > 0 else 1.0
 
-    dp_width = _g(config, 'diff_pair_width')
-    dp_gap = _g(config, 'diff_pair_gap')
-    clearance = _g(config, 'clearance')
-    max_ripup = _g(config, 'max_ripup')
-    max_iter = _g(config, 'max_iterations')
-    min_turn_r = _g(config, 'diff_pair_min_turning_radius')
+    dp_width = _g(config, "diff_pair_width")
+    dp_gap = _g(config, "diff_pair_gap")
+    clearance = _g(config, "clearance")
+    max_ripup = _g(config, "max_ripup")
+    max_iter = _g(config, "max_iterations")
+    min_turn_r = _g(config, "diff_pair_min_turning_radius")
 
     if dp_width is not None and dp_width > 0.15:
         suggestions.append(
@@ -213,8 +205,7 @@ def suggest_diff_pair_adjustments(failed: int, total: int,
         )
     if max_ripup is not None and max_ripup < 3:
         suggestions.append(
-            f"Raise Max Rip-up (currently {int(max_ripup)}) to 3-5 so the "
-            f"router can temporarily remove blockers."
+            f"Raise Max Rip-up (currently {int(max_ripup)}) to 3-5 so the router can temporarily remove blockers."
         )
     if max_iter is not None and max_iter < 200_000 and severity > 0.2:
         suggestions.append(
@@ -224,8 +215,7 @@ def suggest_diff_pair_adjustments(failed: int, total: int,
         )
     if min_turn_r is not None and min_turn_r > 0.3:
         suggestions.append(
-            f"Reduce Min Turning Radius (currently {min_turn_r:.2f} mm) - "
-            f"larger radii block tight detours."
+            f"Reduce Min Turning Radius (currently {min_turn_r:.2f} mm) - larger radii block tight detours."
         )
 
     if not suggestions:
@@ -237,8 +227,7 @@ def suggest_diff_pair_adjustments(failed: int, total: int,
     return suggestions
 
 
-def suggest_bga_fanout_adjustments(failed: int, total: int,
-                                   config: Dict[str, Any]) -> List[str]:
+def suggest_bga_fanout_adjustments(failed: int, total: int, config: dict[str, Any]) -> list[str]:
     """Suggestions for the Fanout tab (BGA) when some nets fail to fanout.
 
     The BGA grid is one of the densest regions on the board - track width,
@@ -247,13 +236,13 @@ def suggest_bga_fanout_adjustments(failed: int, total: int,
     if failed <= 0:
         return []
 
-    suggestions: List[str] = []
+    suggestions: list[str] = []
 
-    track_width = _g(config, 'track_width')
-    clearance = _g(config, 'clearance')
-    via_size = _g(config, 'via_size')
-    via_drill = _g(config, 'via_drill')
-    exit_margin = _g(config, 'exit_margin')
+    track_width = _g(config, "track_width")
+    clearance = _g(config, "clearance")
+    via_size = _g(config, "via_size")
+    via_drill = _g(config, "via_drill")
+    exit_margin = _g(config, "exit_margin")
 
     if track_width is not None and track_width > 0.15:
         suggestions.append(
@@ -273,9 +262,7 @@ def suggest_bga_fanout_adjustments(failed: int, total: int,
             f"vias fit between BGA balls and free up routing channels."
         )
     if via_drill is not None and via_drill > 0.25:
-        suggestions.append(
-            f"Try smaller Via Drill (currently {via_drill:.2f} mm)."
-        )
+        suggestions.append(f"Try smaller Via Drill (currently {via_drill:.2f} mm).")
     if exit_margin is not None and exit_margin > 0.6:
         suggestions.append(
             f"Reduce Exit Margin (currently {exit_margin:.2f} mm) - shorter "
@@ -291,8 +278,7 @@ def suggest_bga_fanout_adjustments(failed: int, total: int,
     return suggestions
 
 
-def suggest_qfn_fanout_adjustments(failed: int, total: int,
-                                   config: Dict[str, Any]) -> List[str]:
+def suggest_qfn_fanout_adjustments(failed: int, total: int, config: dict[str, Any]) -> list[str]:
     """Suggestions for the Fanout tab (QFN/QFP) when stub endpoints collide.
 
     QFN failure mode: stub endpoints land closer than `track_width + extension`
@@ -303,10 +289,10 @@ def suggest_qfn_fanout_adjustments(failed: int, total: int,
     if failed <= 0:
         return []
 
-    suggestions: List[str] = []
+    suggestions: list[str] = []
 
-    track_width = _g(config, 'track_width')
-    extension = _g(config, 'extension')
+    track_width = _g(config, "track_width")
+    extension = _g(config, "extension")
 
     if extension is not None and extension < 0.4:
         suggestions.append(
@@ -336,7 +322,7 @@ def suggest_qfn_fanout_adjustments(failed: int, total: int,
     return suggestions
 
 
-def format_suggestions_for_dialog(suggestions: List[str]) -> str:
+def format_suggestions_for_dialog(suggestions: list[str]) -> str:
     """Turn the suggestion list into a 'Suggested adjustments:' block.
 
     Returns an empty string if there are no suggestions, otherwise a block

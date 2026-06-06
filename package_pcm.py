@@ -37,14 +37,11 @@ import argparse
 import copy
 import hashlib
 import json
-import os
 import shutil
-import sys
 import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 GITHUB_REPO = "drandyhaas/KiCadRoutingTools"
@@ -111,9 +108,13 @@ def stage_plugins(stage_root: Path):
             src,
             dst,
             ignore=shutil.ignore_patterns(
-                "__pycache__", "*.pyc", ".DS_Store",
+                "__pycache__",
+                "*.pyc",
+                ".DS_Store",
                 "target",  # rust_router/target/ is the cargo build dir
-                "grid_router.so", "grid_router.pyd", "grid_router.abi3.so",
+                "grid_router.so",
+                "grid_router.pyd",
+                "grid_router.abi3.so",
                 "Cargo.lock",
             ),
         )
@@ -122,10 +123,7 @@ def stage_plugins(stage_root: Path):
 
 
 def _download_asset(version: str, asset_name: str, dest: Path):
-    url = (
-        f"https://github.com/{GITHUB_REPO}/releases/download/"
-        f"v{version}/{asset_name}"
-    )
+    url = f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/{asset_name}"
     print(f"  Downloading {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "package_pcm.py"})
     with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as f:
@@ -171,9 +169,7 @@ def write_top_level(stage_root: Path, version: str):
     inner_meta = copy.deepcopy(repo_meta)
     inner_meta["versions"] = [inner_version]
 
-    (stage_root / "metadata.json").write_text(
-        json.dumps(inner_meta, indent=2) + "\n"
-    )
+    (stage_root / "metadata.json").write_text(json.dumps(inner_meta, indent=2) + "\n")
 
     resources = stage_root / "resources"
     resources.mkdir(exist_ok=True)
@@ -207,15 +203,10 @@ def sha256_of(path: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", default=None,
-                        help="Override version (default: read VERSION file)")
-    parser.add_argument("--binary-dir", default=None,
-                        help="Directory containing pre-fetched release assets")
-    parser.add_argument("--out-dir", default=str(SCRIPT_DIR / "dist"),
-                        help="Output directory (default: ./dist)")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", default=None, help="Override version (default: read VERSION file)")
+    parser.add_argument("--binary-dir", default=None, help="Directory containing pre-fetched release assets")
+    parser.add_argument("--out-dir", default=str(SCRIPT_DIR / "dist"), help="Output directory (default: ./dist)")
     args = parser.parse_args()
 
     version = args.version or read_version()
@@ -244,13 +235,19 @@ def main():
     print(f"  install_size:    {install_size}")
 
     sidecar = out_dir / f"{zip_name}.meta.json"
-    sidecar.write_text(json.dumps({
-        "version": version,
-        "filename": zip_name,
-        "download_sha256": digest,
-        "download_size": download_size,
-        "install_size": install_size,
-    }, indent=2) + "\n")
+    sidecar.write_text(
+        json.dumps(
+            {
+                "version": version,
+                "filename": zip_name,
+                "download_sha256": digest,
+                "download_size": download_size,
+                "install_size": install_size,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     print(f"  sidecar:       {sidecar}")
 
 

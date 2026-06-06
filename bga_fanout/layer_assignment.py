@@ -4,26 +4,24 @@ Layer assignment for BGA fanout routing.
 Assigns routes to layers to avoid collisions during initial fanout creation.
 """
 
-from typing import List, Dict, Set, Tuple, Optional
 from collections import defaultdict
 
-from bga_fanout.types import FanoutRoute, Channel
 from bga_fanout.collision import check_segment_collision, tracks_match_identifier
+from bga_fanout.types import FanoutRoute
 
 
-def segments_overlap_on_channel(route1: FanoutRoute, route2: FanoutRoute,
-                                min_spacing: float) -> bool:
+def segments_overlap_on_channel(route1: FanoutRoute, route2: FanoutRoute, min_spacing: float) -> bool:
     """
     Check if two routes on the same channel have overlapping channel segments.
 
     For horizontal channels going right: segments from stub_end.x to exit.x
     The segments overlap if one starts before the other ends.
     """
-    if route1.channel.orientation == 'horizontal':
+    if route1.channel.orientation == "horizontal":
         # Check if the horizontal channel segments overlap
         # Going right: segment is from stub_end.x to exit_pos.x
         # Going left: segment is from exit_pos.x to stub_end.x
-        if route1.escape_dir == 'right':
+        if route1.escape_dir == "right":
             # Both going right - segment is stub_end.x to exit.x
             # They overlap since they share the same exit point
             # Route closer to exit (higher x) has segment that overlaps with further one
@@ -39,7 +37,7 @@ def segments_overlap_on_channel(route1: FanoutRoute, route2: FanoutRoute,
             return True
     else:
         # Vertical channel
-        if route1.escape_dir == 'down':
+        if route1.escape_dir == "down":
             y1_start, y1_end = route1.stub_end[1], route1.exit_pos[1]
             y2_start, y2_end = route2.stub_end[1], route2.exit_pos[1]
         else:
@@ -52,13 +50,15 @@ def segments_overlap_on_channel(route1: FanoutRoute, route2: FanoutRoute,
     return False
 
 
-def assign_layers_smart(routes: List[FanoutRoute],
-                        available_layers: List[str],
-                        track_width: float,
-                        clearance: float,
-                        diff_pair_spacing: float = 0.0,
-                        existing_tracks: List[Dict] = None,
-                        no_inner_top_layer: bool = False) -> None:
+def assign_layers_smart(
+    routes: list[FanoutRoute],
+    available_layers: list[str],
+    track_width: float,
+    clearance: float,
+    diff_pair_spacing: float = 0.0,
+    existing_tracks: list[dict] = None,
+    no_inner_top_layer: bool = False,
+) -> None:
     """
     Assign layers to routes to avoid all collisions.
 
@@ -89,14 +89,14 @@ def assign_layers_smart(routes: List[FanoutRoute],
             edge_routes.append(route)
 
     # Build lookup from pair_id to routes
-    pair_routes: Dict[str, List[FanoutRoute]] = defaultdict(list)
+    pair_routes: dict[str, list[FanoutRoute]] = defaultdict(list)
     for route in routes:
         if route.pair_id:
             pair_routes[route.pair_id].append(route)
 
     # Identify half-edge pairs (pairs where one route is an edge route)
     # These pairs should have ALL routes on F.Cu, not just the edge route
-    half_edge_pairs: Set[str] = set()
+    half_edge_pairs: set[str] = set()
     for pair_id, routes_in_pair in pair_routes.items():
         if any(r.is_edge for r in routes_in_pair):
             half_edge_pairs.add(pair_id)
@@ -107,7 +107,7 @@ def assign_layers_smart(routes: List[FanoutRoute],
                     edge_routes.append(r)
 
     # Group inner routes by (channel_index, escape_direction)
-    by_channel_dir: Dict[Tuple[int, str], List[FanoutRoute]] = defaultdict(list)
+    by_channel_dir: dict[tuple[int, str], list[FanoutRoute]] = defaultdict(list)
     for route in routes:
         if route.is_edge:
             continue  # Skip edge pads
@@ -118,7 +118,7 @@ def assign_layers_smart(routes: List[FanoutRoute],
         by_channel_dir[key].append(route)
 
     # Track which pairs have been assigned
-    assigned_pairs: Set[str] = set()
+    assigned_pairs: set[str] = set()
 
     # For each group, assign layers to avoid overlapping channel segments
     for (channel_idx, escape_dir), group_routes in by_channel_dir.items():
@@ -127,14 +127,14 @@ def assign_layers_smart(routes: List[FanoutRoute],
 
         # Sort routes by position along the channel segment
         # This puts routes in order from inner to outer (or vice versa)
-        if group_routes[0].channel.orientation == 'horizontal':
-            if escape_dir == 'right':
+        if group_routes[0].channel.orientation == "horizontal":
+            if escape_dir == "right":
                 # Sort by stub_end X descending - routes closer to exit first
                 group_routes.sort(key=lambda r: r.stub_end[0], reverse=True)
             else:
                 group_routes.sort(key=lambda r: r.stub_end[0])
         else:
-            if escape_dir == 'down':
+            if escape_dir == "down":
                 group_routes.sort(key=lambda r: r.stub_end[1], reverse=True)
             else:
                 group_routes.sort(key=lambda r: r.stub_end[1])
@@ -191,7 +191,7 @@ def assign_layers_smart(routes: List[FanoutRoute],
                         # Check if this route's exit segment conflicts with edge route
                         # Route goes from stub_end to exit_pos (for cross-escape, this is vertical)
                         # Edge route goes from pad_pos/stub_end to exit_pos (horizontal)
-                        if route.escape_dir in ['up', 'down']:
+                        if route.escape_dir in ["up", "down"]:
                             # Vertical exit - check if it crosses any horizontal edge route
                             # Route vertical segment: from stub_end to exit_pos
                             route_x = route.stub_end[0]  # X is constant for vertical
@@ -204,8 +204,7 @@ def assign_layers_smart(routes: List[FanoutRoute],
                             edge_x_max = max(edge_route.pad_pos[0], edge_route.exit_pos[0])
 
                             # Check if vertical segment crosses horizontal segment
-                            if (route_y_min <= edge_y <= route_y_max and
-                                edge_x_min <= route_x <= edge_x_max):
+                            if route_y_min <= edge_y <= route_y_max and edge_x_min <= route_x <= edge_x_max:
                                 # Check spacing - are they too close?
                                 # For diff pairs, check both traces
                                 if route.pair_id:
@@ -223,10 +222,7 @@ def assign_layers_smart(routes: List[FanoutRoute],
                 # Check against existing tracks from the PCB on this layer
                 if not conflict and existing_tracks:
                     # Build approximate segments for this route
-                    route_segs = [
-                        (route.pad_pos, route.stub_end),
-                        (route.stub_end, route.exit_pos)
-                    ]
+                    route_segs = [(route.pad_pos, route.stub_end), (route.stub_end, route.exit_pos)]
                     # Also add channel_point segments if present (for half-edge routes)
                     if route.channel_point:
                         route_segs.append((route.stub_end, route.channel_point))
@@ -236,15 +232,15 @@ def assign_layers_smart(routes: List[FanoutRoute],
                         route_segs.append((route.jog_extension, route.exit_pos))
 
                     for existing in existing_tracks:
-                        if existing['layer'] != layer:
+                        if existing["layer"] != layer:
                             continue
                         # Skip if same net (e.g., connecting to existing stub)
-                        if existing.get('net_id') == route.net_id:
+                        if existing.get("net_id") == route.net_id:
                             continue
                         for seg_start, seg_end in route_segs:
-                            if check_segment_collision(seg_start, seg_end,
-                                                       existing['start'], existing['end'],
-                                                       min_spacing):
+                            if check_segment_collision(
+                                seg_start, seg_end, existing["start"], existing["end"], min_spacing
+                            ):
                                 conflict = True
                                 break
                         if conflict:
@@ -272,12 +268,18 @@ def assign_layers_smart(routes: List[FanoutRoute],
                             partner.layer = candidate_layers[0]
 
 
-def try_reassign_layer(identifier: str, routes: List[FanoutRoute], tracks: List[Dict],
-                       available_layers: List[str], track_width: float,
-                       clearance: float, diff_pair_spacing: float,
-                       avoid_layers: Set[str] = None,
-                       existing_tracks: List[Dict] = None,
-                       no_inner_top_layer: bool = False) -> Optional[str]:
+def try_reassign_layer(
+    identifier: str,
+    routes: list[FanoutRoute],
+    tracks: list[dict],
+    available_layers: list[str],
+    track_width: float,
+    clearance: float,
+    diff_pair_spacing: float,
+    avoid_layers: set[str] = None,
+    existing_tracks: list[dict] = None,
+    no_inner_top_layer: bool = False,
+) -> str | None:
     """Try to find a different layer for a colliding pair/net that has no conflicts.
 
     Args:
@@ -292,7 +294,7 @@ def try_reassign_layer(identifier: str, routes: List[FanoutRoute], tracks: List[
         existing_tracks = []
 
     # Handle both pair_id and net_XXX identifiers
-    is_single_ended = identifier.startswith('net_')
+    is_single_ended = identifier.startswith("net_")
     if is_single_ended:
         net_id = int(identifier[4:])
         # Find routes for this net
@@ -308,7 +310,7 @@ def try_reassign_layer(identifier: str, routes: List[FanoutRoute], tracks: List[
 
     # Diff pairs should NOT use F.Cu (first layer) to avoid clearance violations with pads.
     # If no_inner_top_layer is set, single-ended signals also avoid F.Cu.
-    is_diff_pair = not identifier.startswith('net_')
+    is_diff_pair = not identifier.startswith("net_")
     if is_diff_pair or no_inner_top_layer:
         candidate_layers = available_layers[1:] if len(available_layers) > 1 else available_layers
     else:
@@ -324,8 +326,8 @@ def try_reassign_layer(identifier: str, routes: List[FanoutRoute], tracks: List[
     # Count tracks per layer for load balancing
     layer_counts = {layer: 0 for layer in candidate_layers}
     for t in other_tracks:
-        if t['layer'] in layer_counts:
-            layer_counts[t['layer']] += 1
+        if t["layer"] in layer_counts:
+            layer_counts[t["layer"]] += 1
 
     # Sort layers by count (prefer less crowded layers)
     sorted_layers = sorted(candidate_layers, key=lambda l: layer_counts.get(l, 0))
@@ -342,11 +344,9 @@ def try_reassign_layer(identifier: str, routes: List[FanoutRoute], tracks: List[
         for pt_idx in id_track_indices:
             pt = tracks[pt_idx]
             for ot in all_other_tracks:
-                if ot['layer'] != candidate_layer:
+                if ot["layer"] != candidate_layer:
                     continue
-                if check_segment_collision(pt['start'], pt['end'],
-                                            ot['start'], ot['end'],
-                                            min_spacing):
+                if check_segment_collision(pt["start"], pt["end"], ot["start"], ot["end"], min_spacing):
                     has_collision = True
                     break
             if has_collision:

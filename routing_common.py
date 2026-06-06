@@ -6,34 +6,37 @@ pair routing to avoid code duplication.
 """
 
 import time
-from typing import List, Optional, Tuple, Dict, Set
 
 from kicad_parser import (
-    PCBData, find_components_by_type, get_footprint_bounds, detect_bga_pitch,
-    auto_detect_bga_exclusion_zones
-)
-from routing_config import GridRouteConfig
-from connectivity import get_net_endpoints
-from obstacle_map import build_base_obstacle_map
-from obstacle_cache import (
-    precompute_all_net_obstacles, build_working_obstacle_map, precompute_net_obstacles,
-    add_net_obstacles_from_cache, remove_net_obstacles_from_cache
-)
-from memory_debug import (
-    get_process_memory_mb, format_memory_stats,
-    estimate_net_obstacles_cache_mb
+    PCBData,
+    auto_detect_bga_exclusion_zones,
+    detect_bga_pitch,
+    find_components_by_type,
+    get_footprint_bounds,
 )
 from length_matching import (
-    apply_length_matching_to_group, apply_time_matching_to_group,
-    find_nets_matching_patterns, auto_group_ddr4_nets
+    apply_length_matching_to_group,
+    apply_time_matching_to_group,
+    auto_group_ddr4_nets,
+    find_nets_matching_patterns,
 )
+from memory_debug import estimate_net_obstacles_cache_mb, format_memory_stats, get_process_memory_mb
+from obstacle_cache import (
+    add_net_obstacles_from_cache,
+    build_working_obstacle_map,
+    precompute_all_net_obstacles,
+    precompute_net_obstacles,
+    remove_net_obstacles_from_cache,
+)
+from obstacle_map import build_base_obstacle_map
+from routing_config import GridRouteConfig
 
 
 def setup_bga_exclusion_zones(
     pcb_data: PCBData,
-    disable_bga_zones: Optional[List[str]],
-    existing_zones: Optional[List[Tuple[float, float, float, float]]] = None
-) -> List[Tuple[float, float, float, float, float]]:
+    disable_bga_zones: list[str] | None,
+    existing_zones: list[tuple[float, float, float, float]] | None = None,
+) -> list[tuple[float, float, float, float, float]]:
     """
     Handle --no-bga-zones argument and auto-detect BGA exclusion zones.
 
@@ -53,7 +56,7 @@ def setup_bga_exclusion_zones(
             return []
         else:
             # --no-bga-zones U1 U3: disable only those components
-            bga_components = find_components_by_type(pcb_data, 'BGA')
+            bga_components = find_components_by_type(pcb_data, "BGA")
             bga_exclusion_zones = []
             disabled_refs = set(disable_bga_zones)
             for fp in bga_components:
@@ -63,11 +66,15 @@ def setup_bga_exclusion_zones(
                     edge_tolerance = 0.5 + pitch * 1.1
                     bga_exclusion_zones.append((*bounds, edge_tolerance))
             if bga_exclusion_zones:
-                print(f"Auto-detected {len(bga_exclusion_zones)} BGA exclusion zone(s) (excluding {', '.join(disable_bga_zones)}):")
+                print(
+                    f"Auto-detected {len(bga_exclusion_zones)} BGA exclusion zone(s) (excluding {', '.join(disable_bga_zones)}):"
+                )
                 enabled_fps = [fp for fp in bga_components if fp.reference not in disabled_refs]
                 for fp, zone in zip(enabled_fps, bga_exclusion_zones):
                     edge_tol = zone[4] if len(zone) > 4 else 1.6
-                    print(f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm")
+                    print(
+                        f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm"
+                    )
             else:
                 print(f"BGA exclusion zones disabled for: {', '.join(disable_bga_zones)}")
             return bga_exclusion_zones
@@ -75,11 +82,13 @@ def setup_bga_exclusion_zones(
     elif existing_zones is None:
         bga_exclusion_zones = auto_detect_bga_exclusion_zones(pcb_data, margin=0.5)
         if bga_exclusion_zones:
-            bga_components = find_components_by_type(pcb_data, 'BGA')
+            bga_components = find_components_by_type(pcb_data, "BGA")
             print(f"Auto-detected {len(bga_exclusion_zones)} BGA exclusion zone(s):")
             for i, (fp, zone) in enumerate(zip(bga_components, bga_exclusion_zones)):
                 edge_tol = zone[4] if len(zone) > 4 else 1.6
-                print(f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm")
+                print(
+                    f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm"
+                )
         else:
             print("No BGA components detected - no exclusion zones needed")
         return bga_exclusion_zones
@@ -87,7 +96,7 @@ def setup_bga_exclusion_zones(
     return existing_zones or []
 
 
-def resolve_net_ids(pcb_data: PCBData, net_names: List[str]) -> List[Tuple[str, int]]:
+def resolve_net_ids(pcb_data: PCBData, net_names: list[str]) -> list[tuple[str, int]]:
     """
     Resolve net names to (name, id) tuples.
 
@@ -126,10 +135,8 @@ def resolve_net_ids(pcb_data: PCBData, net_names: List[str]) -> List[Tuple[str, 
 
 
 def filter_already_routed(
-    pcb_data: PCBData,
-    net_ids: List[Tuple[str, int]],
-    config: GridRouteConfig
-) -> Tuple[List[Tuple[str, int]], List[Tuple[str, str]]]:
+    pcb_data: PCBData, net_ids: list[tuple[str, int]], config: GridRouteConfig
+) -> tuple[list[tuple[str, int]], list[tuple[str, str]]]:
     """
     Filter out nets that are already fully connected.
 
@@ -152,19 +159,19 @@ def filter_already_routed(
     from check_connected import check_net_connectivity
 
     # Group data by net for quick lookup
-    zones_by_net: Dict[int, List] = {}
+    zones_by_net: dict[int, list] = {}
     for zone in pcb_data.zones:
         if zone.net_id not in zones_by_net:
             zones_by_net[zone.net_id] = []
         zones_by_net[zone.net_id].append(zone)
 
-    segments_by_net: Dict[int, List] = {}
+    segments_by_net: dict[int, list] = {}
     for seg in pcb_data.segments:
         if seg.net_id not in segments_by_net:
             segments_by_net[seg.net_id] = []
         segments_by_net[seg.net_id].append(seg)
 
-    vias_by_net: Dict[int, List] = {}
+    vias_by_net: dict[int, list] = {}
     for via in pcb_data.vias:
         if via.net_id not in vias_by_net:
             vias_by_net[via.net_id] = []
@@ -190,12 +197,9 @@ def filter_already_routed(
             continue
 
         # Use check_net_connectivity for robust connectivity check
-        result = check_net_connectivity(
-            net_id, net_segments, net_vias, net_pads, net_zones,
-            tolerance=0.02
-        )
+        result = check_net_connectivity(net_id, net_segments, net_vias, net_pads, net_zones, tolerance=0.02)
 
-        if result['connected']:
+        if result["connected"]:
             already_routed.append((net_name, "Already fully connected"))
         else:
             nets_to_route.append((net_name, net_id))
@@ -211,11 +215,11 @@ def filter_already_routed(
 def build_obstacle_infrastructure(
     pcb_data: PCBData,
     config: GridRouteConfig,
-    all_net_ids_to_route: List[int],
-    all_unrouted_net_ids: List[int],
+    all_net_ids_to_route: list[int],
+    all_unrouted_net_ids: list[int],
     debug_memory: bool = False,
-    mem_start: float = 0.0
-) -> Tuple:
+    mem_start: float = 0.0,
+) -> tuple:
     """
     Build base obstacles, net cache, and working obstacles.
 
@@ -244,8 +248,7 @@ def build_obstacle_infrastructure(
     print("Pre-computing net obstacle cache...")
     cache_start = time.time()
     net_obstacles_cache = precompute_all_net_obstacles(
-        pcb_data, list(all_unrouted_net_ids), config,
-        extra_clearance=0.0, diagonal_margin=0.25
+        pcb_data, list(all_unrouted_net_ids), config, extra_clearance=0.0, diagonal_margin=0.25
     )
     cache_time = time.time() - cache_start
     print(f"Net obstacle cache built in {cache_time:.2f}s ({len(net_obstacles_cache)} nets)")
@@ -266,11 +269,8 @@ def build_obstacle_infrastructure(
 
 
 def run_length_matching(
-    routed_results: Dict[int, Dict],
-    length_match_groups: List[List[str]],
-    config: GridRouteConfig,
-    pcb_data: PCBData
-) -> Dict[str, Dict]:
+    routed_results: dict[int, dict], length_match_groups: list[list[str]], config: GridRouteConfig, pcb_data: PCBData
+) -> dict[str, dict]:
     """
     Apply length or time matching to all configured groups.
 
@@ -313,22 +313,21 @@ def run_length_matching(
 
     for group in length_match_groups:
         # Handle "auto" for DDR4 grouping
-        if len(group) == 1 and group[0].lower() == 'auto':
+        if len(group) == 1 and group[0].lower() == "auto":
             auto_groups = auto_group_ddr4_nets(all_routed_names)
             for auto_group in auto_groups:
                 if len(auto_group) >= 2:
                     net_name_to_result = matching_func(
-                        net_name_to_result, auto_group, config, pcb_data,
-                        all_processed_segments, all_processed_vias
+                        net_name_to_result, auto_group, config, pcb_data, all_processed_segments, all_processed_vias
                     )
                     # Collect segments/vias from this group for subsequent groups
                     for net_name in auto_group:
                         if net_name in net_name_to_result:
                             result = net_name_to_result[net_name]
-                            if result.get('new_segments'):
-                                all_processed_segments.extend(result['new_segments'])
-                            if result.get('new_vias'):
-                                all_processed_vias.extend(result['new_vias'])
+                            if result.get("new_segments"):
+                                all_processed_segments.extend(result["new_segments"])
+                            if result.get("new_vias"):
+                                all_processed_vias.extend(result["new_vias"])
         else:
             # Find nets matching the patterns in this group
             matching_nets = find_nets_matching_patterns(all_routed_names, group)
@@ -337,27 +336,26 @@ def run_length_matching(
                 print(f"\n{match_type} group: {group}")
                 print(f"  Matched nets: {matching_nets}")
                 net_name_to_result = matching_func(
-                    net_name_to_result, matching_nets, config, pcb_data,
-                    all_processed_segments, all_processed_vias
+                    net_name_to_result, matching_nets, config, pcb_data, all_processed_segments, all_processed_vias
                 )
                 # Collect segments/vias from this group for subsequent groups
                 for net_name in matching_nets:
                     if net_name in net_name_to_result:
                         result = net_name_to_result[net_name]
-                        if result.get('new_segments'):
-                            all_processed_segments.extend(result['new_segments'])
-                        if result.get('new_vias'):
-                            all_processed_vias.extend(result['new_vias'])
+                        if result.get("new_segments"):
+                            all_processed_segments.extend(result["new_segments"])
+                        if result.get("new_vias"):
+                            all_processed_vias.extend(result["new_vias"])
 
     return net_name_to_result
 
 
 def sync_pcb_data_segments(
     pcb_data: PCBData,
-    routed_results: Dict[int, Dict],
-    original_segment_ids: Set[int],
+    routed_results: dict[int, dict],
+    original_segment_ids: set[int],
     state=None,
-    config: GridRouteConfig = None
+    config: GridRouteConfig = None,
 ) -> None:
     """
     Sync routed segments back to pcb_data and update obstacle cache.
@@ -379,17 +377,20 @@ def sync_pcb_data_segments(
     seg_count_before = len(pcb_data.segments)
 
     # Remove only ROUTED segments (not original stubs) for routed nets
-    pcb_data.segments = [s for s in pcb_data.segments
-                         if s.net_id not in routed_net_ids_set or id(s) in original_segment_ids]
+    pcb_data.segments = [
+        s for s in pcb_data.segments if s.net_id not in routed_net_ids_set or id(s) in original_segment_ids
+    ]
     seg_count_after_remove = len(pcb_data.segments)
 
     # Add current (possibly meandered) segments
     total_added = 0
     for net_id, result in routed_results.items():
-        for seg in result.get('new_segments', []):
+        for seg in result.get("new_segments", []):
             pcb_data.segments.append(seg)
             total_added += 1
-    print(f"\nSync pcb_data: {seg_count_before} -> {seg_count_after_remove} (kept stubs) -> {len(pcb_data.segments)} (after adding {total_added})")
+    print(
+        f"\nSync pcb_data: {seg_count_before} -> {seg_count_after_remove} (kept stubs) -> {len(pcb_data.segments)} (after adding {total_added})"
+    )
 
     # Sync working_obstacles with the updated pcb_data
     if state is not None and config is not None:
@@ -411,7 +412,7 @@ def get_common_config_kwargs(
     via_drill: float,
     grid_step: float,
     via_cost: int,
-    layers: List[str],
+    layers: list[str],
     max_iterations: int,
     max_probe_iterations: int,
     heuristic_weight: float,
@@ -423,7 +424,7 @@ def get_common_config_kwargs(
     bus_attraction_bonus: int,
     bus_min_nets: int,
     proximity_heuristic_factor: float,
-    bga_exclusion_zones: List,
+    bga_exclusion_zones: list,
     stub_proximity_radius: float,
     stub_proximity_cost: float,
     via_proximity_cost: float,
@@ -443,19 +444,19 @@ def get_common_config_kwargs(
     vertical_attraction_cost: float,
     ripped_route_avoidance_radius: float,
     ripped_route_avoidance_cost: float,
-    length_match_groups: Optional[List[List[str]]],
+    length_match_groups: list[list[str]] | None,
     length_match_tolerance: float,
     meander_amplitude: float,
     time_matching: bool,
     time_match_tolerance: float,
     debug_memory: bool,
-    layer_costs: Optional[List[float]] = None,
+    layer_costs: list[float] | None = None,
     guide_corridor_enabled: bool = False,
     guide_corridor_layer: str = "User.1",
     guide_corridor_spacing: float = 0.0,
     keepout_enabled: bool = False,
     keepout_layer: str = "User.2",
-) -> Dict:
+) -> dict:
     """
     Build config kwargs dict from common parameters.
 

@@ -48,7 +48,9 @@ _resolve_rust_binary()
 
 try:
     from kicad_routing_plugin.action_plugin import KiCadRoutingToolsPlugin
+
     KiCadRoutingToolsPlugin().register()
 except Exception as e:
     import logging
+
     logging.getLogger("KiCadRoutingTools").error(f"Failed to register plugin: {e}")

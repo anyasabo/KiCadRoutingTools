@@ -7,19 +7,22 @@ Provides functions to build obstacle maps for:
 """
 
 import math
-from typing import List, Dict, Tuple, Optional
+import os
+import sys
 
 import numpy as np
 
-from kicad_parser import PCBData, Pad, Segment
-from routing_config import GridRouteConfig, GridCoord
+from kicad_parser import Pad, PCBData, Segment
+from obstacle_map import (
+    add_rule_area_keepout_obstacles,
+    add_user_keepout_obstacles,
+    point_in_polygon,
+    point_to_polygon_edge_distance,
+)
+from routing_config import GridCoord, GridRouteConfig
 from routing_utils import iter_pad_blocked_cells
-from obstacle_map import (point_in_polygon, point_to_polygon_edge_distance,
-                          add_user_keepout_obstacles, add_rule_area_keepout_obstacles)
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 from grid_router import GridObstacleMap
 
 
@@ -37,7 +40,7 @@ def _precompute_circle_offsets(radius_sq: float) -> np.ndarray:
     return np.array(offsets, dtype=np.int32)
 
 
-def _bresenham_centers(gx1: int, gy1: int, gx2: int, gy2: int) -> List[Tuple[int, int]]:
+def _bresenham_centers(gx1: int, gy1: int, gx2: int, gy2: int) -> list[tuple[int, int]]:
     """Walk a Bresenham line and return all grid center points."""
     centers = []
     dx = abs(gx2 - gx1)
@@ -67,8 +70,7 @@ def _bresenham_centers(gx1: int, gy1: int, gx2: int, gy2: int) -> List[Tuple[int
     return centers
 
 
-def _batch_block_circles_via(obstacles: GridObstacleMap, centers: List[Tuple[int, int]],
-                              circle_offsets: np.ndarray):
+def _batch_block_circles_via(obstacles: GridObstacleMap, centers: list[tuple[int, int]], circle_offsets: np.ndarray):
     """Block via positions for multiple centers using batched numpy operations."""
     if not centers:
         return
@@ -78,8 +80,9 @@ def _batch_block_circles_via(obstacles: GridObstacleMap, centers: List[Tuple[int
     obstacles.add_blocked_vias_batch(all_cells)
 
 
-def _batch_block_circles_cell(obstacles: GridObstacleMap, centers: List[Tuple[int, int]],
-                               circle_offsets: np.ndarray, layer_idx: int):
+def _batch_block_circles_cell(
+    obstacles: GridObstacleMap, centers: list[tuple[int, int]], circle_offsets: np.ndarray, layer_idx: int
+):
     """Block cells for multiple centers using batched numpy operations."""
     if not centers:
         return
@@ -90,8 +93,9 @@ def _batch_block_circles_cell(obstacles: GridObstacleMap, centers: List[Tuple[in
     obstacles.add_blocked_cells_batch(all_cells_3)
 
 
-def block_circle(obstacles: GridObstacleMap, cx: int, cy: int, radius_sq: float,
-                 layer_idx: Optional[int] = None, via_mode: bool = False):
+def block_circle(
+    obstacles: GridObstacleMap, cx: int, cy: int, radius_sq: float, layer_idx: int | None = None, via_mode: bool = False
+):
     """Block cells in a circular region.
 
     Args:
@@ -104,15 +108,16 @@ def block_circle(obstacles: GridObstacleMap, cx: int, cy: int, radius_sq: float,
     radius_int = int(math.ceil(math.sqrt(radius_sq)))
     for ex in range(-radius_int, radius_int + 1):
         for ey in range(-radius_int, radius_int + 1):
-            if ex*ex + ey*ey <= radius_sq:
+            if ex * ex + ey * ey <= radius_sq:
                 if via_mode:
                     obstacles.add_blocked_via(cx + ex, cy + ey)
                 else:
                     obstacles.add_blocked_cell(cx + ex, cy + ey, layer_idx)
 
 
-def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
-                            pcb_data: PCBData, tolerance: float = 0.01) -> bool:
+def _smd_pad_reaches_layer(
+    pad: Pad, target_layer: str, net_id: int, pcb_data: PCBData, tolerance: float = 0.01
+) -> bool:
     """Return True if the SMD `pad` already has an electrical path to
     `target_layer` through existing same-net tracks, vias, and pads.
 
@@ -125,7 +130,7 @@ def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
     """
     pad_layer = None
     for layer in pad.layers:
-        if layer.endswith('.Cu') and not layer.startswith('*'):
+        if layer.endswith(".Cu") and not layer.startswith("*"):
             pad_layer = layer
             break
     if pad_layer is None:
@@ -134,16 +139,17 @@ def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
         return True
 
     inv_tol = 1.0 / tolerance
+
     def pkey(x: float, y: float):
         return (round(x * inv_tol), round(y * inv_tol))
 
-    if pcb_data.board_info and getattr(pcb_data.board_info, 'copper_layers', None):
-        all_cu = [l for l in pcb_data.board_info.copper_layers if l.endswith('.Cu')]
+    if pcb_data.board_info and getattr(pcb_data.board_info, "copper_layers", None):
+        all_cu = [l for l in pcb_data.board_info.copper_layers if l.endswith(".Cu")]
     else:
-        all_cu = ['F.Cu', 'B.Cu']
+        all_cu = ["F.Cu", "B.Cu"]
 
     # Segment adjacency keyed by (pos_key, layer).
-    seg_adj: Dict[Tuple, set] = {}
+    seg_adj: dict[tuple, set] = {}
     for s in pcb_data.segments:
         if s.net_id != net_id:
             continue
@@ -153,7 +159,7 @@ def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
         seg_adj.setdefault(k2, set()).add(k1)
 
     # Via vertical jumps keyed by pos_key -> set of layers.
-    via_at: Dict[Tuple, set] = {}
+    via_at: dict[tuple, set] = {}
     for v in pcb_data.vias:
         if v.net_id != net_id:
             continue
@@ -162,16 +168,16 @@ def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
         via_at.setdefault(k, set()).update(layers)
 
     # Pads at each position - through-hole pads bridge all copper layers.
-    pad_at: Dict[Tuple, set] = {}
+    pad_at: dict[tuple, set] = {}
     for p in pcb_data.pads_by_net.get(net_id, []):
         k = pkey(p.global_x, p.global_y)
         if p.drill > 0:
             pad_at.setdefault(k, set()).update(all_cu)
         else:
             for pl in p.layers:
-                if pl == '*.Cu':
+                if pl == "*.Cu":
                     pad_at.setdefault(k, set()).update(all_cu)
-                elif pl.endswith('.Cu') and not pl.startswith('*'):
+                elif pl.endswith(".Cu") and not pl.startswith("*"):
                     pad_at.setdefault(k, set()).add(pl)
 
     start = (pkey(pad.global_x, pad.global_y), pad_layer)
@@ -198,11 +204,7 @@ def _smd_pad_reaches_layer(pad: Pad, target_layer: str, net_id: int,
     return False
 
 
-def identify_target_pads(
-    pcb_data: PCBData,
-    net_id: int,
-    plane_layer: str
-) -> List[Dict]:
+def identify_target_pads(pcb_data: PCBData, net_id: int, plane_layer: str) -> list[dict]:
     """
     Identify pads that need via connections to the plane layer.
 
@@ -220,26 +222,16 @@ def identify_target_pads(
         # Check if pad has drill (through-hole)
         if pad.drill > 0:
             # Through-hole pad - directly connects to all layers including plane
-            target_pads.append({
-                'pad': pad,
-                'type': 'through_hole',
-                'needs_via': False,
-                'needs_trace': False
-            })
+            target_pads.append({"pad": pad, "type": "through_hole", "needs_via": False, "needs_trace": False})
         elif plane_layer in pad.layers or "*.Cu" in pad.layers:
             # SMD pad on plane layer - direct zone connection
-            target_pads.append({
-                'pad': pad,
-                'type': 'direct',
-                'needs_via': False,
-                'needs_trace': False
-            })
+            target_pads.append({"pad": pad, "type": "direct", "needs_via": False, "needs_trace": False})
         else:
             # SMD pad NOT on plane layer - needs via
             # Get the pad's actual layer for trace routing
             pad_layer = None
             for layer in pad.layers:
-                if layer.endswith('.Cu') and not layer.startswith('*'):
+                if layer.endswith(".Cu") and not layer.startswith("*"):
                     pad_layer = layer
                     break
 
@@ -247,21 +239,25 @@ def identify_target_pads(
             # electrical path to the plane layer through existing same-net
             # tracks, vias, and through-hole pads.
             if _smd_pad_reaches_layer(pad, plane_layer, net_id, pcb_data):
-                target_pads.append({
-                    'pad': pad,
-                    'type': 'already_connected',
-                    'needs_via': False,
-                    'needs_trace': False,
-                    'pad_layer': pad_layer,
-                })
+                target_pads.append(
+                    {
+                        "pad": pad,
+                        "type": "already_connected",
+                        "needs_via": False,
+                        "needs_trace": False,
+                        "pad_layer": pad_layer,
+                    }
+                )
             else:
-                target_pads.append({
-                    'pad': pad,
-                    'type': 'via_needed',
-                    'needs_via': True,
-                    'needs_trace': True,  # May need trace if via can't be at pad center
-                    'pad_layer': pad_layer
-                })
+                target_pads.append(
+                    {
+                        "pad": pad,
+                        "type": "via_needed",
+                        "needs_via": True,
+                        "needs_trace": True,  # May need trace if via can't be at pad center
+                        "pad_layer": pad_layer,
+                    }
+                )
 
     return target_pads
 
@@ -289,6 +285,7 @@ def build_via_obstacle_map(
             -1 (default) leaves same-net pads unblocked, allowing via-in-pad placement.
     """
     import time
+
     t_start = time.time()
 
     coord = GridCoord(config.grid_step)
@@ -329,7 +326,7 @@ def build_via_obstacle_map(
         if seg.net_id == exclude_net_id:
             continue
         # Include any copper layer (*.Cu)
-        if not seg.layer.endswith('.Cu'):
+        if not seg.layer.endswith(".Cu"):
             continue
         # Use actual segment width for clearance calculation (not config.track_width)
         # Include grid cushion for discretization
@@ -343,7 +340,7 @@ def build_via_obstacle_map(
     t0 = time.time()
     pad_count = 0
     for net_id, pads in pcb_data.pads_by_net.items():
-        is_target_net = (net_id == exclude_net_id)
+        is_target_net = net_id == exclude_net_id
         if is_target_net and same_net_pad_clearance < 0:
             continue
         pad_clearance = same_net_pad_clearance if is_target_net else None
@@ -376,8 +373,7 @@ def build_via_obstacle_map(
     return obstacles
 
 
-def _add_segment_via_obstacle(obstacles: GridObstacleMap, seg: Segment,
-                               coord: GridCoord, expansion_mm: float):
+def _add_segment_via_obstacle(obstacles: GridObstacleMap, seg: Segment, coord: GridCoord, expansion_mm: float):
     """Add a segment as via blocking obstacle using batched numpy operations."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
@@ -388,9 +384,9 @@ def _add_segment_via_obstacle(obstacles: GridObstacleMap, seg: Segment,
     _batch_block_circles_via(obstacles, centers, circle_offsets)
 
 
-def _add_pad_via_obstacle(obstacles: GridObstacleMap, pad: Pad,
-                           coord: GridCoord, config: GridRouteConfig,
-                           clearance_override: float = None):
+def _add_pad_via_obstacle(
+    obstacles: GridObstacleMap, pad: Pad, coord: GridCoord, config: GridRouteConfig, clearance_override: float = None
+):
     """Add a pad as via blocking obstacle using rectangular shape with rounded corners.
 
     clearance_override: if not None, use this edge-to-edge clearance instead of
@@ -403,20 +399,22 @@ def _add_pad_via_obstacle(obstacles: GridObstacleMap, pad: Pad,
     clearance = config.clearance if clearance_override is None else clearance_override
     margin = config.via_size / 2 + clearance + config.grid_step / 2
     # Corner radius based on pad shape (circle/oval use min dimension, roundrect uses rratio)
-    if pad.shape in ('circle', 'oval'):
+    if pad.shape in ("circle", "oval"):
         corner_radius = min(half_width, half_height)
-    elif pad.shape == 'roundrect':
+    elif pad.shape == "roundrect":
         corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
     else:
         corner_radius = 0
 
-    for cell_gx, cell_gy in iter_pad_blocked_cells(gx, gy, half_width, half_height, margin, config.grid_step, corner_radius):
+    for cell_gx, cell_gy in iter_pad_blocked_cells(
+        gx, gy, half_width, half_height, margin, config.grid_step, corner_radius
+    ):
         obstacles.add_blocked_via(cell_gx, cell_gy)
 
 
-def _is_rectangular_outline(board_outline: List[Tuple[float, float]],
-                            board_bounds: Tuple[float, float, float, float],
-                            tolerance: float = 0.1) -> bool:
+def _is_rectangular_outline(
+    board_outline: list[tuple[float, float]], board_bounds: tuple[float, float, float, float], tolerance: float = 0.1
+) -> bool:
     """Check if board outline is approximately rectangular.
 
     Returns True if all vertices are within tolerance of the bounding box corners.
@@ -429,15 +427,18 @@ def _is_rectangular_outline(board_outline: List[Tuple[float, float]],
 
     # Check each vertex - must be on an edge of the bounding box
     for vx, vy in board_outline:
-        on_edge = (abs(vx - min_x) < tolerance or abs(vx - max_x) < tolerance or
-                   abs(vy - min_y) < tolerance or abs(vy - max_y) < tolerance)
+        on_edge = (
+            abs(vx - min_x) < tolerance
+            or abs(vx - max_x) < tolerance
+            or abs(vy - min_y) < tolerance
+            or abs(vy - max_y) < tolerance
+        )
         if not on_edge:
             return False
     return True
 
 
-def _add_board_edge_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                    config: GridRouteConfig):
+def _add_board_edge_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig):
     """Block via placement near board edges.
 
     Supports both rectangular and non-rectangular board outlines.
@@ -494,8 +495,12 @@ def _add_board_edge_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
         for gx in range(gmin_x - grid_margin, gmax_x + grid_margin + 1):
             for gy in range(gmin_y - grid_margin, gmax_y + grid_margin + 1):
                 # Outside board + margin
-                if gx < gmin_x + via_expand or gx > gmax_x - via_expand or \
-                   gy < gmin_y + via_expand or gy > gmax_y - via_expand:
+                if (
+                    gx < gmin_x + via_expand
+                    or gx > gmax_x - via_expand
+                    or gy < gmin_y + via_expand
+                    or gy > gmax_y - via_expand
+                ):
                     obstacles.add_blocked_via(gx, gy)
 
     # Block vias inside board cutouts
@@ -517,8 +522,9 @@ def _add_board_edge_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
                         obstacles.add_blocked_via(gx, gy)
 
 
-def _add_board_edge_track_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                     config: GridRouteConfig, layer_idx: int):
+def _add_board_edge_track_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig, layer_idx: int
+):
     """Block track routing near board edges on a single layer.
 
     Supports both rectangular and non-rectangular board outlines.
@@ -575,8 +581,12 @@ def _add_board_edge_track_obstacles(obstacles: GridObstacleMap, pcb_data: PCBDat
         for gx in range(gmin_x - grid_margin, gmax_x + grid_margin + 1):
             for gy in range(gmin_y - grid_margin, gmax_y + grid_margin + 1):
                 # Outside board + margin
-                if gx < gmin_x + track_expand or gx > gmax_x - track_expand or \
-                   gy < gmin_y + track_expand or gy > gmax_y - track_expand:
+                if (
+                    gx < gmin_x + track_expand
+                    or gx > gmax_x - track_expand
+                    or gy < gmin_y + track_expand
+                    or gy > gmax_y - track_expand
+                ):
                     obstacles.add_blocked_cell(gx, gy, layer_idx)
 
     # Block tracks inside board cutouts
@@ -598,8 +608,9 @@ def _add_board_edge_track_obstacles(obstacles: GridObstacleMap, pcb_data: PCBDat
                         obstacles.add_blocked_cell(gx, gy, layer_idx)
 
 
-def _add_drill_hole_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                    config: GridRouteConfig, exclude_net_id: int):
+def _add_drill_hole_via_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig, exclude_net_id: int
+):
     """Block via placement near existing drill holes."""
     if config.hole_to_hole_clearance <= 0:
         return
@@ -621,7 +632,8 @@ def _add_drill_hole_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
 
     # Group drill holes by radius for batched blocking
     from collections import defaultdict
-    radius_groups: Dict[float, List[Tuple[int, int]]] = defaultdict(list)
+
+    radius_groups: dict[float, list[tuple[int, int]]] = defaultdict(list)
     for hx, hy, drill_dia in drill_holes:
         required_dist = drill_dia / 2 + config.via_drill / 2 + config.hole_to_hole_clearance
         radius_sq = (required_dist / config.grid_step) ** 2
@@ -633,8 +645,14 @@ def _add_drill_hole_via_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
         _batch_block_circles_via(obstacles, centers, circle_offsets)
 
 
-def block_via_position(obstacles: GridObstacleMap, via_x: float, via_y: float,
-                        coord: GridCoord, hole_to_hole_clearance: float, via_drill: float):
+def block_via_position(
+    obstacles: GridObstacleMap,
+    via_x: float,
+    via_y: float,
+    coord: GridCoord,
+    hole_to_hole_clearance: float,
+    via_drill: float,
+):
     """Block the area around a newly placed via for hole-to-hole clearance.
 
     Args:
@@ -658,7 +676,7 @@ def build_routing_obstacle_map(
     exclude_net_id: int,
     route_layer: str,
     skip_pad_blocking: bool = False,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> GridObstacleMap:
     """
     Build obstacle map for A* routing on a specific layer.
@@ -674,6 +692,7 @@ def build_routing_obstacle_map(
         verbose: If True, print timing information for each step.
     """
     import time
+
     t_start = time.time()
 
     coord = GridCoord(config.grid_step)
@@ -707,13 +726,15 @@ def build_routing_obstacle_map(
                     half_height = pad.size_y / 2
                     margin = config.track_width / 2 + config.clearance
                     # Corner radius based on pad shape
-                    if pad.shape in ('circle', 'oval'):
+                    if pad.shape in ("circle", "oval"):
                         corner_radius = min(half_width, half_height)
-                    elif pad.shape == 'roundrect':
+                    elif pad.shape == "roundrect":
                         corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
                     else:
                         corner_radius = 0
-                    for cell_gx, cell_gy in iter_pad_blocked_cells(gx, gy, half_width, half_height, margin, config.grid_step, corner_radius):
+                    for cell_gx, cell_gy in iter_pad_blocked_cells(
+                        gx, gy, half_width, half_height, margin, config.grid_step, corner_radius
+                    ):
                         obstacles.add_blocked_cell(cell_gx, cell_gy, layer_idx)
                     pad_count += 1
     if verbose:
@@ -746,7 +767,7 @@ def build_routing_obstacle_map(
         via_expansion = coord.to_grid_dist(via.size / 2 + config.track_width / 2 + config.clearance)
         for ex in range(-via_expansion, via_expansion + 1):
             for ey in range(-via_expansion, via_expansion + 1):
-                if ex*ex + ey*ey <= via_expansion * via_expansion:
+                if ex * ex + ey * ey <= via_expansion * via_expansion:
                     obstacles.add_blocked_cell(gx + ex, gy + ey, layer_idx)
         via_count += 1
     if verbose:
@@ -769,8 +790,9 @@ def build_routing_obstacle_map(
     return obstacles
 
 
-def _add_segment_routing_obstacle(obstacles: GridObstacleMap, seg: Segment,
-                                    coord: GridCoord, layer_idx: int, expansion_grid: int):
+def _add_segment_routing_obstacle(
+    obstacles: GridObstacleMap, seg: Segment, coord: GridCoord, layer_idx: int, expansion_grid: int
+):
     """Add a segment as a routing obstacle on a specific layer using batched numpy operations."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)

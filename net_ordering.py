@@ -5,18 +5,16 @@ This module provides different strategies for ordering nets before routing,
 including MPS (Maximum Planar Subset), inside-out BGA ordering, and original order.
 """
 
-from typing import List, Tuple, Dict, Optional, Set
-
 from kicad_parser import PCBData
 from routing_config import DiffPairNet
 
 
 def order_nets_mps(
     pcb_data: PCBData,
-    net_ids: List[Tuple[str, int]],
-    diff_pairs: Dict[str, DiffPairNet],
+    net_ids: list[tuple[str, int]],
+    diff_pairs: dict[str, DiffPairNet],
     mps_unroll: bool,
-    bga_exclusion_zones: Optional[List[Tuple[float, float, float, float]]],
+    bga_exclusion_zones: list[tuple[float, float, float, float]] | None,
     mps_reverse_rounds: int,
     crossing_layer_check: bool,
     mps_segment_intersection: bool,
@@ -24,12 +22,12 @@ def order_nets_mps(
     enable_layer_switch: bool = False,
     config=None,
     can_swap_to_top_layer: bool = True,
-    all_segment_modifications: List = None,
-    all_swap_vias: List = None,
-    all_stubs_by_layer: Dict = None,
-    stub_endpoints_by_layer: Dict = None,
-    verbose: bool = False
-) -> Tuple[List[Tuple[str, int]], int]:
+    all_segment_modifications: list = None,
+    all_swap_vias: list = None,
+    all_stubs_by_layer: dict = None,
+    stub_endpoints_by_layer: dict = None,
+    verbose: bool = False,
+) -> tuple[list[tuple[str, int]], int]:
     """
     Order nets using Maximum Planar Subset algorithm.
 
@@ -66,27 +64,32 @@ def order_nets_mps(
         from mps_layer_swap import try_mps_aware_layer_swaps
 
         mps_result = compute_mps_net_ordering(
-            pcb_data, all_net_ids, diff_pairs=diff_pairs,
+            pcb_data,
+            all_net_ids,
+            diff_pairs=diff_pairs,
             use_boundary_ordering=mps_unroll,
             bga_exclusion_zones=bga_exclusion_zones,
             reverse_rounds=mps_reverse_rounds,
             crossing_layer_check=crossing_layer_check,
             return_extended_info=True,
-            use_segment_intersection=True if mps_segment_intersection else None
+            use_segment_intersection=True if mps_segment_intersection else None,
         )
 
         if mps_result.num_rounds > 1:
             print(f"\nMPS detected {mps_result.num_rounds} rounds - attempting layer swaps to reduce crossings...")
 
             swap_result = try_mps_aware_layer_swaps(
-                pcb_data, config, mps_result, diff_pairs,
+                pcb_data,
+                config,
+                mps_result,
+                diff_pairs,
                 available_layers=config.layers,
                 can_swap_to_top_layer=can_swap_to_top_layer,
                 all_segment_modifications=all_segment_modifications,
                 all_swap_vias=all_swap_vias,
                 all_stubs_by_layer=all_stubs_by_layer,
                 stub_endpoints_by_layer=stub_endpoints_by_layer,
-                verbose=verbose
+                verbose=verbose,
             )
 
             if swap_result.swaps_applied > 0:
@@ -94,12 +97,14 @@ def order_nets_mps(
                 # Re-run MPS ordering with updated layer assignments
                 print("Re-running MPS ordering after layer swaps...")
                 ordered_ids = compute_mps_net_ordering(
-                    pcb_data, all_net_ids, diff_pairs=diff_pairs,
+                    pcb_data,
+                    all_net_ids,
+                    diff_pairs=diff_pairs,
                     use_boundary_ordering=mps_unroll,
                     bga_exclusion_zones=bga_exclusion_zones,
                     reverse_rounds=mps_reverse_rounds,
                     crossing_layer_check=crossing_layer_check,
-                    use_segment_intersection=True if mps_segment_intersection else None
+                    use_segment_intersection=True if mps_segment_intersection else None,
                 )
             else:
                 ordered_ids = mps_result.ordered_ids
@@ -107,12 +112,14 @@ def order_nets_mps(
             ordered_ids = mps_result.ordered_ids
     else:
         ordered_ids = compute_mps_net_ordering(
-            pcb_data, all_net_ids, diff_pairs=diff_pairs,
+            pcb_data,
+            all_net_ids,
+            diff_pairs=diff_pairs,
             use_boundary_ordering=mps_unroll,
             bga_exclusion_zones=bga_exclusion_zones,
             reverse_rounds=mps_reverse_rounds,
             crossing_layer_check=crossing_layer_check,
-            use_segment_intersection=True if mps_segment_intersection else None
+            use_segment_intersection=True if mps_segment_intersection else None,
         )
 
     # Rebuild net_ids in the new order
@@ -123,10 +130,8 @@ def order_nets_mps(
 
 
 def order_nets_inside_out(
-    pcb_data: PCBData,
-    net_ids: List[Tuple[str, int]],
-    bga_exclusion_zones: List[Tuple[float, float, float, float]]
-) -> List[Tuple[str, int]]:
+    pcb_data: PCBData, net_ids: list[tuple[str, int]], bga_exclusion_zones: list[tuple[float, float, float, float]]
+) -> list[tuple[str, int]]:
     """
     Order nets inside-out from BGA center(s) for better escape routing.
 
@@ -141,6 +146,7 @@ def order_nets_inside_out(
     Returns:
         Ordered list of (name, id) tuples
     """
+
     def pad_in_bga_zone(pad):
         """Check if a pad is inside any BGA zone."""
         for zone in bga_exclusion_zones:
@@ -152,9 +158,9 @@ def order_nets_inside_out(
         """Get minimum distance from any BGA pad of this net to its BGA center."""
         pads = pcb_data.pads_by_net.get(net_id, [])
         if not pads:
-            return float('inf')
+            return float("inf")
 
-        min_dist = float('inf')
+        min_dist = float("inf")
         for zone in bga_exclusion_zones:
             center_x = (zone[0] + zone[2]) / 2
             center_y = (zone[1] + zone[3]) / 2
@@ -187,10 +193,8 @@ def order_nets_inside_out(
 
 
 def separate_nets_by_type(
-    net_ids: List[Tuple[str, int]],
-    diff_pairs: Dict[str, DiffPairNet],
-    diff_pair_net_ids: Set[int]
-) -> Tuple[List[Tuple[str, DiffPairNet]], List[Tuple[str, int]]]:
+    net_ids: list[tuple[str, int]], diff_pairs: dict[str, DiffPairNet], diff_pair_net_ids: set[int]
+) -> tuple[list[tuple[str, DiffPairNet]], list[tuple[str, int]]]:
     """
     Separate ordered nets into diff pairs and single-ended nets.
 

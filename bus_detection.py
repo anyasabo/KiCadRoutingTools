@@ -9,22 +9,22 @@ This module detects such groups and orders the nets by physical position
 for routing from the middle outward.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional
 import math
+from dataclasses import dataclass, field
 
-from kicad_parser import PCBData
 from connectivity import get_net_routing_endpoints
+from kicad_parser import PCBData
 
 
 @dataclass
 class BusGroup:
     """Represents a group of nets that should be routed as a bus."""
+
     name: str
-    net_ids: List[int] = field(default_factory=list)
+    net_ids: list[int] = field(default_factory=list)
     # Source and target positions per net (parallel lists with net_ids)
-    source_positions: List[Tuple[float, float]] = field(default_factory=list)
-    target_positions: List[Tuple[float, float]] = field(default_factory=list)
+    source_positions: list[tuple[float, float]] = field(default_factory=list)
+    target_positions: list[tuple[float, float]] = field(default_factory=list)
     # Which endpoint type formed the clique (determines routing direction)
     clique_endpoint: str = "source"  # "source" or "target"
 
@@ -35,10 +35,10 @@ class BusGroup:
 
 def detect_bus_groups(
     pcb_data: PCBData,
-    net_ids: List[int],
+    net_ids: list[int],
     detection_radius: float = 2.0,
     min_nets: int = 2,
-) -> List[BusGroup]:
+) -> list[BusGroup]:
     """
     Detect bus groups by finding nets where EITHER all sources are within radius
     of each other OR all targets are within radius of each other.
@@ -54,7 +54,7 @@ def detect_bus_groups(
         List of BusGroup objects, each containing nets that form a bus
     """
     # Get endpoints for each net
-    net_endpoints: Dict[int, Tuple[Tuple[float, float], Tuple[float, float]]] = {}
+    net_endpoints: dict[int, tuple[tuple[float, float], tuple[float, float]]] = {}
 
     for net_id in net_ids:
         endpoints = get_net_routing_endpoints(pcb_data, net_id)
@@ -108,15 +108,11 @@ def detect_bus_groups(
     return bus_groups
 
 
-def _all_within_radius(
-    net_ids: List[int],
-    positions: Dict[int, Tuple[float, float]],
-    radius: float
-) -> bool:
+def _all_within_radius(net_ids: list[int], positions: dict[int, tuple[float, float]], radius: float) -> bool:
     """Check if all positions are within radius of each other (pairwise)."""
     for i, nid1 in enumerate(net_ids):
         x1, y1 = positions[nid1]
-        for nid2 in net_ids[i+1:]:
+        for nid2 in net_ids[i + 1 :]:
             x2, y2 = positions[nid2]
             dist = math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
             if dist > radius:
@@ -124,11 +120,7 @@ def _all_within_radius(
     return True
 
 
-def _find_largest_clique(
-    positions: Dict[int, Tuple[float, float]],
-    radius: float,
-    min_size: int
-) -> List[int]:
+def _find_largest_clique(positions: dict[int, tuple[float, float]], radius: float, min_size: int) -> list[int]:
     """
     Find the largest group where all members are within radius of each other.
 
@@ -144,7 +136,7 @@ def _find_largest_clique(
     edges = []
     for i, id1 in enumerate(items):
         x1, y1 = positions[id1]
-        for id2 in items[i+1:]:
+        for id2 in items[i + 1 :]:
             x2, y2 = positions[id2]
             dist = math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
             if dist <= radius:
@@ -183,9 +175,8 @@ def _find_largest_clique(
 
 
 def _order_nets_by_position(
-    net_ids: List[int],
-    net_endpoints: Dict[int, Tuple[Tuple[float, float], Tuple[float, float]]]
-) -> List[int]:
+    net_ids: list[int], net_endpoints: dict[int, tuple[tuple[float, float], tuple[float, float]]]
+) -> list[int]:
     """
     Order nets by physical position (left-to-right or top-to-bottom).
 
@@ -223,7 +214,7 @@ def _order_nets_by_position(
     return [nid for nid, _ in sources]
 
 
-def get_bus_routing_order(bus: BusGroup) -> List[int]:
+def get_bus_routing_order(bus: BusGroup) -> list[int]:
     """
     Get the order in which bus nets should be routed.
 
@@ -259,10 +250,8 @@ def get_bus_routing_order(bus: BusGroup) -> List[int]:
 
 
 def get_attraction_neighbor(
-    bus: BusGroup,
-    net_id: int,
-    routed_paths: Dict[int, List[Tuple[int, int, int]]]
-) -> Optional[List[Tuple[int, int, int]]]:
+    bus: BusGroup, net_id: int, routed_paths: dict[int, list[tuple[int, int, int]]]
+) -> list[tuple[int, int, int]] | None:
     """
     Get the path of the already-routed neighbor that this net should attract to.
 

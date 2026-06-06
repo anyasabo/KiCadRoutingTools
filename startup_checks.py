@@ -9,8 +9,8 @@ Verifies that:
 If version mismatch is detected, automatically rebuilds using build_router.py.
 """
 
-import sys
 import os
+import sys
 
 
 def check_python_dependencies():
@@ -21,19 +21,19 @@ def check_python_dependencies():
     try:
         import numpy
     except ImportError:
-        missing.append('numpy')
+        missing.append("numpy")
 
     # Check scipy (required for optimal target assignment and Voronoi)
     try:
         from scipy.optimize import linear_sum_assignment
     except ImportError:
-        missing.append('scipy')
+        missing.append("scipy")
 
     # Check shapely (required for polygon union in multi-net plane layers)
     try:
         from shapely.geometry import Polygon
     except ImportError:
-        missing.append('shapely')
+        missing.append("shapely")
 
     if missing:
         print("ERROR: Missing required Python libraries:")
@@ -48,16 +48,16 @@ def check_python_dependencies():
 def get_cargo_version():
     """Read the version from Cargo.toml."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    cargo_path = os.path.join(script_dir, 'rust_router', 'Cargo.toml')
+    cargo_path = os.path.join(script_dir, "rust_router", "Cargo.toml")
 
     if not os.path.exists(cargo_path):
         return None
 
-    with open(cargo_path, 'r') as f:
+    with open(cargo_path) as f:
         for line in f:
-            if line.startswith('version'):
+            if line.startswith("version"):
                 # Parse: version = "0.8.3"
-                parts = line.split('=', 1)
+                parts = line.split("=", 1)
                 if len(parts) == 2:
                     version = parts[1].strip().strip('"').strip("'")
                     return version
@@ -72,7 +72,7 @@ def check_rust_library():
     Returns the installed version string.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    rust_dir = os.path.join(script_dir, 'rust_router')
+    rust_dir = os.path.join(script_dir, "rust_router")
 
     # Add rust_router to path for import
     if rust_dir not in sys.path:
@@ -86,7 +86,8 @@ def check_rust_library():
     # Try to import the Rust library
     try:
         import grid_router
-        installed_version = getattr(grid_router, '__version__', 'unknown')
+
+        installed_version = getattr(grid_router, "__version__", "unknown")
     except ImportError:
         installed_version = None
 
@@ -113,7 +114,7 @@ def run_all_checks():
     return check_rust_library()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Allow running standalone to check/rebuild
     version = run_all_checks()
     print(f"All checks passed. Rust router v{version}")

@@ -3,7 +3,7 @@ Data types for BGA fanout routing.
 """
 
 from dataclasses import dataclass
-from typing import Tuple, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from kicad_parser import Pad
@@ -12,18 +12,20 @@ if TYPE_CHECKING:
 @dataclass
 class Channel:
     """A routing channel between ball rows/columns."""
+
     orientation: str  # 'horizontal' or 'vertical'
-    position: float   # Y for horizontal, X for vertical
+    position: float  # Y for horizontal, X for vertical
     index: int
 
 
 @dataclass
 class BGAGrid:
     """Represents the BGA ball grid structure."""
+
     pitch_x: float
     pitch_y: float
-    rows: List[float]  # Sorted Y positions
-    cols: List[float]  # Sorted X positions
+    rows: list[float]  # Sorted Y positions
+    cols: list[float]  # Sorted X positions
     center_x: float
     center_y: float
     min_x: float
@@ -35,9 +37,10 @@ class BGAGrid:
 @dataclass
 class DiffPairPads:
     """A differential pair of pads (P and N) - tracks pad objects."""
+
     base_name: str  # Common name without _P/_N suffix
-    p_pad: Optional['Pad'] = None
-    n_pad: Optional['Pad'] = None
+    p_pad: Optional["Pad"] = None
+    n_pad: Optional["Pad"] = None
 
     @property
     def is_complete(self) -> bool:
@@ -47,20 +50,21 @@ class DiffPairPads:
 @dataclass
 class FanoutRoute:
     """Complete fanout: pad -> 45° stub -> channel -> exit -> jog."""
-    pad: 'Pad'
-    pad_pos: Tuple[float, float]
-    stub_end: Tuple[float, float]  # Where stub meets channel (or exit for edge pads)
-    exit_pos: Tuple[float, float]  # Where route exits BGA
-    jog_end: Tuple[float, float] = None  # End of 45° jog after exit
-    jog_extension: Tuple[float, float] = None  # Extension point for outside track of diff pair
-    channel_point: Tuple[float, float] = None  # First channel point for half-edge inner pads (45° entry)
-    channel_point2: Tuple[float, float] = None  # Second channel point (after horizontal segment)
-    pre_channel_jog: Tuple[float, float] = None  # Jog point before channel (for jogged routes to farther channel)
-    channel: Optional[Channel] = None  # None for edge pads with direct escape
-    escape_dir: str = ''  # 'left', 'right', 'up', 'down'
+
+    pad: "Pad"
+    pad_pos: tuple[float, float]
+    stub_end: tuple[float, float]  # Where stub meets channel (or exit for edge pads)
+    exit_pos: tuple[float, float]  # Where route exits BGA
+    jog_end: tuple[float, float] = None  # End of 45° jog after exit
+    jog_extension: tuple[float, float] = None  # Extension point for outside track of diff pair
+    channel_point: tuple[float, float] = None  # First channel point for half-edge inner pads (45° entry)
+    channel_point2: tuple[float, float] = None  # Second channel point (after horizontal segment)
+    pre_channel_jog: tuple[float, float] = None  # Jog point before channel (for jogged routes to farther channel)
+    channel: Channel | None = None  # None for edge pads with direct escape
+    escape_dir: str = ""  # 'left', 'right', 'up', 'down'
     is_edge: bool = False  # True for outer row/column pads
     layer: str = "F.Cu"
-    pair_id: Optional[str] = None  # Differential pair base name if part of a pair
+    pair_id: str | None = None  # Differential pair base name if part of a pair
     is_p: bool = True  # True for P, False for N in differential pair
     neighbor_connection: bool = False  # True if this connects directly to adjacent same-net pad
 
@@ -70,12 +74,12 @@ class FanoutRoute:
 
 
 def create_track(
-    start: Tuple[float, float],
-    end: Tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
     width: float,
     layer: str,
     net_id: int,
-    pair_id: Optional[str] = None,
+    pair_id: str | None = None,
     is_existing: bool = False,
 ) -> dict:
     """
@@ -85,14 +89,14 @@ def create_track(
     ensure consistency and eventually migrate to the Track dataclass.
     """
     d = {
-        'start': start,
-        'end': end,
-        'width': width,
-        'layer': layer,
-        'net_id': net_id,
+        "start": start,
+        "end": end,
+        "width": width,
+        "layer": layer,
+        "net_id": net_id,
     }
     if pair_id is not None:
-        d['pair_id'] = pair_id
+        d["pair_id"] = pair_id
     if is_existing:
-        d['is_existing'] = is_existing
+        d["is_existing"] = is_existing
     return d

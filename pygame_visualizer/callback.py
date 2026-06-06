@@ -5,30 +5,38 @@ This module provides a callback interface that the batch router uses
 to communicate with the visualizer without depending on pygame.
 """
 
-from typing import List, Tuple, Set, Optional, Callable, Protocol
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import List, Optional, Protocol, Set, Tuple
 
 
 @dataclass
 class VisualizationData:
     """Data passed to visualization callbacks for rendering obstacles."""
-    blocked_cells: List[Set[Tuple[int, int]]]  # Per-layer blocked cells
-    blocked_vias: Set[Tuple[int, int]]
-    bga_zones_grid: List[Tuple[int, int, int, int]]
-    bounds: Tuple[float, float, float, float]  # min_x, min_y, max_x, max_y in mm
+
+    blocked_cells: list[set[tuple[int, int]]]  # Per-layer blocked cells
+    blocked_vias: set[tuple[int, int]]
+    bga_zones_grid: list[tuple[int, int, int, int]]
+    bounds: tuple[float, float, float, float]  # min_x, min_y, max_x, max_y in mm
 
 
 class VisualizationCallback(Protocol):
     """Protocol for visualization callbacks."""
 
-    def on_routing_start(self, total_nets: int, layers: List[str], grid_step: float) -> None:
+    def on_routing_start(self, total_nets: int, layers: list[str], grid_step: float) -> None:
         """Called when batch routing starts."""
         ...
 
-    def on_net_start(self, net_name: str, net_num: int, net_id: int,
-                     sources: List[Tuple[int, int, int]],
-                     targets: List[Tuple[int, int, int]],
-                     obstacles, vis_data: VisualizationData) -> None:
+    def on_net_start(
+        self,
+        net_name: str,
+        net_num: int,
+        net_id: int,
+        sources: list[tuple[int, int, int]],
+        targets: list[tuple[int, int, int]],
+        obstacles,
+        vis_data: VisualizationData,
+    ) -> None:
         """Called when a net starts routing.
 
         Args:
@@ -53,8 +61,9 @@ class VisualizationCallback(Protocol):
         """
         ...
 
-    def on_net_complete(self, net_name: str, success: bool, path: Optional[List[Tuple[int, int, int]]],
-                        iterations: int, direction: str) -> bool:
+    def on_net_complete(
+        self, net_name: str, success: bool, path: list[tuple[int, int, int]] | None, iterations: int, direction: str
+    ) -> bool:
         """Called when a net finishes routing.
 
         Args:
@@ -89,20 +98,27 @@ class VisualizationCallback(Protocol):
 class NullVisualizationCallback:
     """No-op callback for when visualization is disabled."""
 
-    def on_routing_start(self, total_nets: int, layers: List[str], grid_step: float) -> None:
+    def on_routing_start(self, total_nets: int, layers: list[str], grid_step: float) -> None:
         pass
 
-    def on_net_start(self, net_name: str, net_num: int, net_id: int,
-                     sources: List[Tuple[int, int, int]],
-                     targets: List[Tuple[int, int, int]],
-                     obstacles, vis_data: VisualizationData) -> None:
+    def on_net_start(
+        self,
+        net_name: str,
+        net_num: int,
+        net_id: int,
+        sources: list[tuple[int, int, int]],
+        targets: list[tuple[int, int, int]],
+        obstacles,
+        vis_data: VisualizationData,
+    ) -> None:
         pass
 
     def on_route_step(self, snapshot) -> bool:
         return True
 
-    def on_net_complete(self, net_name: str, success: bool, path: Optional[List[Tuple[int, int, int]]],
-                        iterations: int, direction: str) -> bool:
+    def on_net_complete(
+        self, net_name: str, success: bool, path: list[tuple[int, int, int]] | None, iterations: int, direction: str
+    ) -> bool:
         return True
 
     def on_routing_complete(self, successful: int, failed: int, total_iterations: int) -> None:

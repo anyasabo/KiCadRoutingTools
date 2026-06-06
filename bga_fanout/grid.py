@@ -4,15 +4,14 @@ BGA grid analysis functions.
 Analyzes BGA footprint geometry to extract grid parameters and routing channels.
 """
 
-from typing import List, Optional, Tuple
 from collections import defaultdict
 
-from kicad_parser import Footprint
-from bga_fanout.types import BGAGrid, Channel
 from bga_fanout.constants import EDGE_PAD_TOLERANCE
+from bga_fanout.types import BGAGrid, Channel
+from kicad_parser import Footprint
 
 
-def analyze_bga_grid(footprint: Footprint) -> Optional[BGAGrid]:
+def analyze_bga_grid(footprint: Footprint) -> BGAGrid | None:
     """Analyze a footprint to extract BGA grid parameters."""
     pads = footprint.pads
     if len(pads) < 4:
@@ -24,8 +23,8 @@ def analyze_bga_grid(footprint: Footprint) -> Optional[BGAGrid]:
     if len(x_positions) < 2 or len(y_positions) < 2:
         return None
 
-    x_diffs = [x_positions[i+1] - x_positions[i] for i in range(len(x_positions)-1)]
-    y_diffs = [y_positions[i+1] - y_positions[i] for i in range(len(y_positions)-1)]
+    x_diffs = [x_positions[i + 1] - x_positions[i] for i in range(len(x_positions) - 1)]
+    y_diffs = [y_positions[i + 1] - y_positions[i] for i in range(len(y_positions) - 1)]
 
     def get_dominant_pitch(diffs):
         if not diffs:
@@ -57,29 +56,29 @@ def analyze_bga_grid(footprint: Footprint) -> Optional[BGAGrid]:
         min_x=min(x_positions) - pitch_x / 2,
         max_x=max(x_positions) + pitch_x / 2,
         min_y=min(y_positions) - pitch_y / 2,
-        max_y=max(y_positions) + pitch_y / 2
+        max_y=max(y_positions) + pitch_y / 2,
     )
 
 
-def calculate_channels(grid: BGAGrid) -> List[Channel]:
+def calculate_channels(grid: BGAGrid) -> list[Channel]:
     """Calculate routing channels between ball rows and columns."""
     channels = []
     idx = 0
 
     for i in range(len(grid.rows) - 1):
         y_pos = (grid.rows[i] + grid.rows[i + 1]) / 2
-        channels.append(Channel(orientation='horizontal', position=y_pos, index=idx))
+        channels.append(Channel(orientation="horizontal", position=y_pos, index=idx))
         idx += 1
 
     for i in range(len(grid.cols) - 1):
         x_pos = (grid.cols[i] + grid.cols[i + 1]) / 2
-        channels.append(Channel(orientation='vertical', position=x_pos, index=idx))
+        channels.append(Channel(orientation="vertical", position=x_pos, index=idx))
         idx += 1
 
     return channels
 
 
-def is_edge_pad(pad_x: float, pad_y: float, grid: BGAGrid, tolerance: float = EDGE_PAD_TOLERANCE) -> Tuple[bool, str]:
+def is_edge_pad(pad_x: float, pad_y: float, grid: BGAGrid, tolerance: float = EDGE_PAD_TOLERANCE) -> tuple[bool, str]:
     """
     Check if a pad is on the outer edge of the BGA.
     Returns (is_edge, escape_direction).
@@ -94,12 +93,12 @@ def is_edge_pad(pad_x: float, pad_y: float, grid: BGAGrid, tolerance: float = ED
 
     # Determine escape direction based on which edge
     if on_right:
-        return True, 'right'
+        return True, "right"
     elif on_left:
-        return True, 'left'
+        return True, "left"
     elif on_bottom:
-        return True, 'down'
+        return True, "down"
     elif on_top:
-        return True, 'up'
+        return True, "up"
 
-    return False, ''
+    return False, ""

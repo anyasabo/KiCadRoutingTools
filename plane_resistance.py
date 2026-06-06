@@ -6,10 +6,10 @@ maximum current capacity based on IPC-2152 guidelines.
 """
 
 import math
-from typing import List, Dict, Tuple, Optional
-from shapely.geometry import Polygon as ShapelyPolygon, LineString, Point
-from shapely.validation import make_valid
 
+from shapely.geometry import LineString, Point
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.validation import make_valid
 
 # Physical constants
 COPPER_RESISTIVITY = 1.68e-8  # Ohm·m at 20°C
@@ -17,9 +17,9 @@ OZ_TO_METERS = 35e-6  # 1 oz copper = 35 microns
 
 
 def find_mst_diameter_path(
-    mst_edges: List[Tuple[Tuple[float, float], Tuple[float, float]]],
-    routed_paths: Dict[Tuple[Tuple[float, float], Tuple[float, float]], List[Tuple[float, float]]]
-) -> Tuple[List[Tuple[float, float]], float]:
+    mst_edges: list[tuple[tuple[float, float], tuple[float, float]]],
+    routed_paths: dict[tuple[tuple[float, float], tuple[float, float]], list[tuple[float, float]]],
+) -> tuple[list[tuple[float, float]], float]:
     """
     Find the longest path (diameter) through the MST and return the actual routed path.
 
@@ -34,7 +34,7 @@ def find_mst_diameter_path(
         return [], 0.0
 
     # Build adjacency list from MST edges
-    adjacency: Dict[Tuple[float, float], List[Tuple[Tuple[float, float], float, List[Tuple[float, float]]]]] = {}
+    adjacency: dict[tuple[float, float], list[tuple[tuple[float, float], float, list[tuple[float, float]]]]] = {}
 
     for via_a, via_b in mst_edges:
         # Get the routed path for this edge
@@ -46,9 +46,9 @@ def find_mst_diameter_path(
         # Calculate route length
         length = 0.0
         for i in range(len(route) - 1):
-            dx = route[i+1][0] - route[i][0]
-            dy = route[i+1][1] - route[i][1]
-            length += math.sqrt(dx*dx + dy*dy)
+            dx = route[i + 1][0] - route[i][0]
+            dy = route[i + 1][1] - route[i][1]
+            length += math.sqrt(dx * dx + dy * dy)
 
         # Add to adjacency (both directions)
         if via_a not in adjacency:
@@ -73,9 +73,9 @@ def find_mst_diameter_path(
 
 
 def _bfs_farthest(
-    start: Tuple[float, float],
-    adjacency: Dict[Tuple[float, float], List[Tuple[Tuple[float, float], float, List[Tuple[float, float]]]]]
-) -> Tuple[Tuple[float, float], Dict]:
+    start: tuple[float, float],
+    adjacency: dict[tuple[float, float], list[tuple[tuple[float, float], float, list[tuple[float, float]]]]],
+) -> tuple[tuple[float, float], dict]:
     """BFS to find farthest node from start."""
     from collections import deque
 
@@ -96,21 +96,21 @@ def _bfs_farthest(
                     max_dist = dist[neighbor]
                     farthest = neighbor
 
-    return farthest, {'dist': dist, 'parent': parent}
+    return farthest, {"dist": dist, "parent": parent}
 
 
 def _reconstruct_path(
-    start: Tuple[float, float],
-    end: Tuple[float, float],
-    path_info: Dict,
-    adjacency: Dict[Tuple[float, float], List[Tuple[Tuple[float, float], float, List[Tuple[float, float]]]]]
-) -> Tuple[List[Tuple[float, float]], float]:
+    start: tuple[float, float],
+    end: tuple[float, float],
+    path_info: dict,
+    adjacency: dict[tuple[float, float], list[tuple[tuple[float, float], float, list[tuple[float, float]]]]],
+) -> tuple[list[tuple[float, float]], float]:
     """Reconstruct the actual routed path between start and end."""
     via_sequence = []
     current = end
     while current is not None:
         via_sequence.append(current)
-        current = path_info['parent'].get(current)
+        current = path_info["parent"].get(current)
     via_sequence.reverse()
 
     if len(via_sequence) < 2:
@@ -140,9 +140,7 @@ def _reconstruct_path(
 
 
 def calculate_polygon_width_at_point(
-    polygon: ShapelyPolygon,
-    point: Tuple[float, float],
-    direction: Tuple[float, float]
+    polygon: ShapelyPolygon, point: tuple[float, float], direction: tuple[float, float]
 ) -> float:
     """
     Calculate polygon width at a point, perpendicular to the given direction.
@@ -155,7 +153,7 @@ def calculate_polygon_width_at_point(
     Returns:
         Width in mm, or 0 if point is outside polygon
     """
-    mag = math.sqrt(direction[0]**2 + direction[1]**2)
+    mag = math.sqrt(direction[0] ** 2 + direction[1] ** 2)
     if mag < 1e-9:
         return 0.0
     dx, dy = direction[0] / mag, direction[1] / mag
@@ -169,19 +167,21 @@ def calculate_polygon_width_at_point(
 
     # Create line through point in perpendicular direction
     ray_length = 1000.0
-    line = LineString([
-        (point[0] - perp_x * ray_length, point[1] - perp_y * ray_length),
-        (point[0] + perp_x * ray_length, point[1] + perp_y * ray_length)
-    ])
+    line = LineString(
+        [
+            (point[0] - perp_x * ray_length, point[1] - perp_y * ray_length),
+            (point[0] + perp_x * ray_length, point[1] + perp_y * ray_length),
+        ]
+    )
 
     intersection = line.intersection(polygon)
 
     if intersection.is_empty:
         return 0.0
 
-    if intersection.geom_type == 'LineString':
+    if intersection.geom_type == "LineString":
         return intersection.length
-    elif intersection.geom_type == 'MultiLineString':
+    elif intersection.geom_type == "MultiLineString":
         for geom in intersection.geoms:
             if geom.distance(p) < 0.01:
                 return geom.length
@@ -191,9 +191,7 @@ def calculate_polygon_width_at_point(
 
 
 def calculate_average_width_along_path(
-    polygon: ShapelyPolygon,
-    path: List[Tuple[float, float]],
-    sample_interval: float = 1.0
+    polygon: ShapelyPolygon, path: list[tuple[float, float]], sample_interval: float = 1.0
 ) -> float:
     """
     Calculate average polygon width along a path.
@@ -247,11 +245,7 @@ def calculate_average_width_along_path(
     return sum(widths) / len(widths)
 
 
-def calculate_resistance(
-    path_length_mm: float,
-    avg_width_mm: float,
-    copper_oz: float = 1.0
-) -> float:
+def calculate_resistance(path_length_mm: float, avg_width_mm: float, copper_oz: float = 1.0) -> float:
     """
     Calculate resistance of a plane section.
 
@@ -266,7 +260,7 @@ def calculate_resistance(
         Resistance in ohms
     """
     if path_length_mm < 0.001 or avg_width_mm < 0.001:
-        return float('inf')
+        return float("inf")
 
     length_m = path_length_mm * 1e-3
     width_m = avg_width_mm * 1e-3
@@ -276,10 +270,7 @@ def calculate_resistance(
 
 
 def calculate_max_current_ipc(
-    avg_width_mm: float,
-    copper_oz: float = 1.0,
-    temp_rise_c: float = 10.0,
-    is_internal: bool = True
+    avg_width_mm: float, copper_oz: float = 1.0, temp_rise_c: float = 10.0, is_internal: bool = True
 ) -> float:
     """
     Calculate max current using IPC-2152 formula.
@@ -302,18 +293,15 @@ def calculate_max_current_ipc(
 
     thickness_mm = copper_oz * 0.035
     cross_section_mm2 = avg_width_mm * thickness_mm
-    cross_section_mils2 = cross_section_mm2 * (1000 / 25.4)**2
+    cross_section_mils2 = cross_section_mm2 * (1000 / 25.4) ** 2
 
     k = 0.024 if is_internal else 0.048
-    return k * (temp_rise_c ** 0.44) * (cross_section_mils2 ** 0.725)
+    return k * (temp_rise_c**0.44) * (cross_section_mils2**0.725)
 
 
 def analyze_single_net_plane(
-    polygon_points: List[Tuple[float, float]],
-    layer: str,
-    copper_oz: float = 1.0,
-    temp_rise_c: float = 10.0
-) -> Optional[Dict]:
+    polygon_points: list[tuple[float, float]], layer: str, copper_oz: float = 1.0, temp_rise_c: float = 10.0
+) -> dict | None:
     """
     Analyze resistance for a single-net plane using bounding box diagonal.
 
@@ -335,7 +323,7 @@ def analyze_single_net_plane(
         minx, miny, maxx, maxy = shapely_poly.bounds
         point_a = (minx, miny)
         point_b = (maxx, maxy)
-        path_length = math.sqrt((maxx - minx)**2 + (maxy - miny)**2)
+        path_length = math.sqrt((maxx - minx) ** 2 + (maxy - miny) ** 2)
 
         if path_length < 0.001:
             return None
@@ -355,27 +343,27 @@ def analyze_single_net_plane(
             avg_width = shapely_poly.area / path_length
 
         resistance = calculate_resistance(path_length, avg_width, copper_oz)
-        is_internal = layer.startswith('In')
+        is_internal = layer.startswith("In")
         max_current = calculate_max_current_ipc(avg_width, copper_oz, temp_rise_c, is_internal)
 
         return {
-            'path_length': path_length,
-            'avg_width': avg_width,
-            'resistance': resistance,
-            'max_current': max_current
+            "path_length": path_length,
+            "avg_width": avg_width,
+            "resistance": resistance,
+            "max_current": max_current,
         }
     except Exception:
         return None
 
 
 def analyze_multi_net_plane(
-    polygon_points: List[Tuple[float, float]],
-    mst_edges: List[Tuple[Tuple[float, float], Tuple[float, float]]],
-    routed_paths: Dict[Tuple[Tuple[float, float], Tuple[float, float]], List[Tuple[float, float]]],
+    polygon_points: list[tuple[float, float]],
+    mst_edges: list[tuple[tuple[float, float], tuple[float, float]]],
+    routed_paths: dict[tuple[tuple[float, float], tuple[float, float]], list[tuple[float, float]]],
     layer: str,
     copper_oz: float = 1.0,
-    temp_rise_c: float = 10.0
-) -> Optional[Dict]:
+    temp_rise_c: float = 10.0,
+) -> dict | None:
     """
     Analyze resistance for a multi-net plane using MST diameter path.
 
@@ -410,34 +398,34 @@ def analyze_multi_net_plane(
             avg_width = shapely_poly.area / path_length
 
         resistance = calculate_resistance(path_length, avg_width, copper_oz)
-        is_internal = layer.startswith('In')
+        is_internal = layer.startswith("In")
         max_current = calculate_max_current_ipc(avg_width, copper_oz, temp_rise_c, is_internal)
 
         return {
-            'path_length': path_length,
-            'avg_width': avg_width,
-            'resistance': resistance,
-            'max_current': max_current
+            "path_length": path_length,
+            "avg_width": avg_width,
+            "resistance": resistance,
+            "max_current": max_current,
         }
     except Exception:
         return None
 
 
-def print_single_net_resistance(result: Dict, net_name: str):
+def print_single_net_resistance(result: dict, net_name: str):
     """Print resistance analysis for a single-net plane."""
     if not result:
         return
 
-    print(f"\n  Plane Resistance Analysis (1 oz copper, 10°C rise):")
+    print("\n  Plane Resistance Analysis (1 oz copper, 10°C rise):")
     print(f"    Path length: {result['path_length']:.1f} mm (diagonal)")
     print(f"    Avg width:   {result['avg_width']:.1f} mm")
-    r_str = f"{result['resistance']*1000:.3f} mΩ" if result['resistance'] < float('inf') else "N/A"
-    i_str = f"{result['max_current']:.2f} A" if result['max_current'] > 0 else "N/A"
+    r_str = f"{result['resistance'] * 1000:.3f} mΩ" if result["resistance"] < float("inf") else "N/A"
+    i_str = f"{result['max_current']:.2f} A" if result["max_current"] > 0 else "N/A"
     print(f"    Resistance:  {r_str}")
     print(f"    Max current: {i_str}")
 
 
-def print_multi_net_resistance(results: Dict[str, Dict]):
+def print_multi_net_resistance(results: dict[str, dict]):
     """
     Print resistance analysis table for multi-net planes.
 
@@ -447,18 +435,20 @@ def print_multi_net_resistance(results: Dict[str, Dict]):
     if not results:
         return
 
-    print(f"\n  Plane Resistance Analysis (1 oz copper, 10°C rise):")
-    print(f"  {'-'*70}")
+    print("\n  Plane Resistance Analysis (1 oz copper, 10°C rise):")
+    print(f"  {'-' * 70}")
     print(f"  {'Net':<25} {'Path(mm)':<10} {'AvgW(mm)':<10} {'R(mΩ)':<10} {'Imax(A)':<10}")
-    print(f"  {'-'*70}")
+    print(f"  {'-' * 70}")
 
     for net_name, result in results.items():
         if result:
-            r_str = f"{result['resistance']*1000:.3f}" if result['resistance'] < float('inf') else "N/A"
-            i_str = f"{result['max_current']:.2f}" if result['max_current'] > 0 else "N/A"
-            print(f"  {net_name:<25} {result['path_length']:<10.1f} {result['avg_width']:<10.1f} {r_str:<10} {i_str:<10}")
+            r_str = f"{result['resistance'] * 1000:.3f}" if result["resistance"] < float("inf") else "N/A"
+            i_str = f"{result['max_current']:.2f}" if result["max_current"] > 0 else "N/A"
+            print(
+                f"  {net_name:<25} {result['path_length']:<10.1f} {result['avg_width']:<10.1f} {r_str:<10} {i_str:<10}"
+            )
         else:
             print(f"  {net_name:<25} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10}")
 
-    print(f"  {'-'*70}")
-    print(f"  Path = longest MST route, AvgW = avg polygon width along path")
+    print(f"  {'-' * 70}")
+    print("  Path = longest MST route, AvgW = avg polygon width along path")

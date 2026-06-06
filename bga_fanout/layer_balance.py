@@ -4,13 +4,12 @@ Layer rebalancing for BGA fanout routing.
 Distributes routes evenly across available layers after initial assignment.
 """
 
-from typing import List, Dict, Set, Tuple
-from bga_fanout.types import FanoutRoute
 from bga_fanout.collision import check_segment_collision
-from bga_fanout.constants import MAX_REBALANCE_ITERATIONS, MAX_EDGE_PAIR_ITERATIONS
+from bga_fanout.constants import MAX_EDGE_PAIR_ITERATIONS, MAX_REBALANCE_ITERATIONS
+from bga_fanout.types import FanoutRoute
 
 
-def _build_route_segments(route: FanoutRoute) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def _build_route_segments(route: FanoutRoute) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Build segment list for a route, including channel points for half-edge routes."""
     segs = []
     if route.channel_point:
@@ -27,13 +26,13 @@ def _build_route_segments(route: FanoutRoute) -> List[Tuple[Tuple[float, float],
 
 
 def _check_conflicts_on_layer(
-    pair_routes_to_check: List[FanoutRoute],
-    all_route_segs: List[Tuple[Tuple[float, float], Tuple[float, float]]],
-    all_net_ids: Set[int],
+    pair_routes_to_check: list[FanoutRoute],
+    all_route_segs: list[tuple[tuple[float, float], tuple[float, float]]],
+    all_net_ids: set[int],
     target_layer: str,
-    routes: List[FanoutRoute],
-    tracks: List[Dict],
-    existing_tracks: List[Dict],
+    routes: list[FanoutRoute],
+    tracks: list[dict],
+    existing_tracks: list[dict],
     min_spacing: float,
 ) -> bool:
     """Check if routes can move to target_layer without conflicts."""
@@ -48,41 +47,38 @@ def _check_conflicts_on_layer(
                     return True
 
     # Check against existing tracks on target layer
-    existing_on_layer = [e for e in existing_tracks if e['layer'] == target_layer]
+    existing_on_layer = [e for e in existing_tracks if e["layer"] == target_layer]
     for existing in existing_on_layer:
         for seg_start, seg_end in all_route_segs:
-            if check_segment_collision(seg_start, seg_end,
-                                       existing['start'], existing['end'],
-                                       min_spacing):
+            if check_segment_collision(seg_start, seg_end, existing["start"], existing["end"], min_spacing):
                 return True
 
     # Check against new tracks already on target layer (from other nets)
     for track in tracks:
-        if track['layer'] != target_layer:
+        if track["layer"] != target_layer:
             continue
-        if track.get('net_id') in all_net_ids:
+        if track.get("net_id") in all_net_ids:
             continue  # Skip our own tracks
         for seg_start, seg_end in all_route_segs:
-            if check_segment_collision(seg_start, seg_end,
-                                       track['start'], track['end'],
-                                       min_spacing):
+            if check_segment_collision(seg_start, seg_end, track["start"], track["end"], min_spacing):
                 return True
 
     return False
 
 
 def _move_connected_tracks(
-    seed_positions: List[Tuple[float, float]],
-    net_ids: Set[int],
+    seed_positions: list[tuple[float, float]],
+    net_ids: set[int],
     old_layer: str,
     new_layer: str,
-    tracks: List[Dict],
+    tracks: list[dict],
 ) -> None:
     """Walk connected tracks from seed positions and move them to new_layer.
 
     Uses flood-fill approach: start from pad positions, find connected tracks,
     add their other endpoints to the frontier, repeat until no more found.
     """
+
     def round_pos(pos):
         return (round(pos[0], 2), round(pos[1], 2))
 
@@ -98,13 +94,13 @@ def _move_connected_tracks(
 
         # Find all tracks on old_layer that connect to current_pos
         for track in tracks:
-            if track.get('net_id') not in net_ids:
+            if track.get("net_id") not in net_ids:
                 continue
-            if track['layer'] != old_layer:
+            if track["layer"] != old_layer:
                 continue
 
-            ts = round_pos(track['start'])
-            te = round_pos(track['end'])
+            ts = round_pos(track["start"])
+            te = round_pos(track["end"])
 
             if ts == current_pos:
                 if track not in tracks_to_move:
@@ -117,14 +113,14 @@ def _move_connected_tracks(
 
     # Move all found tracks
     for track in tracks_to_move:
-        track['layer'] = new_layer
+        track["layer"] = new_layer
 
 
 def rebalance_layers(
-    routes: List[FanoutRoute],
-    tracks: List[Dict],
-    existing_tracks: List[Dict],
-    layers: List[str],
+    routes: list[FanoutRoute],
+    tracks: list[dict],
+    existing_tracks: list[dict],
+    layers: list[str],
     min_spacing: float,
 ) -> int:
     """
@@ -160,14 +156,14 @@ def rebalance_layers(
                 edge_pair_ids.add(route.pair_id)
 
     # Categorize edge pairs by their escape direction (which edge they're on)
-    edge_pairs_by_dir: Dict[str, List[Tuple[float, str]]] = {'left': [], 'right': [], 'up': [], 'down': []}
+    edge_pairs_by_dir: dict[str, list[tuple[float, str]]] = {"left": [], "right": [], "up": [], "down": []}
     seen_pairs = set()
     for route in routes:
         if route.pair_id in edge_pair_ids and route.is_edge and route.pair_id not in seen_pairs:
             esc_dir = route.escape_dir
             if esc_dir and esc_dir in edge_pairs_by_dir:
                 seen_pairs.add(route.pair_id)
-                if esc_dir in ['left', 'right']:
+                if esc_dir in ["left", "right"]:
                     pos = route.pad_pos[1]  # Y position
                 else:
                     pos = route.pad_pos[0]  # X position
@@ -183,14 +179,13 @@ def rebalance_layers(
     target_pairs_on_fcu = int(avg_routes_per_layer / 2 + 0.5)
 
     # Distribute target pairs evenly across edge directions
-    directions = [d for d in ['up', 'down', 'left', 'right'] if edge_pairs_by_dir[d]]
+    directions = [d for d in ["up", "down", "left", "right"] if edge_pairs_by_dir[d]]
     pairs_to_keep_per_dir = {}
     if directions:
         base_per_dir = target_pairs_on_fcu // len(directions)
         remainder = target_pairs_on_fcu % len(directions)
         for i, d in enumerate(directions):
-            pairs_to_keep_per_dir[d] = min(base_per_dir + (1 if i < remainder else 0),
-                                           len(edge_pairs_by_dir[d]))
+            pairs_to_keep_per_dir[d] = min(base_per_dir + (1 if i < remainder else 0), len(edge_pairs_by_dir[d]))
 
     # Mark which pairs should stay on F.Cu - select evenly spaced pairs along each edge
     pairs_to_keep_on_fcu = set()
@@ -265,8 +260,9 @@ def rebalance_layers(
                 if not route.is_edge and try_layer == layers[0]:
                     continue
 
-                if _check_conflicts_on_layer(pair_routes, all_route_segs, all_net_ids, try_layer,
-                                             routes, tracks, existing_tracks, min_spacing):
+                if _check_conflicts_on_layer(
+                    pair_routes, all_route_segs, all_net_ids, try_layer, routes, tracks, existing_tracks, min_spacing
+                ):
                     continue
 
                 old_layer = pair_routes[0].layer
@@ -331,16 +327,27 @@ def rebalance_layers(
                     all_route_segs.extend(_build_route_segments(r))
                     all_net_ids.add(r.net_id)
 
-                candidate_layers = [l for l in all_layers if l != max_edge_layer and
-                                    edge_layer_counts[l] < edge_layer_counts[max_edge_layer]]
+                candidate_layers = [
+                    l
+                    for l in all_layers
+                    if l != max_edge_layer and edge_layer_counts[l] < edge_layer_counts[max_edge_layer]
+                ]
                 candidate_layers.sort(key=lambda l: (edge_layer_counts[l], total_layer_counts[l]))
 
                 for try_layer in candidate_layers:
                     if total_layer_counts[try_layer] + len(pair_routes) > avg_total + 2:
                         continue
 
-                    if not _check_conflicts_on_layer(pair_routes, all_route_segs, all_net_ids, try_layer,
-                                                     routes, tracks, existing_tracks, min_spacing):
+                    if not _check_conflicts_on_layer(
+                        pair_routes,
+                        all_route_segs,
+                        all_net_ids,
+                        try_layer,
+                        routes,
+                        tracks,
+                        existing_tracks,
+                        min_spacing,
+                    ):
                         old_layer = pair_routes[0].layer
                         for r in pair_routes:
                             r.layer = try_layer

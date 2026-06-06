@@ -21,17 +21,16 @@ Usage:
         print_blocking_analysis(blockers)
 """
 
-from typing import List, Tuple, Dict, Set, Optional
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
 
-from kicad_parser import PCBData, Segment, Via
-from routing_config import GridRouteConfig, GridCoord
-from routing_utils import build_layer_map
 from bresenham_utils import walk_line
+from kicad_parser import PCBData
+from routing_config import GridCoord, GridRouteConfig
+from routing_utils import build_layer_map
 
 
-def invalidate_obstacle_cache(cache: Dict, net_id: int) -> None:
+def invalidate_obstacle_cache(cache: dict, net_id: int) -> None:
     """Remove all cache entries for a net_id.
 
     Cache keys are (net_id, extra_clearance) tuples, so we need to remove
@@ -45,24 +44,25 @@ def invalidate_obstacle_cache(cache: Dict, net_id: int) -> None:
 @dataclass
 class BlockingInfo:
     """Information about how much a net blocks a route."""
+
     net_id: int
     net_name: str
     blocked_count: int  # Number of frontier cells blocked by this net
-    track_cells: int    # Cells blocked by tracks
-    via_cells: int      # Cells blocked by vias
-    unique_cells: int   # Cells where this net is the ONLY blocker
+    track_cells: int  # Cells blocked by tracks
+    via_cells: int  # Cells blocked by vias
+    unique_cells: int  # Cells where this net is the ONLY blocker
     near_target_cells: int  # Cells within proximity of target (more critical)
     near_source_cells: int  # Cells within proximity of source
-    details: str        # Human-readable details
+    details: str  # Human-readable details
 
 
 def compute_net_obstacle_cells(
     pcb_data: PCBData,
     net_id: int,
-    path: Optional[List[Tuple[int, int, int]]],
+    path: list[tuple[int, int, int]] | None,
     config: GridRouteConfig,
     extra_clearance: float = 0.0,
-) -> Tuple[Set[Tuple[int, int, int]], Set[Tuple[int, int, int]]]:
+) -> tuple[set[tuple[int, int, int]], set[tuple[int, int, int]]]:
     """
     Compute all obstacle cells for a net (tracks and vias).
 
@@ -76,8 +76,9 @@ def compute_net_obstacle_cells(
     # expansion = existing_track_half + clearance + routing_track_half
     expansion_mm = config.track_width / 2 + config.clearance + config.track_width / 2 + extra_clearance
     expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
-    via_expansion_grid = max(1, coord.to_grid_dist(
-        config.via_size / 2 + config.track_width / 2 + config.clearance + extra_clearance))
+    via_expansion_grid = max(
+        1, coord.to_grid_dist(config.via_size / 2 + config.track_width / 2 + config.clearance + extra_clearance)
+    )
 
     track_cells = set()
     via_cells = set()
@@ -92,7 +93,7 @@ def compute_net_obstacle_cells(
                 # Via - blocks all layers
                 for ex in range(-via_expansion_grid, via_expansion_grid + 1):
                     for ey in range(-via_expansion_grid, via_expansion_grid + 1):
-                        if ex*ex + ey*ey <= via_expansion_grid * via_expansion_grid:
+                        if ex * ex + ey * ey <= via_expansion_grid * via_expansion_grid:
                             for layer_idx in range(num_layers):
                                 via_cells.add((gx1 + ex, gy1 + ey, layer_idx))
             else:
@@ -125,7 +126,7 @@ def compute_net_obstacle_cells(
         gx, gy = coord.to_grid(via.x, via.y)
         for ex in range(-via_expansion_grid, via_expansion_grid + 1):
             for ey in range(-via_expansion_grid, via_expansion_grid + 1):
-                if ex*ex + ey*ey <= via_expansion_grid * via_expansion_grid:
+                if ex * ex + ey * ey <= via_expansion_grid * via_expansion_grid:
                     for layer_idx in range(num_layers):
                         via_cells.add((gx + ex, gy + ey, layer_idx))
 
@@ -133,16 +134,16 @@ def compute_net_obstacle_cells(
 
 
 def analyze_frontier_blocking(
-    blocked_cells: List[Tuple[int, int, int]],
+    blocked_cells: list[tuple[int, int, int]],
     pcb_data: PCBData,
     config: GridRouteConfig,
-    routed_net_paths: Dict[int, List[Tuple[int, int, int]]],
-    exclude_net_ids: Optional[Set[int]] = None,
+    routed_net_paths: dict[int, list[tuple[int, int, int]]],
+    exclude_net_ids: set[int] | None = None,
     extra_clearance: float = 0.0,
-    target_xy: Optional[Tuple[float, float]] = None,
-    source_xy: Optional[Tuple[float, float]] = None,
-    obstacle_cache: Optional[Dict[int, Tuple[Set, Set]]] = None,
-) -> List[BlockingInfo]:
+    target_xy: tuple[float, float] | None = None,
+    source_xy: tuple[float, float] | None = None,
+    obstacle_cache: dict[int, tuple[set, set]] | None = None,
+) -> list[BlockingInfo]:
     """
     Analyze which nets are blocking based on frontier data.
 
@@ -180,7 +181,7 @@ def analyze_frontier_blocking(
         source_gx, source_gy = coord.to_grid(source_xy[0], source_xy[1])
 
     # First pass: compute obstacle cells for each net and track which nets block each cell
-    cell_to_blockers: Dict[Tuple[int, int, int], Set[int]] = defaultdict(set)
+    cell_to_blockers: dict[tuple[int, int, int], set[int]] = defaultdict(set)
     net_blocking_data = {}  # net_id -> (track_cells, via_cells, blocking_track, blocking_via, blocking_total)
 
     # Use provided cache or create local one
@@ -196,9 +197,7 @@ def analyze_frontier_blocking(
         if cache_key in local_cache:
             track_cells, via_cells = local_cache[cache_key]
         else:
-            track_cells, via_cells = compute_net_obstacle_cells(
-                pcb_data, net_id, path, config, extra_clearance
-            )
+            track_cells, via_cells = compute_net_obstacle_cells(pcb_data, net_id, path, config, extra_clearance)
             # Store in cache for future calls
             local_cache[cache_key] = (track_cells, via_cells)
 
@@ -230,25 +229,27 @@ def analyze_frontier_blocking(
         for gx, gy, _ in blocking_total:
             if target_gx is not None:
                 dist_sq = (gx - target_gx) ** 2 + (gy - target_gy) ** 2
-                if dist_sq <= near_radius_grid ** 2:
+                if dist_sq <= near_radius_grid**2:
                     near_target_count += 1
             if source_gx is not None:
                 dist_sq = (gx - source_gx) ** 2 + (gy - source_gy) ** 2
-                if dist_sq <= near_radius_grid ** 2:
+                if dist_sq <= near_radius_grid**2:
                     near_source_count += 1
 
         details = f"{len(blocking_track)} track, {len(blocking_via)} via cells on frontier"
-        results.append(BlockingInfo(
-            net_id=net_id,
-            net_name=net_name,
-            blocked_count=len(blocking_total),
-            track_cells=len(blocking_track),
-            via_cells=len(blocking_via),
-            unique_cells=unique_count,
-            near_target_cells=near_target_count,
-            near_source_cells=near_source_count,
-            details=details
-        ))
+        results.append(
+            BlockingInfo(
+                net_id=net_id,
+                net_name=net_name,
+                blocked_count=len(blocking_total),
+                track_cells=len(blocking_track),
+                via_cells=len(blocking_via),
+                unique_cells=unique_count,
+                near_target_cells=near_target_count,
+                near_source_cells=near_source_count,
+                details=details,
+            )
+        )
 
     # Sort to prioritize nets that will actually open up routing:
     # 1. Nets with 100% unique blocking are top priority (guaranteed to help)
@@ -275,11 +276,11 @@ def analyze_frontier_blocking(
 
 
 def analyze_static_blockers(
-    blocked_cells: List[Tuple[int, int, int]],
+    blocked_cells: list[tuple[int, int, int]],
     pcb_data: PCBData,
     config: GridRouteConfig,
-    nets_to_route: Optional[Set[int]] = None,
-) -> Dict[str, List[str]]:
+    nets_to_route: set[int] | None = None,
+) -> dict[str, list[str]]:
     """
     Analyze what static obstacles are blocking the given cells.
 
@@ -294,9 +295,9 @@ def analyze_static_blockers(
     nets_to_route = nets_to_route or set()
 
     result = {
-        'pads': [],
-        'tracks': [],
-        'zone_cells': 0,
+        "pads": [],
+        "tracks": [],
+        "zone_cells": 0,
     }
 
     # Track which nets' pads are blocking
@@ -335,9 +336,9 @@ def analyze_static_blockers(
     # Format pad blockers
     for net_name, refs in sorted(pad_blockers.items(), key=lambda x: -len(x[1])):
         if len(refs) <= 3:
-            result['pads'].append(f"{net_name} ({', '.join(sorted(refs))})")
+            result["pads"].append(f"{net_name} ({', '.join(sorted(refs))})")
         else:
-            result['pads'].append(f"{net_name} ({len(refs)} pads)")
+            result["pads"].append(f"{net_name} ({len(refs)} pads)")
 
     # Check pre-existing tracks from other nets
     track_blockers = set()
@@ -369,7 +370,7 @@ def analyze_static_blockers(
                 track_blockers.add(net_name)
                 break
 
-    result['tracks'] = sorted(track_blockers)
+    result["tracks"] = sorted(track_blockers)
 
     # Check BGA exclusion zones
     zone_cells = 0
@@ -381,19 +382,19 @@ def analyze_static_blockers(
             gx, gy, _ = cell
             if gmin_x <= gx <= gmax_x and gmin_y <= gy <= gmax_y:
                 zone_cells += 1
-    result['zone_cells'] = zone_cells
+    result["zone_cells"] = zone_cells
 
     return result
 
 
 def print_blocking_analysis(
-    blockers: List[BlockingInfo],
+    blockers: list[BlockingInfo],
     max_display: int = 10,
     prefix: str = "  ",
-    blocked_cells: Optional[List[Tuple[int, int, int]]] = None,
-    pcb_data: Optional[PCBData] = None,
-    config: Optional[GridRouteConfig] = None,
-    nets_to_route: Optional[Set[int]] = None,
+    blocked_cells: list[tuple[int, int, int]] | None = None,
+    pcb_data: PCBData | None = None,
+    config: GridRouteConfig | None = None,
+    nets_to_route: set[int] | None = None,
 ):
     """Print blocking analysis results."""
     if not blockers:
@@ -402,15 +403,15 @@ def print_blocking_analysis(
         if blocked_cells and pcb_data and config:
             static = analyze_static_blockers(blocked_cells, pcb_data, config, nets_to_route)
             details = []
-            if static['pads']:
+            if static["pads"]:
                 details.append(f"pads: {', '.join(static['pads'][:5])}")
-                if len(static['pads']) > 5:
-                    details[-1] += f" (+{len(static['pads'])-5} more)"
-            if static['tracks']:
+                if len(static["pads"]) > 5:
+                    details[-1] += f" (+{len(static['pads']) - 5} more)"
+            if static["tracks"]:
                 details.append(f"pre-existing tracks: {', '.join(static['tracks'][:3])}")
-                if len(static['tracks']) > 3:
-                    details[-1] += f" (+{len(static['tracks'])-3} more)"
-            if static['zone_cells'] > 0:
+                if len(static["tracks"]) > 3:
+                    details[-1] += f" (+{len(static['tracks']) - 3} more)"
+            if static["zone_cells"] > 0:
                 details.append(f"BGA zone ({static['zone_cells']} cells)")
             if details:
                 print(f"{msg}")
@@ -447,7 +448,7 @@ def print_blocking_analysis(
         if info.near_source_cells > 0 or info.near_target_cells > 0:
             parts.append(f"near: {info.near_source_cells} src, {info.near_target_cells} tgt")
 
-        print(f"{prefix}  {i+1}. {info.net_name}: {', '.join(parts)}")
+        print(f"{prefix}  {i + 1}. {info.net_name}: {', '.join(parts)}")
 
     if len(blockers) > max_display:
         remaining = sum(b.blocked_count for b in blockers[max_display:])
@@ -455,11 +456,8 @@ def print_blocking_analysis(
 
 
 def filter_rippable_blockers(
-    blockers: List[BlockingInfo],
-    routed_results: Dict,
-    diff_pair_by_net_id: Dict,
-    get_canonical_net_id_func
-) -> Tuple[List[BlockingInfo], Set[int]]:
+    blockers: list[BlockingInfo], routed_results: dict, diff_pair_by_net_id: dict, get_canonical_net_id_func
+) -> tuple[list[BlockingInfo], set[int]]:
     """
     Filter blockers to only those that can be ripped (in routed_results),
     deduplicating by diff pair (P and N count as one).

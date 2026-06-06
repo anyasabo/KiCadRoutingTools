@@ -5,18 +5,17 @@ This wraps the existing RoutingVisualizer to implement the callback interface.
 """
 
 import time
-from typing import List, Tuple, Set, Optional
+from typing import List, Optional, Set, Tuple
 
 from .callback import VisualizationCallback, VisualizationData
-from .visualizer import RoutingVisualizer
 from .config import VisualizerConfig
+from .visualizer import RoutingVisualizer
 
 
 class PyGameVisualizationCallback(VisualizationCallback):
     """PyGame-based visualization callback implementation."""
 
-    def __init__(self, config: VisualizerConfig = None, auto_advance: bool = False,
-                 display_time: float = 0.0):
+    def __init__(self, config: VisualizerConfig = None, auto_advance: bool = False, display_time: float = 0.0):
         """Initialize the PyGame visualizer.
 
         Args:
@@ -31,16 +30,16 @@ class PyGameVisualizationCallback(VisualizationCallback):
 
         self._total_nets = 0
         self._grid_step = 0.1
-        self._layers: List[str] = []
+        self._layers: list[str] = []
         self._current_obstacles = None
-        self._display_wait_start: Optional[float] = None
+        self._display_wait_start: float | None = None
         self._waiting_for_next = False
 
         # In auto-advance mode, use maximum speed
         if auto_advance:
             self.visualizer.iterations_per_frame = self.config.max_speed
 
-    def on_routing_start(self, total_nets: int, layers: List[str], grid_step: float) -> None:
+    def on_routing_start(self, total_nets: int, layers: list[str], grid_step: float) -> None:
         """Called when batch routing starts."""
         self._total_nets = total_nets
         self._layers = layers
@@ -49,10 +48,16 @@ class PyGameVisualizationCallback(VisualizationCallback):
         print(f"\nStarting visualization with {total_nets} nets...")
         print("Controls: Space=pause, N=next net, R=restart, +/-=speed, Z=zoom to net, Q=quit")
 
-    def on_net_start(self, net_name: str, net_num: int, net_id: int,
-                     sources: List[Tuple[int, int, int]],
-                     targets: List[Tuple[int, int, int]],
-                     obstacles, vis_data: VisualizationData) -> None:
+    def on_net_start(
+        self,
+        net_name: str,
+        net_num: int,
+        net_id: int,
+        sources: list[tuple[int, int, int]],
+        targets: list[tuple[int, int, int]],
+        obstacles,
+        vis_data: VisualizationData,
+    ) -> None:
         """Called when a net starts routing."""
         self._current_obstacles = obstacles
         self._waiting_for_next = False
@@ -90,8 +95,9 @@ class PyGameVisualizationCallback(VisualizationCallback):
 
         return True
 
-    def on_net_complete(self, net_name: str, success: bool, path: Optional[List[Tuple[int, int, int]]],
-                        iterations: int, direction: str) -> bool:
+    def on_net_complete(
+        self, net_name: str, success: bool, path: list[tuple[int, int, int]] | None, iterations: int, direction: str
+    ) -> bool:
         """Called when a net finishes routing."""
         if success and path:
             self.visualizer.status_message = f"Path found ({direction}) - N=next"
@@ -132,7 +138,7 @@ class PyGameVisualizationCallback(VisualizationCallback):
 
     def on_routing_complete(self, successful: int, failed: int, total_iterations: int) -> None:
         """Called when all routing is complete."""
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"All nets processed: {successful} successful, {failed} failed")
         print(f"Total iterations: {total_iterations}")
 
@@ -166,8 +172,9 @@ class PyGameVisualizationCallback(VisualizationCallback):
         return self.visualizer.running
 
 
-def create_pygame_callback(layers: List[str] = None, auto_advance: bool = False,
-                           display_time: float = 0.0) -> PyGameVisualizationCallback:
+def create_pygame_callback(
+    layers: list[str] = None, auto_advance: bool = False, display_time: float = 0.0
+) -> PyGameVisualizationCallback:
     """Factory function to create a PyGame visualization callback.
 
     Args:

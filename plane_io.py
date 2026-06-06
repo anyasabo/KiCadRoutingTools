@@ -6,21 +6,26 @@ Handles reading zone information from PCB files and writing plane output.
 
 import re
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
 
 from kicad_parser import PCBData
-from kicad_writer import generate_via_sexpr, generate_segment_sexpr, move_copper_text_to_silkscreen, add_teardrops_to_pads
+from kicad_writer import (
+    add_teardrops_to_pads,
+    generate_segment_sexpr,
+    generate_via_sexpr,
+    move_copper_text_to_silkscreen,
+)
 
 
 @dataclass
 class ZoneInfo:
     """Information about a copper zone/pour."""
+
     net_id: int
     net_name: str
     layer: str
 
 
-def extract_zones(pcb_file: str) -> List[ZoneInfo]:
+def extract_zones(pcb_file: str) -> list[ZoneInfo]:
     """Extract zone information from a KiCad PCB file.
 
     Args:
@@ -29,7 +34,7 @@ def extract_zones(pcb_file: str) -> List[ZoneInfo]:
     Returns:
         List of ZoneInfo objects for each zone found
     """
-    with open(pcb_file, 'r', encoding='utf-8') as f:
+    with open(pcb_file, encoding="utf-8") as f:
         content = f.read()
 
     zones = []
@@ -37,27 +42,26 @@ def extract_zones(pcb_file: str) -> List[ZoneInfo]:
     zone_pattern = r'\(zone\s+\(net\s+(\d+)\)\s+\(net_name\s+"([^"]+)"\)\s+\(layer\s+"([^"]+)"\)'
 
     for match in re.finditer(zone_pattern, content):
-        zones.append(ZoneInfo(
-            net_id=int(match.group(1)),
-            net_name=match.group(2),
-            layer=match.group(3)
-        ))
+        zones.append(ZoneInfo(net_id=int(match.group(1)), net_name=match.group(2), layer=match.group(3)))
 
     if not zones:
         # KiCad 10: (zone (net "name") (layer "layer")) - no numeric ID, no net_name line
         zone_pattern_v10 = r'\(zone\s+\(net\s+"([^"]+)"\)\s+\(layer\s+"([^"]+)"\)'
         for match in re.finditer(zone_pattern_v10, content):
-            zones.append(ZoneInfo(
-                net_id=0,  # No numeric ID in KiCad 10
-                net_name=match.group(1),
-                layer=match.group(2)
-            ))
+            zones.append(
+                ZoneInfo(
+                    net_id=0,  # No numeric ID in KiCad 10
+                    net_name=match.group(1),
+                    layer=match.group(2),
+                )
+            )
 
     return zones
 
 
-def check_existing_zones(zones: List[ZoneInfo], target_layer: str, target_net_name: str,
-                          target_net_id: int, verbose: bool = False) -> Tuple[bool, bool, Optional[ZoneInfo]]:
+def check_existing_zones(
+    zones: list[ZoneInfo], target_layer: str, target_net_name: str, target_net_id: int, verbose: bool = False
+) -> tuple[bool, bool, ZoneInfo | None]:
     """Check for existing zones on the target layer.
 
     Args:
@@ -81,7 +85,9 @@ def check_existing_zones(zones: List[ZoneInfo], target_layer: str, target_net_na
                 return (True, True, zone)
             else:
                 # Different net - error
-                print(f"Error: Zone already exists on {target_layer} for DIFFERENT net '{zone.net_name}' (ID {zone.net_id})")
+                print(
+                    f"Error: Zone already exists on {target_layer} for DIFFERENT net '{zone.net_name}' (ID {zone.net_id})"
+                )
                 print(f"  Cannot create {target_net_name} zone on same layer. Aborting.")
                 return (False, False, None)
 
@@ -89,7 +95,7 @@ def check_existing_zones(zones: List[ZoneInfo], target_layer: str, target_net_na
     return (True, True, None)
 
 
-def resolve_net_id(pcb_data: PCBData, net_name: str) -> Optional[int]:
+def resolve_net_id(pcb_data: PCBData, net_name: str) -> int | None:
     """Resolve a net name to its ID.
 
     Args:
@@ -113,8 +119,9 @@ def resolve_net_id(pcb_data: PCBData, net_name: str) -> Optional[int]:
     return None
 
 
-def filter_nets_from_content(content: str, net_ids_to_exclude: List[int],
-                             net_names_to_exclude: List[str] = None) -> str:
+def filter_nets_from_content(
+    content: str, net_ids_to_exclude: list[int], net_names_to_exclude: list[str] = None
+) -> str:
     """
     Filter out segments and vias for specific net IDs from PCB file content.
 
@@ -131,7 +138,7 @@ def filter_nets_from_content(content: str, net_ids_to_exclude: List[int],
 
     net_id_set = set(net_ids_to_exclude) if net_ids_to_exclude else set()
     net_name_set = set(net_names_to_exclude) if net_names_to_exclude else set()
-    lines = content.split('\n')
+    lines = content.split("\n")
     result_lines = []
 
     i = 0
@@ -140,20 +147,24 @@ def filter_nets_from_content(content: str, net_ids_to_exclude: List[int],
         stripped = line.strip()
 
         # Check if this starts a segment or via (may be multi-line)
-        if stripped == '(segment' or stripped.startswith('(segment ') or \
-           stripped == '(via' or stripped.startswith('(via '):
+        if (
+            stripped == "(segment"
+            or stripped.startswith("(segment ")
+            or stripped == "(via"
+            or stripped.startswith("(via ")
+        ):
             # Collect all lines of this element
             element_lines = [line]
-            open_parens = line.count('(') - line.count(')')
+            open_parens = line.count("(") - line.count(")")
             while open_parens > 0 and i + 1 < len(lines):
                 i += 1
                 element_lines.append(lines[i])
-                open_parens += lines[i].count('(') - lines[i].count(')')
+                open_parens += lines[i].count("(") - lines[i].count(")")
 
             # Check if any line contains net ID to exclude
-            element_text = '\n'.join(element_lines)
+            element_text = "\n".join(element_lines)
             # Try KiCad 9 format: (net <id>)
-            net_match = re.search(r'\(net\s+(\d+)\)', element_text)
+            net_match = re.search(r"\(net\s+(\d+)\)", element_text)
             if net_match:
                 element_net_id = int(net_match.group(1))
                 if element_net_id in net_id_set:
@@ -174,11 +185,12 @@ def filter_nets_from_content(content: str, net_ids_to_exclude: List[int],
 
         i += 1
 
-    return '\n'.join(result_lines)
+    return "\n".join(result_lines)
 
 
-def filter_zones_from_content(content: str, zones_to_remove: List[Tuple[int, str]],
-                              zone_names_to_remove: List[Tuple[str, str]] = None) -> str:
+def filter_zones_from_content(
+    content: str, zones_to_remove: list[tuple[int, str]], zone_names_to_remove: list[tuple[str, str]] = None
+) -> str:
     """
     Filter out zones for specific (net_id, layer) pairs from PCB file content.
 
@@ -196,7 +208,7 @@ def filter_zones_from_content(content: str, zones_to_remove: List[Tuple[int, str
     # Build sets for fast lookup
     remove_set = set(zones_to_remove) if zones_to_remove else set()
     remove_name_set = set(zone_names_to_remove) if zone_names_to_remove else set()
-    lines = content.split('\n')
+    lines = content.split("\n")
     result_lines = []
 
     i = 0
@@ -205,20 +217,20 @@ def filter_zones_from_content(content: str, zones_to_remove: List[Tuple[int, str
         stripped = line.strip()
 
         # Check if this starts a zone (may be multi-line)
-        if stripped == '(zone' or stripped.startswith('(zone '):
+        if stripped == "(zone" or stripped.startswith("(zone "):
             # Collect all lines of this zone element
             element_lines = [line]
-            open_parens = line.count('(') - line.count(')')
+            open_parens = line.count("(") - line.count(")")
             while open_parens > 0 and i + 1 < len(lines):
                 i += 1
                 element_lines.append(lines[i])
-                open_parens += lines[i].count('(') - lines[i].count(')')
+                open_parens += lines[i].count("(") - lines[i].count(")")
 
             # Extract net_id and layer from the zone
-            element_text = '\n'.join(element_lines)
+            element_text = "\n".join(element_lines)
             layer_match = re.search(r'\(layer\s+"([^"]+)"\)', element_text)
             # Try KiCad 9: (net <id>)
-            net_match = re.search(r'\(net\s+(\d+)\)', element_text)
+            net_match = re.search(r"\(net\s+(\d+)\)", element_text)
 
             if net_match and layer_match:
                 zone_net_id = int(net_match.group(1))
@@ -244,20 +256,20 @@ def filter_zones_from_content(content: str, zones_to_remove: List[Tuple[int, str
 
         i += 1
 
-    return '\n'.join(result_lines)
+    return "\n".join(result_lines)
 
 
 def write_plane_output(
     input_file: str,
     output_file: str,
-    zone_sexpr: Optional[str],
-    new_vias: List[Dict],
-    new_segments: List[Dict],
-    exclude_net_ids: List[int] = None,
-    zones_to_replace: List[Tuple[int, str]] = None,
+    zone_sexpr: str | None,
+    new_vias: list[dict],
+    new_segments: list[dict],
+    exclude_net_ids: list[int] = None,
+    zones_to_replace: list[tuple[int, str]] = None,
     add_teardrops: bool = False,
-    net_id_to_name: Dict[int, str] = None,
-    zone_names_for_replace: List[Tuple[str, str]] = None
+    net_id_to_name: dict[int, str] = None,
+    zone_names_for_replace: list[tuple[str, str]] = None,
 ) -> bool:
     """Write the complete output file with zone (optional), vias, and traces.
 
@@ -276,7 +288,7 @@ def write_plane_output(
     Returns:
         True if successful, False otherwise
     """
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(input_file, encoding="utf-8") as f:
         content = f.read()
 
     # Move text from copper layers to silkscreen (prevents routing interference)
@@ -293,8 +305,7 @@ def write_plane_output(
 
     # Filter out zones to be replaced
     if zones_to_replace:
-        content = filter_zones_from_content(content, zones_to_replace,
-                                            zone_names_to_remove=zone_names_for_replace)
+        content = filter_zones_from_content(content, zones_to_replace, zone_names_to_remove=zone_names_for_replace)
 
     # Filter out excluded nets if specified
     if exclude_net_ids:
@@ -309,37 +320,39 @@ def write_plane_output(
 
     # Add vias
     for via in new_vias:
-        via_net_name = net_id_to_name.get(via['net_id']) if net_id_to_name else None
-        elements.append(generate_via_sexpr(
-            via['x'], via['y'], via['size'], via['drill'],
-            via['layers'], via['net_id'], net_name=via_net_name
-        ))
+        via_net_name = net_id_to_name.get(via["net_id"]) if net_id_to_name else None
+        elements.append(
+            generate_via_sexpr(
+                via["x"], via["y"], via["size"], via["drill"], via["layers"], via["net_id"], net_name=via_net_name
+            )
+        )
 
     # Add segments
     for seg in new_segments:
-        seg_net_name = net_id_to_name.get(seg['net_id']) if net_id_to_name else None
-        elements.append(generate_segment_sexpr(
-            seg['start'], seg['end'],
-            seg['width'], seg['layer'], seg['net_id'], net_name=seg_net_name
-        ))
+        seg_net_name = net_id_to_name.get(seg["net_id"]) if net_id_to_name else None
+        elements.append(
+            generate_segment_sexpr(
+                seg["start"], seg["end"], seg["width"], seg["layer"], seg["net_id"], net_name=seg_net_name
+            )
+        )
 
     if not elements:
         # Nothing to add, just copy the file
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(content)
         return True
 
-    routing_text = '\n'.join(elements)
+    routing_text = "\n".join(elements)
 
     # Insert before final paren
-    last_paren = content.rfind(')')
+    last_paren = content.rfind(")")
     if last_paren == -1:
         print("Error: Could not find closing parenthesis in PCB file")
         return False
 
-    new_content = content[:last_paren] + '\n' + routing_text + '\n' + content[last_paren:]
+    new_content = content[:last_paren] + "\n" + routing_text + "\n" + content[last_paren:]
 
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(new_content)
 
     return True

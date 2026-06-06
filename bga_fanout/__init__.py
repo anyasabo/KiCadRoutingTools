@@ -15,67 +15,62 @@ Key features:
 """
 
 import math
-from typing import List, Dict, Tuple, Optional, Set
-from collections import defaultdict
-
-import sys
 import os
+import sys
+from collections import defaultdict
+from typing import Dict, List, Optional, Set, Tuple
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kicad_parser import parse_kicad_pcb, Pad, Footprint, PCBData, find_components_by_type, KICAD_10_MIN_VERSION
-from net_queries import matches_net_filter
-from kicad_writer import add_tracks_and_vias_to_pcb
-from bga_fanout.types import (
-    create_track,
-    Channel,
-    BGAGrid,
-    DiffPairPads,
-    FanoutRoute,
+from bga_fanout.diff_pair import find_differential_pairs
+from bga_fanout.escape import (
+    assign_pair_escapes,
+    find_diff_pair_escape,
+    find_escape_channel,
 )
-from bga_fanout.layer_balance import rebalance_layers
-from bga_fanout.layer_assignment import assign_layers_smart
+from bga_fanout.geometry import (
+    calculate_exit_point,
+    calculate_jog_end,
+    create_45_stub,
+)
 from bga_fanout.grid import (
     analyze_bga_grid,
     calculate_channels,
     is_edge_pad,
 )
-from bga_fanout.geometry import (
-    create_45_stub,
-    calculate_exit_point,
-    calculate_jog_end,
-)
-from bga_fanout.escape import (
-    find_escape_channel,
-    find_diff_pair_escape,
-    assign_pair_escapes,
-)
+from bga_fanout.layer_assignment import assign_layers_smart
+from bga_fanout.layer_balance import rebalance_layers
 from bga_fanout.reroute import find_existing_fanouts, resolve_collisions
-from bga_fanout.diff_pair import find_differential_pairs
 from bga_fanout.tracks import (
-    detect_collisions,
     convert_segments_to_tracks,
+    detect_collisions,
     generate_tracks_from_routes,
 )
-
+from bga_fanout.types import (
+    BGAGrid,
+    Channel,
+    DiffPairPads,
+    FanoutRoute,
+    create_track,
+)
+from kicad_parser import KICAD_10_MIN_VERSION, Footprint, Pad, PCBData, find_components_by_type, parse_kicad_pcb
+from kicad_writer import add_tracks_and_vias_to_pcb
+from net_queries import matches_net_filter
 
 # Public API
 __all__ = [
-    'generate_bga_fanout',
-    'main',
+    "generate_bga_fanout",
+    "main",
     # Types re-exported for external use
-    'BGAGrid',
-    'Channel',
-    'FanoutRoute',
-    'DiffPairPads',
+    "BGAGrid",
+    "Channel",
+    "FanoutRoute",
+    "DiffPairPads",
 ]
 
 
 def calculate_jog_ends_for_routes(
-    routes: List[FanoutRoute],
-    layers: List[str],
-    jog_length: float,
-    track_width: float,
-    diff_pair_gap: float
+    routes: list[FanoutRoute], layers: list[str], jog_length: float, track_width: float, diff_pair_gap: float
 ) -> None:
     """
     Calculate jog_end positions for each route based on layer.
@@ -111,11 +106,11 @@ def calculate_jog_ends_for_routes(
                 jog_direction = 2 * layer_factor - 1  # -1 = left, +1 = right
 
             # Determine if this route is on the outside of the bend
-            if route.escape_dir in ['left', 'right']:
+            if route.escape_dir in ["left", "right"]:
                 # Horizontal escape, jog is in Y direction
                 for other in routes:
                     if other.pair_id == route.pair_id and other is not route:
-                        if route.escape_dir == 'right':
+                        if route.escape_dir == "right":
                             if jog_direction < 0:  # Jog goes up (-Y)
                                 is_outside = route.exit_pos[1] > other.exit_pos[1]
                             else:  # Jog goes down (+Y)
@@ -130,7 +125,7 @@ def calculate_jog_ends_for_routes(
                 # Vertical escape, jog is in X direction
                 for other in routes:
                     if other.pair_id == route.pair_id and other is not route:
-                        if route.escape_dir == 'down':
+                        if route.escape_dir == "down":
                             if jog_direction < 0:  # Jog goes right (+X)
                                 is_outside = route.exit_pos[0] < other.exit_pos[0]
                             else:  # Jog goes left (-X)
@@ -150,13 +145,13 @@ def calculate_jog_ends_for_routes(
             jog_length,
             is_diff_pair=route.pair_id is not None,
             is_outside_track=is_outside,
-            pair_spacing=pair_spacing
+            pair_spacing=pair_spacing,
         )
         route.jog_end = jog_end
         route.jog_extension = extension
 
 
-def print_route_statistics(routes: List[FanoutRoute]) -> None:
+def print_route_statistics(routes: list[FanoutRoute]) -> None:
     """Print statistics about the generated routes."""
     print(f"  Found {len(routes)} pads to fanout")
     paired_count = sum(1 for r in routes if r.pair_id is not None)
@@ -166,14 +161,14 @@ def print_route_statistics(routes: List[FanoutRoute]) -> None:
     escape_counts = defaultdict(int)
     for r in routes:
         escape_counts[r.escape_dir] += 1
-    print(f"  Escape direction distribution:")
-    for direction in ['left', 'right', 'up', 'down']:
+    print("  Escape direction distribution:")
+    for direction in ["left", "right", "up", "down"]:
         if escape_counts[direction] > 0:
             print(f"    {direction}: {escape_counts[direction]}")
 
     # Print all net names being fanned out
     net_names = sorted(set(r.pad.net_name for r in routes if r.pad.net_name))
-    print(f"  Nets being fanned out:")
+    print("  Nets being fanned out:")
     for name in net_names:
         print(f"    {name}")
 
@@ -182,12 +177,12 @@ POSITION_TOLERANCE = 0.01  # mm tolerance for position comparisons
 
 
 def reassign_on_channel_pads(
-    routes: List[FanoutRoute],
-    channels: List[Channel],
+    routes: list[FanoutRoute],
+    channels: list[Channel],
     grid: BGAGrid,
     num_layers: int,
     exit_margin: float,
-    footprint: 'Footprint' = None
+    footprint: "Footprint" = None,
 ) -> int:
     """
     Reassign on-channel pads to adjacent channels when their straight path is blocked.
@@ -244,19 +239,19 @@ def reassign_on_channel_pads(
         has_blocking_pad = False
         px, py = route.pad_pos
 
-        if route.escape_dir == 'left':
+        if route.escape_dir == "left":
             # Check for pads at same Y but smaller X (between pad and left exit)
             for other_x, other_y in all_pad_positions:
                 if abs(other_y - py) < POSITION_TOLERANCE and other_x < px - POSITION_TOLERANCE:
                     has_blocking_pad = True
                     break
-        elif route.escape_dir == 'right':
+        elif route.escape_dir == "right":
             # Check for pads at same Y but larger X
             for other_x, other_y in all_pad_positions:
                 if abs(other_y - py) < POSITION_TOLERANCE and other_x > px + POSITION_TOLERANCE:
                     has_blocking_pad = True
                     break
-        elif route.escape_dir == 'up':
+        elif route.escape_dir == "up":
             # Check for pads at same X but smaller Y
             for other_x, other_y in all_pad_positions:
                 if abs(other_x - px) < POSITION_TOLERANCE and other_y < py - POSITION_TOLERANCE:
@@ -277,17 +272,15 @@ def reassign_on_channel_pads(
 
     # Reassign each blocked route to an adjacent channel
     # Sort h_channels and v_channels once for efficiency
-    h_channels = sorted([c for c in channels if c.orientation == 'horizontal'],
-                       key=lambda c: c.position)
-    v_channels = sorted([c for c in channels if c.orientation == 'vertical'],
-                       key=lambda c: c.position)
+    h_channels = sorted([c for c in channels if c.orientation == "horizontal"], key=lambda c: c.position)
+    v_channels = sorted([c for c in channels if c.orientation == "vertical"], key=lambda c: c.position)
 
     for route in routes_to_reassign:
         orientation = route.channel.orientation
         channel_pos = route.channel.position
         escape_dir = route.escape_dir
 
-        if orientation == 'horizontal':
+        if orientation == "horizontal":
             # Find current channel index
             current_idx = None
             for i, c in enumerate(h_channels):
@@ -320,7 +313,7 @@ def reassign_on_channel_pads(
 
             # Create 45° jog from pad to new channel
             dy = new_channel.position - route.pad_pos[1]
-            if escape_dir == 'right':
+            if escape_dir == "right":
                 dx = abs(dy)  # Move right while jogging
             else:  # left
                 dx = -abs(dy)  # Move left while jogging
@@ -328,7 +321,7 @@ def reassign_on_channel_pads(
             jog_point = (route.pad_pos[0] + dx, new_channel.position)
 
             # Calculate new exit position
-            if escape_dir == 'right':
+            if escape_dir == "right":
                 new_exit = (grid.max_x + exit_margin, new_channel.position)
             else:  # left
                 new_exit = (grid.min_x - exit_margin, new_channel.position)
@@ -373,7 +366,7 @@ def reassign_on_channel_pads(
 
             # Create 45° jog from pad to new channel
             dx = new_channel.position - route.pad_pos[0]
-            if escape_dir == 'down':
+            if escape_dir == "down":
                 dy = abs(dx)  # Move down while jogging
             else:  # up
                 dy = -abs(dx)  # Move up while jogging
@@ -381,7 +374,7 @@ def reassign_on_channel_pads(
             jog_point = (new_channel.position, route.pad_pos[1] + dy)
 
             # Calculate new exit position
-            if escape_dir == 'down':
+            if escape_dir == "down":
                 new_exit = (new_channel.position, grid.max_y + exit_margin)
             else:  # up
                 new_exit = (new_channel.position, grid.min_y - exit_margin)
@@ -397,10 +390,7 @@ def reassign_on_channel_pads(
 
 
 def connect_adjacent_same_net_pads(
-    routes: List[FanoutRoute],
-    grid: BGAGrid,
-    track_width: float,
-    clearance: float
+    routes: list[FanoutRoute], grid: BGAGrid, track_width: float, clearance: float
 ) -> int:
     """
     Connect adjacent pads on the same net directly instead of separate fanouts.
@@ -419,7 +409,7 @@ def connect_adjacent_same_net_pads(
         Number of routes modified to connect to neighbors
     """
     # Group routes by net_id
-    routes_by_net: Dict[int, List[FanoutRoute]] = {}
+    routes_by_net: dict[int, list[FanoutRoute]] = {}
     for route in routes:
         net_id = route.net_id
         if net_id not in routes_by_net:
@@ -442,7 +432,7 @@ def connect_adjacent_same_net_pads(
             if i in connected_as_secondary:
                 continue
 
-            for j, route2 in enumerate(net_routes[i+1:], i+1):
+            for j, route2 in enumerate(net_routes[i + 1 :], i + 1):
                 if j in connected_as_secondary:
                     continue
 
@@ -478,10 +468,10 @@ def connect_adjacent_same_net_pads(
 def create_single_ended_route(
     pad: Pad,
     grid: BGAGrid,
-    channels: List[Channel],
-    layers: List[str],
+    channels: list[Channel],
+    layers: list[str],
     exit_margin: float,
-    force_orientation: Optional[str] = None
+    force_orientation: str | None = None,
 ) -> FanoutRoute:
     """
     Create a route for a single-ended (non-differential) signal.
@@ -498,17 +488,16 @@ def create_single_ended_route(
         FanoutRoute for this pad
     """
     channel, escape_dir = find_escape_channel(
-        pad.global_x, pad.global_y, grid, channels,
-        force_orientation=force_orientation
+        pad.global_x, pad.global_y, grid, channels, force_orientation=force_orientation
     )
     is_edge = channel is None
 
     if is_edge:
-        if escape_dir == 'right':
+        if escape_dir == "right":
             exit_pos = (grid.max_x + exit_margin, pad.global_y)
-        elif escape_dir == 'left':
+        elif escape_dir == "left":
             exit_pos = (grid.min_x - exit_margin, pad.global_y)
-        elif escape_dir == 'down':
+        elif escape_dir == "down":
             exit_pos = (pad.global_x, grid.max_y + exit_margin)
         else:  # up
             exit_pos = (pad.global_x, grid.min_y - exit_margin)
@@ -527,18 +516,18 @@ def create_single_ended_route(
         is_edge=is_edge,
         layer=layers[0],
         pair_id=None,
-        is_p=True
+        is_p=True,
     )
 
 
 def manage_vias(
-    routes: List[FanoutRoute],
-    pcb_data: 'PCBData',
+    routes: list[FanoutRoute],
+    pcb_data: "PCBData",
     top_layer: str,
     via_size: float,
     via_drill: float,
     clearance: float,
-) -> Tuple[List[Dict], List[Dict]]:
+) -> tuple[list[dict], list[dict]]:
     """
     Manage vias for fanout routes.
 
@@ -556,12 +545,13 @@ def manage_vias(
     Returns:
         Tuple of (vias_to_add, vias_to_remove)
     """
+
     def find_nearby_via(x: float, y: float, net_id: int, max_dist: float):
         """Find an existing via on the same net within max_dist of position."""
         for via in pcb_data.vias:
             if via.net_id != net_id:
                 continue
-            dist = math.sqrt((via.x - x)**2 + (via.y - y)**2)
+            dist = math.sqrt((via.x - x) ** 2 + (via.y - y) ** 2)
             if dist <= max_dist:
                 return via
         return None
@@ -569,14 +559,14 @@ def manage_vias(
     def would_overlap_existing_via(x: float, y: float, new_via_size: float) -> bool:
         """Check if a new via at (x,y) would overlap within clearance of any existing via."""
         for via in pcb_data.vias:
-            dist = math.sqrt((via.x - x)**2 + (via.y - y)**2)
+            dist = math.sqrt((via.x - x) ** 2 + (via.y - y) ** 2)
             min_dist = (via.size / 2) + (new_via_size / 2) + clearance
             if dist < min_dist:
                 return True
         return False
 
-    vias_to_add: List[Dict] = []
-    vias_to_remove: List[Dict] = []
+    vias_to_add: list[dict] = []
+    vias_to_remove: list[dict] = []
 
     # Check distance threshold: via is "at pad" if within via radius + small tolerance
     via_proximity_threshold = via_size / 2 + 0.1
@@ -591,22 +581,21 @@ def manage_vias(
         if route.layer == top_layer:
             # Routing on top layer - no via needed at pad
             if existing_via:
-                vias_to_remove.append({
-                    'x': existing_via.x,
-                    'y': existing_via.y
-                })
+                vias_to_remove.append({"x": existing_via.x, "y": existing_via.y})
         else:
             # Routing on inner/bottom layer - via needed only for SMD pads
             if not is_through_hole and not existing_via:
                 if not would_overlap_existing_via(pad_x, pad_y, via_size):
-                    vias_to_add.append({
-                        'x': pad_x,
-                        'y': pad_y,
-                        'size': via_size,
-                        'drill': via_drill,
-                        'layers': ['F.Cu', 'B.Cu'],
-                        'net_id': route.net_id
-                    })
+                    vias_to_add.append(
+                        {
+                            "x": pad_x,
+                            "y": pad_y,
+                            "size": via_size,
+                            "drill": via_drill,
+                            "layers": ["F.Cu", "B.Cu"],
+                            "net_id": route.net_id,
+                        }
+                    )
 
     if vias_to_add:
         print(f"  Adding {len(vias_to_add)} vias at pads on non-top layers")
@@ -616,22 +605,24 @@ def manage_vias(
     return vias_to_add, vias_to_remove
 
 
-def generate_bga_fanout(footprint: Footprint,
-                        pcb_data: PCBData,
-                        net_filter: Optional[List[str]] = None,
-                        diff_pair_patterns: Optional[List[str]] = None,
-                        layers: List[str] = None,
-                        track_width: float = 0.1,
-                        clearance: float = 0.1,
-                        diff_pair_gap: float = 0.101,
-                        exit_margin: float = 0.5,
-                        primary_escape: str = 'horizontal',
-                        force_escape_direction: bool = False,
-                        rebalance_escape: bool = False,
-                        via_size: float = 0.5,
-                        via_drill: float = 0.3,
-                        check_for_previous: bool = False,
-                        no_inner_top_layer: bool = False) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+def generate_bga_fanout(
+    footprint: Footprint,
+    pcb_data: PCBData,
+    net_filter: list[str] | None = None,
+    diff_pair_patterns: list[str] | None = None,
+    layers: list[str] = None,
+    track_width: float = 0.1,
+    clearance: float = 0.1,
+    diff_pair_gap: float = 0.101,
+    exit_margin: float = 0.5,
+    primary_escape: str = "horizontal",
+    force_escape_direction: bool = False,
+    rebalance_escape: bool = False,
+    via_size: float = 0.5,
+    via_drill: float = 0.3,
+    check_for_previous: bool = False,
+    no_inner_top_layer: bool = False,
+) -> tuple[list[dict], list[dict], list[dict]]:
     """
     Generate BGA fanout tracks for a footprint.
 
@@ -675,26 +666,24 @@ def generate_bga_fanout(footprint: Footprint,
     print(f"  Boundary: X[{grid.min_x:.2f}, {grid.max_x:.2f}], Y[{grid.min_y:.2f}, {grid.max_y:.2f}]")
 
     channels = calculate_channels(grid)
-    h_count = len([c for c in channels if c.orientation == 'horizontal'])
-    v_count = len([c for c in channels if c.orientation == 'vertical'])
+    h_count = len([c for c in channels if c.orientation == "horizontal"])
+    v_count = len([c for c in channels if c.orientation == "vertical"])
     print(f"  Channels: {h_count} horizontal, {v_count} vertical")
     print(f"  Available layers: {layers}")
 
     # Check for existing fanouts if requested
-    fanned_out_nets: Set[int] = set()
-    pre_occupied_exits: Dict[Tuple[str, str, float], str] = {}
+    fanned_out_nets: set[int] = set()
+    pre_occupied_exits: dict[tuple[str, str, float], str] = {}
     if check_for_previous:
-        fanned_out_nets, pre_occupied_exits = find_existing_fanouts(
-            pcb_data, footprint, grid, channels
-        )
+        fanned_out_nets, pre_occupied_exits = find_existing_fanouts(pcb_data, footprint, grid, channels)
         if fanned_out_nets:
             print(f"  Found {len(fanned_out_nets)} nets with existing fanouts (will skip)")
         if pre_occupied_exits:
             print(f"  Found {len(pre_occupied_exits)} occupied exit positions")
 
     # Find differential pairs if patterns specified
-    diff_pairs: Dict[str, DiffPairPads] = {}
-    pair_escape_assignments: Dict[str, Tuple[Optional[Channel], str]] = {}
+    diff_pairs: dict[str, DiffPairPads] = {}
+    pair_escape_assignments: dict[str, tuple[Channel | None, str]] = {}
     if diff_pair_patterns:
         diff_pairs = find_differential_pairs(footprint, diff_pair_patterns)
         original_pair_count = len(diff_pairs)
@@ -720,7 +709,10 @@ def generate_bga_fanout(footprint: Footprint,
         force_str = " (forced)" if force_escape_direction else ""
         print(f"  Assigning escape directions (primary: {primary_escape}{force_str})...")
         pair_escape_assignments, pair_layer_assignments = assign_pair_escapes(
-            diff_pairs, grid, channels, layers,
+            diff_pairs,
+            grid,
+            channels,
+            layers,
             primary_orientation=primary_escape,
             track_width=track_width,
             clearance=clearance,
@@ -728,11 +720,11 @@ def generate_bga_fanout(footprint: Footprint,
             via_size=via_size,
             rebalance=rebalance_escape,
             pre_occupied=pre_occupied_exits,
-            force_escape_direction=force_escape_direction
+            force_escape_direction=force_escape_direction,
         )
 
     # Build lookup from net_name to pair info
-    net_to_pair: Dict[str, Tuple[str, bool]] = {}  # net_name -> (pair_id, is_p)
+    net_to_pair: dict[str, tuple[str, bool]] = {}  # net_name -> (pair_id, is_p)
     for pair_id, pair in diff_pairs.items():
         if pair.p_pad:
             net_to_pair[pair.p_pad.net_name] = (pair_id, True)
@@ -762,22 +754,26 @@ def generate_bga_fanout(footprint: Footprint,
     use_adjacent_channels_v = half_pair_spacing > max_offset_v
 
     if use_adjacent_channels_h and use_adjacent_channels_v:
-        print(f"  Using adjacent-channel routing for diff pairs in both directions")
+        print("  Using adjacent-channel routing for diff pairs in both directions")
     elif use_adjacent_channels_h:
-        print(f"  Using adjacent-channel routing for horizontal escape (half_pair_spacing {half_pair_spacing:.3f}mm > max_offset_h {max_offset_h:.3f}mm)")
+        print(
+            f"  Using adjacent-channel routing for horizontal escape (half_pair_spacing {half_pair_spacing:.3f}mm > max_offset_h {max_offset_h:.3f}mm)"
+        )
     elif use_adjacent_channels_v:
-        print(f"  Using adjacent-channel routing for vertical escape (half_pair_spacing {half_pair_spacing:.3f}mm > max_offset_v {max_offset_v:.3f}mm)")
+        print(
+            f"  Using adjacent-channel routing for vertical escape (half_pair_spacing {half_pair_spacing:.3f}mm > max_offset_v {max_offset_v:.3f}mm)"
+        )
 
     # Build routes - process differential pairs together
-    routes: List[FanoutRoute] = []
-    processed_pairs: Set[str] = set()
+    routes: list[FanoutRoute] = []
+    processed_pairs: set[str] = set()
 
     for pad in footprint.pads:
         if not pad.net_name or pad.net_id == 0:
             continue
 
         # Skip unconnected nets (KiCad pins not connected in schematic)
-        if pad.net_name.lower().startswith('unconnected-'):
+        if pad.net_name.lower().startswith("unconnected-"):
             continue
 
         if net_filter and not matches_net_filter(pad.net_name, net_filter):
@@ -809,9 +805,7 @@ def generate_bga_fanout(footprint: Footprint,
                 channel, escape_dir = pair_escape_assignments[pair_id]
             else:
                 channel, escape_dir = find_diff_pair_escape(
-                    p_pad.global_x, p_pad.global_y,
-                    n_pad.global_x, n_pad.global_y,
-                    grid, channels
+                    p_pad.global_x, p_pad.global_y, n_pad.global_x, n_pad.global_y, grid, channels
                 )
             is_edge = channel is None
 
@@ -823,23 +817,27 @@ def generate_bga_fanout(footprint: Footprint,
             # In cross case, pads converge with 45° stubs (like edge pairs)
             is_cross_escape = False
             if channel:
-                if pads_horizontal and escape_dir in ['up', 'down']:
-                    is_cross_escape = True
-                elif not pads_horizontal and escape_dir in ['left', 'right']:
+                if (
+                    pads_horizontal
+                    and escape_dir in ["up", "down"]
+                    or not pads_horizontal
+                    and escape_dir in ["left", "right"]
+                ):
                     is_cross_escape = True
 
             # For adjacent-channel mode: find two channels, one on each side of the pads
             # Check per-direction whether adjacent channels are needed
             p_channel = channel
             n_channel = channel
-            needs_adjacent = ((escape_dir in ['left', 'right'] and use_adjacent_channels_h) or
-                              (escape_dir in ['up', 'down'] and use_adjacent_channels_v))
+            needs_adjacent = (escape_dir in ["left", "right"] and use_adjacent_channels_h) or (
+                escape_dir in ["up", "down"] and use_adjacent_channels_v
+            )
             if needs_adjacent and channel and not is_cross_escape and not is_edge:
                 # Find two adjacent channels for the diff pair - one above, one below the pads
-                if channel.orientation == 'horizontal':
+                if channel.orientation == "horizontal":
                     # Horizontal pads escaping left/right - use channels on OPPOSITE sides of pads
                     # One track goes UP to channel above, other goes DOWN to channel below
-                    h_channels = [c for c in channels if c.orientation == 'horizontal']
+                    h_channels = [c for c in channels if c.orientation == "horizontal"]
                     h_channels_sorted = sorted(h_channels, key=lambda c: c.position)
                     pad_y = (p_pad.global_y + n_pad.global_y) / 2
 
@@ -850,7 +848,7 @@ def generate_bga_fanout(footprint: Footprint,
                     if channels_above and channels_below:
                         # Use closest channel above for one pad, closest below for the other
                         ch_above = channels_above[-1]  # closest above
-                        ch_below = channels_below[0]   # closest below
+                        ch_below = channels_below[0]  # closest below
                         # P/t goes to channel below, N/c goes to channel above
                         p_channel = ch_below
                         n_channel = ch_above
@@ -879,7 +877,7 @@ def generate_bga_fanout(footprint: Footprint,
                         n_channel = channel
                 else:
                     # Vertical pads escaping up/down - use channels on OPPOSITE sides of pads
-                    v_channels = [c for c in channels if c.orientation == 'vertical']
+                    v_channels = [c for c in channels if c.orientation == "vertical"]
                     v_channels_sorted = sorted(v_channels, key=lambda c: c.position)
                     pad_x = (p_pad.global_x + n_pad.global_x) / 2
 
@@ -888,7 +886,7 @@ def generate_bga_fanout(footprint: Footprint,
                     channels_right = [c for c in v_channels_sorted if c.position > pad_x]
 
                     if channels_left and channels_right:
-                        ch_left = channels_left[-1]   # closest left
+                        ch_left = channels_left[-1]  # closest left
                         ch_right = channels_right[0]  # closest right
                         # P/t goes right, N/c goes left (consistent with horizontal)
                         p_channel = ch_right
@@ -929,7 +927,7 @@ def generate_bga_fanout(footprint: Footprint,
                 # Adjacent channel mode - each track centered in its own channel
                 p_offset = 0
                 n_offset = 0
-            elif channel and channel.orientation == 'horizontal' and not is_cross_escape:
+            elif channel and channel.orientation == "horizontal" and not is_cross_escape:
                 # Horizontal channel - pads are horizontally adjacent, escaping left/right
                 # Traces will be offset in Y (one above, one below channel center)
                 # Rule: pad closer to escape edge goes to inner side (closer to pads),
@@ -937,7 +935,7 @@ def generate_bga_fanout(footprint: Footprint,
                 channel_above = channel.position < p_pad.global_y
                 p_is_left = p_pad.global_x < n_pad.global_x
 
-                if escape_dir == 'left':
+                if escape_dir == "left":
                     # Escaping left - pad on left (smaller X) is closer to edge
                     pad_closer_to_edge_is_p = p_is_left
                 else:  # right
@@ -947,20 +945,20 @@ def generate_bga_fanout(footprint: Footprint,
                 if channel_above:
                     # Channel is above pads - inner side is below (positive offset)
                     if pad_closer_to_edge_is_p:
-                        p_offset = half_pair_spacing   # P closer to edge -> inner (below)
+                        p_offset = half_pair_spacing  # P closer to edge -> inner (below)
                         n_offset = -half_pair_spacing  # N further -> outer (above)
                     else:
                         p_offset = -half_pair_spacing  # P further -> outer (above)
-                        n_offset = half_pair_spacing   # N closer to edge -> inner (below)
+                        n_offset = half_pair_spacing  # N closer to edge -> inner (below)
                 else:
                     # Channel is below pads - inner side is above (negative offset)
                     if pad_closer_to_edge_is_p:
                         p_offset = -half_pair_spacing  # P closer to edge -> inner (above)
-                        n_offset = half_pair_spacing   # N further -> outer (below)
+                        n_offset = half_pair_spacing  # N further -> outer (below)
                     else:
-                        p_offset = half_pair_spacing   # P further -> outer (below)
+                        p_offset = half_pair_spacing  # P further -> outer (below)
                         n_offset = -half_pair_spacing  # N closer to edge -> inner (above)
-            elif channel and channel.orientation == 'vertical' and not is_cross_escape:
+            elif channel and channel.orientation == "vertical" and not is_cross_escape:
                 # Vertical channel - pads are vertically adjacent, escaping up/down
                 # Traces will be offset in X (one left, one right of channel center)
                 # Rule: pad closer to escape edge goes to inner side (closer to pads),
@@ -968,7 +966,7 @@ def generate_bga_fanout(footprint: Footprint,
                 channel_right = channel.position > p_pad.global_x
                 p_is_above = p_pad.global_y < n_pad.global_y
 
-                if escape_dir == 'up':
+                if escape_dir == "up":
                     # Escaping up - pad above (smaller Y) is closer to edge
                     pad_closer_to_edge_is_p = p_is_above
                 else:  # down
@@ -979,33 +977,36 @@ def generate_bga_fanout(footprint: Footprint,
                     # Channel is right of pads - inner side is left (negative offset)
                     if pad_closer_to_edge_is_p:
                         p_offset = -half_pair_spacing  # P closer to edge -> inner (left)
-                        n_offset = half_pair_spacing   # N further -> outer (right)
+                        n_offset = half_pair_spacing  # N further -> outer (right)
                     else:
-                        p_offset = half_pair_spacing   # P further -> outer (right)
+                        p_offset = half_pair_spacing  # P further -> outer (right)
                         n_offset = -half_pair_spacing  # N closer to edge -> inner (left)
                 else:
                     # Channel is left of pads - inner side is right (positive offset)
                     if pad_closer_to_edge_is_p:
-                        p_offset = half_pair_spacing   # P closer to edge -> inner (right)
+                        p_offset = half_pair_spacing  # P closer to edge -> inner (right)
                         n_offset = -half_pair_spacing  # N further -> outer (left)
                     else:
                         p_offset = -half_pair_spacing  # P further -> outer (left)
-                        n_offset = half_pair_spacing   # N closer to edge -> inner (right)
+                        n_offset = half_pair_spacing  # N closer to edge -> inner (right)
             else:
                 # Edge pads or cross-escape - no offset needed, they converge with 45° stubs
                 p_offset = 0
                 n_offset = 0
 
             # Check for half-edge case
-            is_half_edge = escape_dir.startswith('half_edge_')
+            is_half_edge = escape_dir.startswith("half_edge_")
             if is_half_edge:
-                actual_escape_dir = escape_dir.replace('half_edge_', '')
+                actual_escape_dir = escape_dir.replace("half_edge_", "")
             else:
                 actual_escape_dir = escape_dir
 
             # Create routes for both P and N
             # In adjacent-channel mode, p_channel and n_channel are different
-            for pad_info, offset, is_p_route, route_ch in [(p_pad, p_offset, True, p_channel), (n_pad, n_offset, False, n_channel)]:
+            for pad_info, offset, is_p_route, route_ch in [
+                (p_pad, p_offset, True, p_channel),
+                (n_pad, n_offset, False, n_channel),
+            ]:
                 if is_half_edge:
                     # Half-edge pair: one pad on edge, one inner
                     # Edge pad: goes straight out to BGA edge
@@ -1030,9 +1031,9 @@ def generate_bga_fanout(footprint: Footprint,
                     this_pad_is_edge = (is_p_route and edge_is_p) or (not is_p_route and not edge_is_p)
                     pair_spacing_full = 2 * half_pair_spacing
 
-                    if actual_escape_dir in ['left', 'right']:
+                    if actual_escape_dir in ["left", "right"]:
                         # Find channel between inner pad and edge pad (horizontally adjacent)
-                        h_channels = [c for c in channels if c.orientation == 'horizontal']
+                        h_channels = [c for c in channels if c.orientation == "horizontal"]
                         inner_y = inner_pad_info.global_y
                         edge_y = edge_pad_info.global_y
 
@@ -1059,7 +1060,7 @@ def generate_bga_fanout(footprint: Footprint,
                             # Edge pad: straight out horizontally
                             # stub_end = pad position (no stub needed)
                             stub_end = (edge_pad_info.global_x, edge_pad_info.global_y)
-                            if actual_escape_dir == 'right':
+                            if actual_escape_dir == "right":
                                 exit_pos = (grid.max_x + exit_margin, edge_pad_info.global_y)
                             else:
                                 exit_pos = (grid.min_x - exit_margin, edge_pad_info.global_y)
@@ -1072,7 +1073,7 @@ def generate_bga_fanout(footprint: Footprint,
                             channel_y = inner_channel.position
                             dy_to_channel = channel_y - inner_pad_info.global_y
 
-                            if actual_escape_dir == 'right':
+                            if actual_escape_dir == "right":
                                 # First 45°: pad -> channel entry point
                                 channel_pt_x = inner_pad_info.global_x + abs(dy_to_channel)
                                 channel_pt = (channel_pt_x, channel_y)
@@ -1116,7 +1117,7 @@ def generate_bga_fanout(footprint: Footprint,
 
                     else:
                         # Vertical escape - similar logic but X/Y swapped
-                        v_channels = [c for c in channels if c.orientation == 'vertical']
+                        v_channels = [c for c in channels if c.orientation == "vertical"]
                         inner_x = inner_pad_info.global_x
                         edge_x = edge_pad_info.global_x
 
@@ -1138,7 +1139,7 @@ def generate_bga_fanout(footprint: Footprint,
 
                         if this_pad_is_edge:
                             stub_end = (edge_pad_info.global_x, edge_pad_info.global_y)
-                            if actual_escape_dir == 'down':
+                            if actual_escape_dir == "down":
                                 exit_pos = (edge_pad_info.global_x, grid.max_y + exit_margin)
                             else:
                                 exit_pos = (edge_pad_info.global_x, grid.min_y - exit_margin)
@@ -1149,7 +1150,7 @@ def generate_bga_fanout(footprint: Footprint,
                             channel_x = inner_channel.position
                             dx_to_channel = channel_x - inner_pad_info.global_x
 
-                            if actual_escape_dir == 'down':
+                            if actual_escape_dir == "down":
                                 # First 45°: pad -> channel entry point
                                 channel_pt_y = inner_pad_info.global_y + abs(dx_to_channel)
                                 channel_pt = (channel_x, channel_pt_y)
@@ -1207,7 +1208,7 @@ def generate_bga_fanout(footprint: Footprint,
                         is_edge=this_pad_is_edge,
                         layer=layers[0],
                         pair_id=pair_id,
-                        is_p=is_p_route
+                        is_p=is_p_route,
                     )
                     routes.append(route)
                     continue  # Skip the normal edge/inner handling below
@@ -1239,11 +1240,11 @@ def generate_bga_fanout(footprint: Footprint,
                         dx_needed = target_x - pad_info.global_x
 
                         # At 45°, dy = dx (in absolute terms, direction depends on escape)
-                        if escape_dir == 'down':
+                        if escape_dir == "down":
                             # Going down: Y increases, stub goes at 45° down
                             stub_end_y = pad_info.global_y + abs(dx_needed)
                             stub_end_x = target_x
-                        elif escape_dir == 'up':
+                        elif escape_dir == "up":
                             # Going up: Y decreases, stub goes at 45° up
                             stub_end_y = pad_info.global_y - abs(dx_needed)
                             stub_end_x = target_x
@@ -1255,11 +1256,11 @@ def generate_bga_fanout(footprint: Footprint,
                         stub_end = (stub_end_x, stub_end_y)
 
                         # Exit position continues in escape direction
-                        if escape_dir == 'down':
+                        if escape_dir == "down":
                             exit_pos = (stub_end[0], grid.max_y + exit_margin)
-                        elif escape_dir == 'up':
+                        elif escape_dir == "up":
                             exit_pos = (stub_end[0], grid.min_y - exit_margin)
-                        elif escape_dir == 'right':
+                        elif escape_dir == "right":
                             exit_pos = (grid.max_x + exit_margin, stub_end[1])
                         else:  # left
                             exit_pos = (grid.min_x - exit_margin, stub_end[1])
@@ -1268,18 +1269,17 @@ def generate_bga_fanout(footprint: Footprint,
                         # Determine which pad is on the top vs bottom (smaller Y = top in KiCad)
                         p_is_top = p_pad.global_y < n_pad.global_y
 
-                        if use_adjacent_channels_h and escape_dir in ['left', 'right']:
+                        if use_adjacent_channels_h and escape_dir in ["left", "right"]:
                             # Adjacent-channel mode for cross-escape: use two ADJACENT channels
                             # Find the channel between the two pads, then use it and the next one
                             # on the escape side (both tracks go same direction, different adjacent channels)
-                            h_channels = [c for c in channels if c.orientation == 'horizontal']
+                            h_channels = [c for c in channels if c.orientation == "horizontal"]
                             h_channels_sorted = sorted(h_channels, key=lambda c: c.position)
 
                             # Find the channel between the two pads (between their Y positions)
                             top_pad_y = min(p_pad.global_y, n_pad.global_y)
                             bot_pad_y = max(p_pad.global_y, n_pad.global_y)
-                            channels_between = [c for c in h_channels_sorted
-                                               if top_pad_y < c.position < bot_pad_y]
+                            channels_between = [c for c in h_channels_sorted if top_pad_y < c.position < bot_pad_y]
 
                             if channels_between:
                                 # Use the channel between pads and one adjacent to it
@@ -1287,7 +1287,7 @@ def generate_bga_fanout(footprint: Footprint,
                                 between_idx = h_channels_sorted.index(between_ch)
 
                                 # Determine which pad is closer to the escape edge
-                                if escape_dir == 'left':
+                                if escape_dir == "left":
                                     p_closer_to_edge = p_pad.global_x < n_pad.global_x
                                 else:  # right
                                     p_closer_to_edge = p_pad.global_x > n_pad.global_x
@@ -1331,8 +1331,16 @@ def generate_bga_fanout(footprint: Footprint,
                                 # No channel between pads - use channels above and below
                                 channels_above = [c for c in h_channels_sorted if c.position < top_pad_y]
                                 channels_below = [c for c in h_channels_sorted if c.position > bot_pad_y]
-                                p_target_ch = channels_above[-1] if channels_above and p_is_top else (channels_below[0] if channels_below else None)
-                                n_target_ch = channels_below[0] if channels_below and not p_is_top else (channels_above[-1] if channels_above else None)
+                                p_target_ch = (
+                                    channels_above[-1]
+                                    if channels_above and p_is_top
+                                    else (channels_below[0] if channels_below else None)
+                                )
+                                n_target_ch = (
+                                    channels_below[0]
+                                    if channels_below and not p_is_top
+                                    else (channels_above[-1] if channels_above else None)
+                                )
 
                             # Initialize route_ch with default before conditional assignment
                             route_ch = channel
@@ -1344,12 +1352,16 @@ def generate_bga_fanout(footprint: Footprint,
                                 route_ch = n_target_ch
                             else:
                                 # Fallback to convergence if no separate channel available
-                                target_y = center_y - half_pair_spacing if (is_p_route and p_is_top) or (not is_p_route and not p_is_top) else center_y + half_pair_spacing
+                                target_y = (
+                                    center_y - half_pair_spacing
+                                    if (is_p_route and p_is_top) or (not is_p_route and not p_is_top)
+                                    else center_y + half_pair_spacing
+                                )
                                 # route_ch already initialized to channel above
 
                             # Route to target channel via 45° stub
                             dy_needed = target_y - pad_info.global_y
-                            if escape_dir == 'right':
+                            if escape_dir == "right":
                                 stub_end_x = pad_info.global_x + abs(dy_needed)
                             else:  # left
                                 stub_end_x = pad_info.global_x - abs(dy_needed)
@@ -1357,7 +1369,7 @@ def generate_bga_fanout(footprint: Footprint,
                             stub_end = (stub_end_x, stub_end_y)
 
                             # Exit continues horizontally to BGA edge
-                            if escape_dir == 'right':
+                            if escape_dir == "right":
                                 exit_pos = (grid.max_x + exit_margin, stub_end[1])
                             else:  # left
                                 exit_pos = (grid.min_x - exit_margin, stub_end[1])
@@ -1375,10 +1387,10 @@ def generate_bga_fanout(footprint: Footprint,
                             dy_needed = target_y - pad_info.global_y
 
                             # At 45°, dx = dy (in absolute terms)
-                            if escape_dir == 'right':
+                            if escape_dir == "right":
                                 stub_end_x = pad_info.global_x + abs(dy_needed)
                                 stub_end_y = target_y
-                            elif escape_dir == 'left':
+                            elif escape_dir == "left":
                                 stub_end_x = pad_info.global_x - abs(dy_needed)
                                 stub_end_y = target_y
                             else:
@@ -1387,21 +1399,19 @@ def generate_bga_fanout(footprint: Footprint,
 
                             stub_end = (stub_end_x, stub_end_y)
 
-                            if escape_dir == 'right':
+                            if escape_dir == "right":
                                 exit_pos = (grid.max_x + exit_margin, stub_end[1])
-                            elif escape_dir == 'left':
+                            elif escape_dir == "left":
                                 exit_pos = (grid.min_x - exit_margin, stub_end[1])
-                            elif escape_dir == 'down':
+                            elif escape_dir == "down":
                                 exit_pos = (stub_end[0], grid.max_y + exit_margin)
                             else:  # up
                                 exit_pos = (stub_end[0], grid.min_y - exit_margin)
                 else:
                     # Inner pads with aligned escape: 45° stub to channel with offset, then channel to exit
                     # In adjacent-channel mode, route_ch is the pad-specific channel
-                    stub_end = create_45_stub(pad_info.global_x, pad_info.global_y,
-                                             route_ch, escape_dir, offset)
-                    exit_pos = calculate_exit_point(stub_end, route_ch, escape_dir,
-                                                   grid, exit_margin, offset)
+                    stub_end = create_45_stub(pad_info.global_x, pad_info.global_y, route_ch, escape_dir, offset)
+                    exit_pos = calculate_exit_point(stub_end, route_ch, escape_dir, grid, exit_margin, offset)
 
                 # Use pre-assigned layer if available, otherwise default to layers[0]
                 assigned_layer = pair_layer_assignments.get(pair_id, layers[0]) if pair_layer_assignments else layers[0]
@@ -1416,15 +1426,13 @@ def generate_bga_fanout(footprint: Footprint,
                     is_edge=is_edge,
                     layer=assigned_layer,
                     pair_id=pair_id,
-                    is_p=is_p_route
+                    is_p=is_p_route,
                 )
                 routes.append(route)
         else:
             # Single-ended signal (not part of a pair)
             force_orient = primary_escape if force_escape_direction else None
-            route = create_single_ended_route(
-                pad, grid, channels, layers, exit_margin, force_orient
-            )
+            route = create_single_ended_route(pad, grid, channels, layers, exit_margin, force_orient)
             routes.append(route)
 
     print_route_statistics(routes)
@@ -1462,27 +1470,39 @@ def generate_bga_fanout(footprint: Footprint,
     # Validate no collisions
     min_spacing = track_width + clearance
     collision_count, collision_pairs = detect_collisions(tracks, existing_tracks, min_spacing)
-    failed_nets: List = []  # populated by resolve_collisions if there are collisions
+    failed_nets: list = []  # populated by resolve_collisions if there are collisions
 
     if collision_count > 0:
         print(f"  INFO: {collision_count} potential collisions detected (will attempt to resolve)")
         for t1, t2 in collision_pairs:
-            existing_marker = " (existing)" if t2.get('is_existing') else ""
+            existing_marker = " (existing)" if t2.get("is_existing") else ""
             print(f"    {t1['layer']} net{t1['net_id']}: {t1['start']}->{t1['end']}")
             print(f"    {t2['layer']} net{t2['net_id']}: {t2['start']}->{t2['end']}{existing_marker}")
 
         # Try to resolve collisions by reassigning layers or using alternate channels
-        print(f"  Attempting to resolve collisions...")
+        print("  Attempting to resolve collisions...")
         # Build net_id -> net_name mapping for error reporting
         net_id_to_name = {r.net_id: r.pad.net_name for r in routes if r.pad.net_name}
-        reassigned, failed_nets = resolve_collisions(routes, tracks, layers, track_width, clearance, diff_pair_gap,
-                                        existing_tracks, grid, channels, exit_margin, net_id_to_name, no_inner_top_layer)
+        reassigned, failed_nets = resolve_collisions(
+            routes,
+            tracks,
+            layers,
+            track_width,
+            clearance,
+            diff_pair_gap,
+            existing_tracks,
+            grid,
+            channels,
+            exit_margin,
+            net_id_to_name,
+            no_inner_top_layer,
+        )
 
         if failed_nets:
             print(f"\n  ERROR: Failed to route {len(failed_nets)} net(s):")
             for net_name in failed_nets:
                 print(f"    - {net_name}")
-            print(f"  These nets have been removed from the output.\n")
+            print("  These nets have been removed from the output.\n")
 
         if reassigned > 0:
             # Recount collisions after resolution
@@ -1490,7 +1510,7 @@ def generate_bga_fanout(footprint: Footprint,
             print(f"  After resolution: {new_collision_count} collisions remaining")
             collisions_remaining = new_collision_count
     else:
-        print(f"  Validated: No collisions")
+        print("  Validated: No collisions")
         collisions_remaining = 0
 
     # Post-resolution layer rebalancing for even distribution
@@ -1507,9 +1527,7 @@ def generate_bga_fanout(footprint: Footprint,
         print(f"    {layer}: {count} routes")
 
     # Via management: add vias where needed, remove unnecessary ones
-    vias_to_add, vias_to_remove = manage_vias(
-        routes, pcb_data, layers[0], via_size, via_drill, clearance
-    )
+    vias_to_add, vias_to_remove = manage_vias(routes, pcb_data, layers[0], via_size, via_drill, clearance)
 
     return tracks, vias_to_add, vias_to_remove, list(failed_nets)
 
@@ -1518,48 +1536,60 @@ def main():
     """Run BGA fanout generation."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Generate BGA fanout routing')
-    parser.add_argument('pcb', help='Input PCB file')
-    parser.add_argument('--output', '-o', default='kicad_files/fanout_test.kicad_pcb',
-                        help='Output PCB file')
-    parser.add_argument('--component', '-c', default=None,
-                        help='Component reference (auto-detected if not specified)')
-    parser.add_argument('--layers', '-l', nargs='+', default=['F.Cu', 'B.Cu'],
-                        help='Routing layers (default: F.Cu B.Cu)')
-    parser.add_argument('--track-width', '-w', type=float, default=0.3,
-                        help='Track width in mm (default: 0.3)')
-    parser.add_argument('--clearance', type=float, default=0.25,
-                        help='Track clearance in mm (default: 0.25)')
-    parser.add_argument('--via-size', type=float, default=0.5,
-                        help='Via outer diameter in mm (default: 0.5)')
-    parser.add_argument('--via-drill', type=float, default=0.3,
-                        help='Via drill size in mm (default: 0.3)')
-    parser.add_argument('--nets', '-n', nargs='*',
-                        help='Net patterns to include')
-    parser.add_argument('--diff-pairs', '-d', nargs='*',
-                        help='Differential pair net patterns (e.g., "*lvds*"). '
-                             'Matching P/N pairs will be routed together on same layer.')
-    parser.add_argument('--diff-pair-gap', type=float, default=0.1,
-                        help='Gap between differential pair traces in mm')
-    parser.add_argument('--exit-margin', type=float, default=0.5,
-                        help='Distance past BGA boundary')
-    parser.add_argument('--primary-escape', '-p', choices=['horizontal', 'vertical'],
-                        default='horizontal',
-                        help='Primary escape direction preference (default: horizontal). '
-                             'Pairs will use this direction first, then switch if channels are full.')
-    parser.add_argument('--force-escape-direction', action='store_true',
-                        help='Only use the primary escape direction (horizontal or vertical). '
-                             'Do not fall back to the secondary direction.')
-    parser.add_argument('--rebalance-escape', action='store_true',
-                        help='Rebalance escape directions after initial assignment. '
-                             'Pairs near secondary edge but far from primary edge will be '
-                             'reassigned to secondary direction for more even distribution.')
-    parser.add_argument('--check-for-previous', action='store_true',
-                        help='Check for existing fanout tracks and skip pads that are already '
-                             'fanned out. Also avoids occupied channel positions.')
-    parser.add_argument('--no-inner-top-layer', action='store_true',
-                        help='Prevent inner pads from using F.Cu (top layer). '
-                             'Use when there is not enough clearance on top layer for inner routes.')
+    parser = argparse.ArgumentParser(description="Generate BGA fanout routing")
+    parser.add_argument("pcb", help="Input PCB file")
+    parser.add_argument("--output", "-o", default="kicad_files/fanout_test.kicad_pcb", help="Output PCB file")
+    parser.add_argument("--component", "-c", default=None, help="Component reference (auto-detected if not specified)")
+    parser.add_argument(
+        "--layers", "-l", nargs="+", default=["F.Cu", "B.Cu"], help="Routing layers (default: F.Cu B.Cu)"
+    )
+    parser.add_argument("--track-width", "-w", type=float, default=0.3, help="Track width in mm (default: 0.3)")
+    parser.add_argument("--clearance", type=float, default=0.25, help="Track clearance in mm (default: 0.25)")
+    parser.add_argument("--via-size", type=float, default=0.5, help="Via outer diameter in mm (default: 0.5)")
+    parser.add_argument("--via-drill", type=float, default=0.3, help="Via drill size in mm (default: 0.3)")
+    parser.add_argument("--nets", "-n", nargs="*", help="Net patterns to include")
+    parser.add_argument(
+        "--diff-pairs",
+        "-d",
+        nargs="*",
+        help='Differential pair net patterns (e.g., "*lvds*"). '
+        "Matching P/N pairs will be routed together on same layer.",
+    )
+    parser.add_argument("--diff-pair-gap", type=float, default=0.1, help="Gap between differential pair traces in mm")
+    parser.add_argument("--exit-margin", type=float, default=0.5, help="Distance past BGA boundary")
+    parser.add_argument(
+        "--primary-escape",
+        "-p",
+        choices=["horizontal", "vertical"],
+        default="horizontal",
+        help="Primary escape direction preference (default: horizontal). "
+        "Pairs will use this direction first, then switch if channels are full.",
+    )
+    parser.add_argument(
+        "--force-escape-direction",
+        action="store_true",
+        help="Only use the primary escape direction (horizontal or vertical). "
+        "Do not fall back to the secondary direction.",
+    )
+    parser.add_argument(
+        "--rebalance-escape",
+        action="store_true",
+        help="Rebalance escape directions after initial assignment. "
+        "Pairs near secondary edge but far from primary edge will be "
+        "reassigned to secondary direction for more even distribution.",
+    )
+    parser.add_argument(
+        "--check-for-previous",
+        action="store_true",
+        help="Check for existing fanout tracks and skip pads that are already "
+        "fanned out. Also avoids occupied channel positions.",
+    )
+    parser.add_argument(
+        "--no-inner-top-layer",
+        action="store_true",
+        help="Prevent inner pads from using F.Cu (top layer). "
+        "Use when there is not enough clearance on top layer for inner routes.",
+    )
 
     args = parser.parse_args()
 
@@ -1568,7 +1598,7 @@ def main():
 
     # Auto-detect BGA component if not specified
     if args.component is None:
-        bga_components = find_components_by_type(pcb_data, 'BGA')
+        bga_components = find_components_by_type(pcb_data, "BGA")
         if bga_components:
             args.component = bga_components[0].reference
             print(f"Auto-detected BGA component: {args.component}")
@@ -1606,7 +1636,7 @@ def main():
         via_size=args.via_size,
         via_drill=args.via_drill,
         check_for_previous=args.check_for_previous,
-        no_inner_top_layer=args.no_inner_top_layer
+        no_inner_top_layer=args.no_inner_top_layer,
     )
 
     if tracks:
@@ -1616,8 +1646,9 @@ def main():
         if vias_to_remove:
             print(f"  Removing {len(vias_to_remove)} vias")
         kicad_v10_names = pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None
-        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias_to_add, vias_to_remove,
-                                   net_id_to_name=kicad_v10_names)
+        add_tracks_and_vias_to_pcb(
+            args.pcb, args.output, tracks, vias_to_add, vias_to_remove, net_id_to_name=kicad_v10_names
+        )
         print("Done!")
     else:
         print("\nNo fanout tracks generated")
@@ -1625,5 +1656,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

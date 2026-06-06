@@ -8,5 +8,5 @@ See qfn_fanout/README.md for documentation.
 
 from qfn_fanout import main
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

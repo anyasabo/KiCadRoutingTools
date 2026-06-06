@@ -5,14 +5,16 @@ Functions for calculating fanout stub positions and angles.
 """
 
 import math
-from typing import Tuple
 
-from qfn_fanout.types import QFNLayout, PadInfo
+from qfn_fanout.types import PadInfo, QFNLayout
 
 
-def calculate_fanout_stub(pad_info: PadInfo, layout: QFNLayout,
-                          straight_length: float, max_diagonal_length: float,
-                          ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+def calculate_fanout_stub(
+    pad_info: PadInfo,
+    layout: QFNLayout,
+    straight_length: float,
+    max_diagonal_length: float,
+) -> tuple[tuple[float, float], tuple[float, float]]:
     """
     Calculate fanout stub with two segments: straight then 45 degrees.
 
@@ -36,7 +38,7 @@ def calculate_fanout_stub(pad_info: PadInfo, layout: QFNLayout,
     pad_x, pad_y = pad.global_x, pad.global_y
     side = pad_info.side
 
-    if side == 'center':
+    if side == "center":
         return ((pad_x, pad_y), (pad_x, pad_y))
 
     # Escape direction perpendicular to edge
@@ -47,7 +49,7 @@ def calculate_fanout_stub(pad_info: PadInfo, layout: QFNLayout,
     corner_y = pad_y + esc_y * straight_length
 
     # Calculate position along edge (0 = center, 1 = corner)
-    if side in ('top', 'bottom'):
+    if side in ("top", "bottom"):
         half_width = layout.width / 2
         offset_from_center = abs(pad_x - layout.center_x)
         edge_position = offset_from_center / half_width if half_width > 0 else 0
@@ -67,7 +69,7 @@ def calculate_fanout_stub(pad_info: PadInfo, layout: QFNLayout,
     # Distance along 45 degree line = diagonal_length, so each component = diagonal_length / sqrt(2)
     diag_component = diagonal_length / math.sqrt(2)
 
-    if side in ('top', 'bottom'):
+    if side in ("top", "bottom"):
         # Horizontal edge - fan left/right based on position
         offset_from_center = pad_x - layout.center_x
         fan_dir = 1 if offset_from_center >= 0 else -1

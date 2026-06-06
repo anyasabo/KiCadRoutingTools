@@ -7,6 +7,7 @@ PCB Editor menu system.
 
 import os
 import sys
+
 import pcbnew
 import wx
 
@@ -90,17 +91,14 @@ class KiCadRoutingToolsPlugin(pcbnew.ActionPlugin):
         try:
             self._run_plugin()
         except Exception as e:
-            wx.MessageBox(
-                f"Error running KiCad Routing Tools:\n\n{e}",
-                "Routing Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"Error running KiCad Routing Tools:\n\n{e}", "Routing Error", wx.OK | wx.ICON_ERROR)
 
     def _run_plugin(self):
         """Main plugin logic."""
         # Ensure scipy/shapely are available (KiCad doesn't bundle them, and
         # PCM-installed plugins can't pip-install during install).
         from .deps_check import ensure_dependencies
+
         parent_for_deps = wx.GetTopLevelWindows()[0] if wx.GetTopLevelWindows() else None
         if not ensure_dependencies(parent_for_deps):
             return
@@ -108,9 +106,7 @@ class KiCadRoutingToolsPlugin(pcbnew.ActionPlugin):
         board = pcbnew.GetBoard()
         if board is None:
             wx.MessageBox(
-                "No board is currently open.\nPlease open a PCB file first.",
-                "No Board",
-                wx.OK | wx.ICON_WARNING
+                "No board is currently open.\nPlease open a PCB file first.", "No Board", wx.OK | wx.ICON_WARNING
             )
             return
 
@@ -119,17 +115,14 @@ class KiCadRoutingToolsPlugin(pcbnew.ActionPlugin):
 
         # Import our modules
         from kicad_parser import build_pcb_data_from_board
+
         from .swig_gui import RoutingDialog
 
         # Build PCBData directly from pcbnew's in-memory board (fast, no file I/O)
         try:
             pcb_data = build_pcb_data_from_board(board)
         except Exception as e:
-            wx.MessageBox(
-                f"Failed to read board data:\n\n{e}",
-                "Board Read Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"Failed to read board data:\n\n{e}", "Board Read Error", wx.OK | wx.ICON_ERROR)
             return
 
         # Collect the nets the user has selected in the PCB editor so the
@@ -141,13 +134,15 @@ class KiCadRoutingToolsPlugin(pcbnew.ActionPlugin):
 
         # Check if we have saved settings for this board
         saved_settings = None
-        if (KiCadRoutingToolsPlugin._saved_board_filename == board_filename
-                and KiCadRoutingToolsPlugin._saved_settings is not None):
+        if (
+            KiCadRoutingToolsPlugin._saved_board_filename == board_filename
+            and KiCadRoutingToolsPlugin._saved_settings is not None
+        ):
             saved_settings = KiCadRoutingToolsPlugin._saved_settings
 
-        dlg = RoutingDialog(parent, pcb_data, board_filename,
-                            saved_settings=saved_settings,
-                            preselected_nets=preselected_nets)
+        dlg = RoutingDialog(
+            parent, pcb_data, board_filename, saved_settings=saved_settings, preselected_nets=preselected_nets
+        )
 
         dlg.ShowModal()
 

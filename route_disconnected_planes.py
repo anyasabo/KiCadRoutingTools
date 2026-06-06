@@ -15,36 +15,37 @@ Usage:
         --nets GND --plane-layers B.Cu
 """
 
-import sys
-import os
 import argparse
-from typing import List, Tuple, Dict, Optional
+import os
+import sys
 
 # Run startup checks first
 from startup_checks import run_all_checks
+
 run_all_checks()
 
-from kicad_parser import parse_kicad_pcb, PCBData, Segment, Via, KICAD_10_MIN_VERSION
-from kicad_writer import generate_segment_sexpr, generate_gr_line_sexpr, generate_via_sexpr
-from routing_config import GridRouteConfig, GridCoord
-from plane_io import extract_zones, ZoneInfo
-from plane_region_connector import route_disconnected_regions, build_base_obstacles, add_route_to_obstacles
-import routing_defaults as defaults
 import re
 
+import routing_defaults as defaults
+from kicad_parser import KICAD_10_MIN_VERSION, PCBData, Segment, Via, parse_kicad_pcb
+from kicad_writer import generate_gr_line_sexpr, generate_segment_sexpr, generate_via_sexpr
+from plane_io import extract_zones
+from plane_region_connector import build_base_obstacles, route_disconnected_regions
+from routing_config import GridRouteConfig
 
-def extract_zone_properties(input_file: str) -> Dict[Tuple[str, str], Dict]:
+
+def extract_zone_properties(input_file: str) -> dict[tuple[str, str], dict]:
     """
     Extract zone properties (clearance, min_thickness) from PCB file.
 
     Returns:
         Dict mapping (net_name, layer) -> {'clearance': float, 'min_thickness': float}
     """
-    with open(input_file, 'r') as f:
+    with open(input_file) as f:
         content = f.read()
 
     zone_props = {}
-    zone_pattern = r'\(zone\s*\n\s*\(net\s+\d+\)'
+    zone_pattern = r"\(zone\s*\n\s*\(net\s+\d+\)"
     matches = list(re.finditer(zone_pattern, content))
 
     for m in matches:
@@ -52,9 +53,9 @@ def extract_zone_properties(input_file: str) -> Dict[Tuple[str, str], Dict]:
         depth = 0
         end = start
         for i, c in enumerate(content[start:]):
-            if c == '(':
+            if c == "(":
                 depth += 1
-            elif c == ')':
+            elif c == ")":
                 depth -= 1
                 if depth == 0:
                     end = start + i + 1
@@ -64,24 +65,22 @@ def extract_zone_properties(input_file: str) -> Dict[Tuple[str, str], Dict]:
 
         net_name = re.search(r'\(net_name\s+"([^"]*)"\)', zone_text)
         layer = re.search(r'\(layer\s+"([^"]+)"\)', zone_text)
-        clearance = re.search(r'\(clearance\s+([\d.]+)\)', zone_text)
-        min_thick = re.search(r'\(min_thickness\s+([\d.]+)\)', zone_text)
+        clearance = re.search(r"\(clearance\s+([\d.]+)\)", zone_text)
+        min_thick = re.search(r"\(min_thickness\s+([\d.]+)\)", zone_text)
 
         if net_name and layer:
             key = (net_name.group(1), layer.group(1))
             zone_props[key] = {
-                'clearance': float(clearance.group(1)) if clearance else 0.2,
-                'min_thickness': float(min_thick.group(1)) if min_thick else 0.1
+                "clearance": float(clearance.group(1)) if clearance else 0.2,
+                "min_thickness": float(min_thick.group(1)) if min_thick else 0.1,
             }
 
     return zone_props
 
 
 def auto_detect_zones(
-    input_file: str,
-    filter_nets: Optional[List[str]] = None,
-    filter_layers: Optional[List[str]] = None
-) -> List[Tuple[str, str]]:
+    input_file: str, filter_nets: list[str] | None = None, filter_layers: list[str] | None = None
+) -> list[tuple[str, str]]:
     """
     Auto-detect zone net/layer pairs from the PCB file.
 
@@ -99,7 +98,7 @@ def auto_detect_zones(
         return []
 
     # Build list of (net_name, layer) pairs
-    zone_pairs: List[Tuple[str, str]] = []
+    zone_pairs: list[tuple[str, str]] = []
     seen = set()
 
     for zone in zones:
@@ -120,8 +119,8 @@ def auto_detect_zones(
 def route_planes(
     input_file: str,
     output_file: str,
-    net_names: List[str],
-    plane_layers: List[str],
+    net_names: list[str],
+    plane_layers: list[str],
     track_width: float = defaults.TRACK_WIDTH,
     clearance: float = defaults.CLEARANCE,
     zone_clearance: float = defaults.PLANE_ZONE_CLEARANCE,
@@ -138,10 +137,10 @@ def route_planes(
     verbose: bool = False,
     dry_run: bool = False,
     debug_lines: bool = False,
-    routing_layers: Optional[List[str]] = None,
-    pcb_data: Optional[PCBData] = None,
-    return_results: bool = False
-) -> Tuple[int, int]:
+    routing_layers: list[str] | None = None,
+    pcb_data: PCBData | None = None,
+    return_results: bool = False,
+) -> tuple[int, int]:
     """
     Route between disconnected regions in power plane zones.
 
@@ -200,7 +199,7 @@ def route_planes(
         min_x + board_edge_clearance,
         min_y + board_edge_clearance,
         max_x - board_edge_clearance,
-        max_y - board_edge_clearance
+        max_y - board_edge_clearance,
     )
 
     # Build routing config
@@ -210,19 +209,19 @@ def route_planes(
         via_size=via_size,
         via_drill=via_drill,
         grid_step=grid_step,
-        board_edge_clearance=board_edge_clearance
+        board_edge_clearance=board_edge_clearance,
     )
 
     # Auto-detect routing layers if not specified
     if routing_layers is None:
         routing_layers = pcb_data.board_info.copper_layers
         if not routing_layers:
-            routing_layers = ['F.Cu', 'B.Cu']  # Fallback
+            routing_layers = ["F.Cu", "B.Cu"]  # Fallback
     print(f"Routing layers: {', '.join(routing_layers)}")
 
-    all_new_segments: List[Dict] = []
-    all_new_vias: List[Dict] = []
-    all_debug_lines: List[str] = []
+    all_new_segments: list[dict] = []
+    all_new_vias: list[dict] = []
+    all_debug_lines: list[str] = []
     total_routes = 0
     total_regions = 0
     total_vias = 0
@@ -230,16 +229,16 @@ def route_planes(
     # Extract per-zone clearances and min_thickness from PCB file
     zone_props = extract_zone_properties(input_file)
     if verbose:
-        print(f"Zone properties:")
+        print("Zone properties:")
         for (net, layer), props in zone_props.items():
             print(f"  {net} on {layer}: clearance={props['clearance']}mm, min_thickness={props['min_thickness']}mm")
 
-    print(f"\n{'='*60}")
-    print(f"Routing disconnected plane regions")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("Routing disconnected plane regions")
+    print(f"{'=' * 60}")
 
     # Group zones by net - process each net once with all its zone layers
-    unique_nets: Dict[int, Tuple[str, Set[str]]] = {}  # net_id -> (net_name, set of layers)
+    unique_nets: dict[int, tuple[str, Set[str]]] = {}  # net_id -> (net_name, set of layers)
     for net_name, plane_layer, net_id in zip(net_names, plane_layers, net_ids):
         if net_id not in unique_nets:
             unique_nets[net_id] = (net_name, set())
@@ -248,11 +247,11 @@ def route_planes(
     for net_id, (net_name, net_zone_layers) in unique_nets.items():
         # Build per-layer zone clearances for all layers with zones for this net
         # These are used in flood fill to determine what the zone fill connects
-        zone_clearances: Dict[str, float] = {}
+        zone_clearances: dict[str, float] = {}
         for layer in net_zone_layers:
             zk = (net_name, layer)
             if zk in zone_props:
-                zone_clearances[layer] = zone_props[zk]['clearance']
+                zone_clearances[layer] = zone_props[zk]["clearance"]
 
         # Use maximum clearance as fallback (per-layer clearances used in flood fill)
         max_zone_clearance = max(zone_clearances.values()) if zone_clearances else zone_clearance
@@ -265,7 +264,7 @@ def route_planes(
         print(f"\n[{net_name}] on {layers_str} (clearances: {clearances_str}):")
 
         # Build obstacle map for this net
-        print(f"  Building obstacle map...", end=" ", flush=True)
+        print("  Building obstacle map...", end=" ", flush=True)
         base_obstacles, layer_map = build_base_obstacles(
             exclude_net_ids={net_id},
             routing_layers=routing_layers,
@@ -273,7 +272,7 @@ def route_planes(
             config=config,
             track_width=min_track_width,
             track_via_clearance=track_via_clearance,
-            hole_to_hole_clearance=hole_to_hole_clearance
+            hole_to_hole_clearance=hole_to_hole_clearance,
         )
         print("done")
 
@@ -295,7 +294,7 @@ def route_planes(
             max_iterations=max_iterations,
             verbose=verbose,
             zone_layers=net_zone_layers,
-            zone_clearances=zone_clearances
+            zone_clearances=zone_clearances,
         )
 
         if routes_added > 0:
@@ -314,27 +313,37 @@ def route_planes(
 
             # Add segments to pcb_data so subsequent nets see them as obstacles
             for s in region_segments:
-                start = s['start']
-                end = s['end']
-                pcb_data.segments.append(Segment(
-                    start_x=start[0], start_y=start[1],
-                    end_x=end[0], end_y=end[1],
-                    width=s['width'], layer=s['layer'], net_id=s['net_id']
-                ))
+                start = s["start"]
+                end = s["end"]
+                pcb_data.segments.append(
+                    Segment(
+                        start_x=start[0],
+                        start_y=start[1],
+                        end_x=end[0],
+                        end_y=end[1],
+                        width=s["width"],
+                        layer=s["layer"],
+                        net_id=s["net_id"],
+                    )
+                )
 
             # Add vias to pcb_data so subsequent nets see them as obstacles
             for v in region_vias:
-                pcb_data.vias.append(Via(
-                    x=v['x'], y=v['y'],
-                    size=v['size'], drill=v['drill'],
-                    layers=['F.Cu', 'B.Cu'],  # Through-hole vias
-                    net_id=v['net_id']
-                ))
+                pcb_data.vias.append(
+                    Via(
+                        x=v["x"],
+                        y=v["y"],
+                        size=v["size"],
+                        drill=v["drill"],
+                        layers=["F.Cu", "B.Cu"],  # Through-hole vias
+                        net_id=v["net_id"],
+                    )
+                )
 
     # Print summary
-    print(f"\n{'='*60}")
-    print(f"SUMMARY")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("SUMMARY")
+    print(f"{'=' * 60}")
     print(f"  Zones processed: {len(net_names)}")
     print(f"  Total routes added: {total_routes}")
     if total_vias > 0:
@@ -346,15 +355,21 @@ def route_planes(
         print("\nDry run - no output file written")
     elif total_routes > 0:
         print(f"\nWriting output to {output_file}...")
-        _write_output(input_file, output_file, all_new_segments, all_new_vias, all_debug_lines,
-                      net_id_to_name=pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None)
+        _write_output(
+            input_file,
+            output_file,
+            all_new_segments,
+            all_new_vias,
+            all_debug_lines,
+            net_id_to_name=pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None,
+        )
         print(f"Output written to {output_file}")
         print("Note: Open in KiCad and press 'B' to refill zones")
     else:
         print("\nNo routes added - copying input to output unchanged")
-        with open(input_file, 'r', encoding='utf-8') as f:
+        with open(input_file, encoding="utf-8") as f:
             content = f.read()
-        with open(output_file, 'w', encoding='utf-8') as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(content)
 
     if return_results:
@@ -362,23 +377,29 @@ def route_planes(
     return (total_routes, total_regions)
 
 
-def _write_output(input_file: str, output_file: str, segments: List[Dict], vias: List[Dict] = None,
-                  debug_lines: List[str] = None, net_id_to_name: Dict = None):
+def _write_output(
+    input_file: str,
+    output_file: str,
+    segments: list[dict],
+    vias: list[dict] = None,
+    debug_lines: list[str] = None,
+    net_id_to_name: dict = None,
+):
     """Write the output PCB file with new segments, vias, and optional debug lines."""
-    with open(input_file, 'r', encoding='utf-8') as f:
+    with open(input_file, encoding="utf-8") as f:
         content = f.read()
 
     # Generate segment S-expressions
     segment_sexprs = []
     for seg in segments:
-        seg_net_name = net_id_to_name.get(seg['net_id']) if net_id_to_name else None
+        seg_net_name = net_id_to_name.get(seg["net_id"]) if net_id_to_name else None
         sexpr = generate_segment_sexpr(
-            start=seg['start'],
-            end=seg['end'],
-            width=seg['width'],
-            layer=seg['layer'],
-            net_id=seg['net_id'],
-            net_name=seg_net_name
+            start=seg["start"],
+            end=seg["end"],
+            width=seg["width"],
+            layer=seg["layer"],
+            net_id=seg["net_id"],
+            net_name=seg_net_name,
         )
         segment_sexprs.append(sexpr)
 
@@ -386,29 +407,29 @@ def _write_output(input_file: str, output_file: str, segments: List[Dict], vias:
     via_sexprs = []
     if vias:
         for via in vias:
-            via_net_name = net_id_to_name.get(via['net_id']) if net_id_to_name else None
+            via_net_name = net_id_to_name.get(via["net_id"]) if net_id_to_name else None
             sexpr = generate_via_sexpr(
-                x=via['x'],
-                y=via['y'],
-                size=via['size'],
-                drill=via['drill'],
-                layers=['F.Cu', 'B.Cu'],  # Through-hole vias
-                net_id=via['net_id'],
-                net_name=via_net_name
+                x=via["x"],
+                y=via["y"],
+                size=via["size"],
+                drill=via["drill"],
+                layers=["F.Cu", "B.Cu"],  # Through-hole vias
+                net_id=via["net_id"],
+                net_name=via_net_name,
             )
             via_sexprs.append(sexpr)
 
-    routing_text = '\n'.join(segment_sexprs + via_sexprs)
+    routing_text = "\n".join(segment_sexprs + via_sexprs)
 
     # Add debug lines if provided
     if debug_lines:
-        routing_text += '\n' + '\n'.join(debug_lines)
+        routing_text += "\n" + "\n".join(debug_lines)
 
     # Insert before final closing paren
-    last_paren = content.rfind(')')
-    new_content = content[:last_paren] + '\n' + routing_text + '\n' + content[last_paren:]
+    last_paren = content.rfind(")")
+    new_content = content[:last_paren] + "\n" + routing_text + "\n" + content[last_paren:]
 
-    with open(output_file, 'w', encoding='utf-8') as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         f.write(new_content)
 
 
@@ -433,65 +454,88 @@ Examples:
     python route_disconnected_planes.py input.kicad_pcb output.kicad_pcb \\
         --nets GND +3.3V --plane-layers B.Cu In1.Cu \\
         --max-track-width 1.0
-"""
+""",
     )
 
     parser.add_argument("input_file", help="Input KiCad PCB file")
     parser.add_argument("output_file", nargs="?", help="Output KiCad PCB file (default: input_routed.kicad_pcb)")
-    parser.add_argument("--overwrite", "-O", action="store_true",
-                        help="Overwrite input file instead of creating _routed copy")
+    parser.add_argument(
+        "--overwrite", "-O", action="store_true", help="Overwrite input file instead of creating _routed copy"
+    )
 
     # Net and layer specification (now optional)
-    parser.add_argument("--nets", "-n", nargs="+",
-                        help="Net name(s) to process. If omitted, all nets with zones are processed.")
-    parser.add_argument("--plane-layers", "-p", nargs="+",
-                        help="Plane layer(s) to process. If omitted, all layers with zones are processed.")
-    parser.add_argument("--layers", "-l", nargs="+",
-                        help="Layer(s) available for routing (e.g., F.Cu B.Cu). If omitted, all copper layers are used.")
+    parser.add_argument(
+        "--nets", "-n", nargs="+", help="Net name(s) to process. If omitted, all nets with zones are processed."
+    )
+    parser.add_argument(
+        "--plane-layers",
+        "-p",
+        nargs="+",
+        help="Plane layer(s) to process. If omitted, all layers with zones are processed.",
+    )
+    parser.add_argument(
+        "--layers",
+        "-l",
+        nargs="+",
+        help="Layer(s) available for routing (e.g., F.Cu B.Cu). If omitted, all copper layers are used.",
+    )
 
     # Track width options
-    parser.add_argument("--max-track-width", type=float, default=2.0,
-                        help="Maximum track width for connections in mm (default: 2.0)")
-    parser.add_argument("--min-track-width", type=float, default=0.2,
-                        help="Minimum track width for connections in mm (default: 0.2)")
-    parser.add_argument("--track-width", type=float, default=0.3,
-                        help="Default track width for routing config in mm (default: 0.3)")
+    parser.add_argument(
+        "--max-track-width", type=float, default=2.0, help="Maximum track width for connections in mm (default: 2.0)"
+    )
+    parser.add_argument(
+        "--min-track-width", type=float, default=0.2, help="Minimum track width for connections in mm (default: 0.2)"
+    )
+    parser.add_argument(
+        "--track-width", type=float, default=0.3, help="Default track width for routing config in mm (default: 0.3)"
+    )
 
     # Clearance options
-    parser.add_argument("--clearance", type=float, default=0.25,
-                        help="Trace-to-trace clearance in mm (default: 0.25)")
-    parser.add_argument("--zone-clearance", type=float, default=0.2,
-                        help="Zone fill clearance around obstacles in mm (default: 0.2)")
-    parser.add_argument("--track-via-clearance", type=float, default=0.8,
-                        help="Clearance from tracks to other nets' vias in mm (default: 0.8)")
-    parser.add_argument("--board-edge-clearance", type=float, default=0.5,
-                        help="Clearance from board edge in mm (default: 0.5)")
-    parser.add_argument("--hole-to-hole-clearance", type=float, default=0.3,
-                        help="Minimum clearance between drill holes in mm (default: 0.3)")
+    parser.add_argument("--clearance", type=float, default=0.25, help="Trace-to-trace clearance in mm (default: 0.25)")
+    parser.add_argument(
+        "--zone-clearance", type=float, default=0.2, help="Zone fill clearance around obstacles in mm (default: 0.2)"
+    )
+    parser.add_argument(
+        "--track-via-clearance",
+        type=float,
+        default=0.8,
+        help="Clearance from tracks to other nets' vias in mm (default: 0.8)",
+    )
+    parser.add_argument(
+        "--board-edge-clearance", type=float, default=0.5, help="Clearance from board edge in mm (default: 0.5)"
+    )
+    parser.add_argument(
+        "--hole-to-hole-clearance",
+        type=float,
+        default=0.3,
+        help="Minimum clearance between drill holes in mm (default: 0.3)",
+    )
 
     # Via options (for config)
-    parser.add_argument("--via-size", type=float, default=0.5,
-                        help="Via outer diameter in mm (default: 0.5)")
-    parser.add_argument("--via-drill", type=float, default=0.3,
-                        help="Via drill diameter in mm (default: 0.3)")
+    parser.add_argument("--via-size", type=float, default=0.5, help="Via outer diameter in mm (default: 0.5)")
+    parser.add_argument("--via-drill", type=float, default=0.3, help="Via drill diameter in mm (default: 0.3)")
 
     # Grid step
-    parser.add_argument("--grid-step", type=float, default=0.1,
-                        help="Routing grid step in mm (default: 0.1)")
-    parser.add_argument("--analysis-grid-step", type=float, default=0.5,
-                        help="Grid step for connectivity analysis in mm (coarser = faster, default: 0.5)")
+    parser.add_argument("--grid-step", type=float, default=0.1, help="Routing grid step in mm (default: 0.1)")
+    parser.add_argument(
+        "--analysis-grid-step",
+        type=float,
+        default=0.5,
+        help="Grid step for connectivity analysis in mm (coarser = faster, default: 0.5)",
+    )
 
     # Routing options
-    parser.add_argument("--max-iterations", type=int, default=200000,
-                        help="Maximum A* iterations per route attempt (default: 200000)")
+    parser.add_argument(
+        "--max-iterations", type=int, default=200000, help="Maximum A* iterations per route attempt (default: 200000)"
+    )
 
     # Debug options
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Analyze without writing output")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="Print detailed debug messages")
-    parser.add_argument("--debug-lines", action="store_true",
-                        help="Add debug lines on User.4 layer showing route paths")
+    parser.add_argument("--dry-run", action="store_true", help="Analyze without writing output")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print detailed debug messages")
+    parser.add_argument(
+        "--debug-lines", action="store_true", help="Add debug lines on User.4 layer showing route paths"
+    )
 
     args = parser.parse_args()
 
@@ -502,14 +546,14 @@ Examples:
         else:
             # Auto-generate output filename: input.kicad_pcb -> input_routed.kicad_pcb
             base, ext = os.path.splitext(args.input_file)
-            args.output_file = base + '_routed' + ext
+            args.output_file = base + "_routed" + ext
             print(f"Output file: {args.output_file}")
 
     # Auto-detect zones if nets/layers not fully specified
     if args.nets and args.plane_layers:
         # Both specified - must match in count
         if len(args.nets) != len(args.plane_layers):
-            print(f"Error: When both --nets and --plane-layers are specified, counts must match")
+            print("Error: When both --nets and --plane-layers are specified, counts must match")
             print(f"  Got {len(args.nets)} net(s) and {len(args.plane_layers)} layer(s)")
             sys.exit(1)
         net_names = args.nets
@@ -517,11 +561,7 @@ Examples:
     else:
         # Auto-detect from PCB zones
         print(f"Auto-detecting zones from {args.input_file}...")
-        zone_pairs = auto_detect_zones(
-            args.input_file,
-            filter_nets=args.nets,
-            filter_layers=args.plane_layers
-        )
+        zone_pairs = auto_detect_zones(args.input_file, filter_nets=args.nets, filter_layers=args.plane_layers)
 
         if not zone_pairs:
             if args.nets or args.plane_layers:
@@ -558,7 +598,7 @@ Examples:
         verbose=args.verbose,
         dry_run=args.dry_run,
         debug_lines=args.debug_lines,
-        routing_layers=args.layers
+        routing_layers=args.layers,
     )
 
 

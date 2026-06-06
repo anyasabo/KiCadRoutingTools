@@ -5,9 +5,9 @@ Displays version info, author, and links.
 """
 
 import os
+
 import wx
 import wx.adv
-
 
 # Directory paths
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,8 +17,14 @@ ROOT_DIR = os.path.dirname(PLUGIN_DIR)
 class AboutTab(wx.Panel):
     """About tab panel with version info, author, and links."""
 
-    def __init__(self, parent, on_reset_settings=None, on_transparency_changed=None,
-                 initial_transparency=240, on_validate_pcb_data=None):
+    def __init__(
+        self,
+        parent,
+        on_reset_settings=None,
+        on_transparency_changed=None,
+        initial_transparency=240,
+        on_validate_pcb_data=None,
+    ):
         super().__init__(parent)
         self.on_reset_settings = on_reset_settings
         self.on_transparency_changed = on_transparency_changed
@@ -100,18 +106,11 @@ class AboutTab(wx.Panel):
 
         # GitHub link
         github_url = "https://github.com/drandyhaas/KiCadRoutingTools"
-        github_link = wx.adv.HyperlinkCtrl(
-            self,
-            label="GitHub Repository",
-            url=github_url
-        )
+        github_link = wx.adv.HyperlinkCtrl(self, label="GitHub Repository", url=github_url)
         about_sizer.Add(github_link, 0, wx.ALIGN_CENTER | wx.ALL, 10)
 
         # License/copyright
-        copyright_text = wx.StaticText(
-            self,
-            label="Open source - see repository for license details"
-        )
+        copyright_text = wx.StaticText(self, label="Open source - see repository for license details")
         copyright_text.SetForegroundColour(wx.Colour(128, 128, 128))
         about_sizer.Add(copyright_text, 0, wx.ALIGN_CENTER | wx.TOP, 20)
 
@@ -120,8 +119,7 @@ class AboutTab(wx.Panel):
         transparency_label = wx.StaticText(self, label="Window Transparency:")
         transparency_sizer.Add(transparency_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 20)
         self.transparency_slider = wx.Slider(
-            self, value=self._initial_transparency, minValue=155, maxValue=255,
-            style=wx.SL_HORIZONTAL
+            self, value=self._initial_transparency, minValue=155, maxValue=255, style=wx.SL_HORIZONTAL
         )
         self.transparency_slider.SetMinSize((-1, 40))  # Ensure enough height for thumb
         self.transparency_slider.SetToolTip("Adjust window transparency")
@@ -132,8 +130,7 @@ class AboutTab(wx.Panel):
         # Validate PCB Data button
         validate_btn = wx.Button(self, label="Validate PCB Data")
         validate_btn.SetToolTip(
-            "Compare pcbnew-extracted data against file parse to verify correctness.\n"
-            "Results are shown in the Log tab."
+            "Compare pcbnew-extracted data against file parse to verify correctness.\nResults are shown in the Log tab."
         )
         validate_btn.Bind(wx.EVT_BUTTON, self._on_validate_pcb_data)
         about_sizer.Add(validate_btn, 0, wx.ALIGN_CENTER | wx.TOP, 20)
@@ -155,10 +152,9 @@ class AboutTab(wx.Panel):
     def _on_reset_settings(self, event):
         """Handle reset settings button click."""
         result = wx.MessageBox(
-            "This will reset all settings to defaults, clear the log, "
-            "and uncheck all net selections.\n\nContinue?",
+            "This will reset all settings to defaults, clear the log, and uncheck all net selections.\n\nContinue?",
             "Reset Settings",
-            wx.YES_NO | wx.ICON_WARNING
+            wx.YES_NO | wx.ICON_WARNING,
         )
         if result == wx.YES and self.on_reset_settings:
             self.on_reset_settings()
@@ -175,7 +171,7 @@ class AboutTab(wx.Panel):
         plugin_version = "Unknown"
         version_file = os.path.join(ROOT_DIR, "VERSION")
         try:
-            with open(version_file, 'r') as f:
+            with open(version_file) as f:
                 plugin_version = f.read().strip()
         except Exception:
             pass
@@ -184,8 +180,10 @@ class AboutTab(wx.Panel):
         router_version = "Unknown"
         try:
             import sys
-            sys.path.insert(0, os.path.join(ROOT_DIR, 'rust_router'))
+
+            sys.path.insert(0, os.path.join(ROOT_DIR, "rust_router"))
             import grid_router
+
             router_version = grid_router.__version__
         except Exception:
             pass

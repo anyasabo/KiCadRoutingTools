@@ -8,67 +8,55 @@ Usage:
     python route_planes.py input.kicad_pcb output.kicad_pcb --nets GND --plane-layers B.Cu
 """
 
-import sys
-import os
 import argparse
-from typing import List, Optional, Tuple, Dict, Set
+import os
+import sys
 from dataclasses import dataclass
 
 # Run startup checks first (validates numpy, scipy, shapely are installed)
 from startup_checks import run_all_checks
+
 run_all_checks()
 
 # These imports are guaranteed to work after startup_checks passes
 import numpy as np
 
-from kicad_parser import parse_kicad_pcb, PCBData, Pad, Via, Segment, KICAD_10_MIN_VERSION
-from kicad_writer import generate_zone_sexpr, generate_gr_line_sexpr
-from routing_config import GridRouteConfig, GridCoord
-from route import batch_route
-from obstacle_cache import ViaPlacementObstacleData, precompute_via_placement_obstacles
 from connectivity import compute_mst_segments
+from kicad_parser import KICAD_10_MIN_VERSION, Pad, PCBData, Segment, Via, parse_kicad_pcb
+from kicad_writer import generate_gr_line_sexpr, generate_zone_sexpr
+from obstacle_cache import ViaPlacementObstacleData, precompute_via_placement_obstacles
+from plane_blocker_detection import (
+    try_place_via_with_ripup,
+)
 
 # Import from new refactored modules
-from plane_io import (
-    ZoneInfo,
-    extract_zones,
-    check_existing_zones,
-    resolve_net_id,
-    write_plane_output
-)
+from plane_io import ZoneInfo, check_existing_zones, extract_zones, resolve_net_id, write_plane_output
 from plane_obstacle_builder import (
-    identify_target_pads,
-    build_via_obstacle_map,
-    build_routing_obstacle_map,
-    block_via_position,
+    _add_board_edge_track_obstacles,
     _add_segment_routing_obstacle,
-    _add_board_edge_track_obstacles
+    block_via_position,
+    build_routing_obstacle_map,
+    build_via_obstacle_map,
+    identify_target_pads,
 )
-from plane_blocker_detection import (
-    ViaPlacementResult,
-    find_via_position_blocker,
-    find_route_blocker_from_frontier,
-    try_place_via_with_ripup
-)
-from plane_zone_geometry import (
-    compute_zone_boundaries,
-    find_polygon_groups,
-    sample_route_for_voronoi
-)
+from plane_zone_geometry import compute_zone_boundaries, sample_route_for_voronoi
+from route import batch_route
+from routing_config import GridCoord, GridRouteConfig
 from terminal_colors import GREEN, RED, RESET
 
 # Import Rust router (startup_checks ensures it's available and up-to-date)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 from grid_router import GridObstacleMap, GridRouter
+
+import routing_defaults as defaults
 
 # Plane resistance calculations
 from plane_resistance import (
-    analyze_single_net_plane,
     analyze_multi_net_plane,
+    analyze_single_net_plane,
+    print_multi_net_resistance,
     print_single_net_resistance,
-    print_multi_net_resistance
 )
-import routing_defaults as defaults
 
 
 class ViaSpatialIndex:
@@ -76,9 +64,9 @@ class ViaSpatialIndex:
 
     def __init__(self, bucket_size: float):
         self.bucket_size = bucket_size
-        self._buckets: Dict[Tuple[int, int], List[Tuple[float, float]]] = {}
+        self._buckets: dict[tuple[int, int], list[tuple[float, float]]] = {}
 
-    def _key(self, x: float, y: float) -> Tuple[int, int]:
+    def _key(self, x: float, y: float) -> tuple[int, int]:
         return (int(x // self.bucket_size), int(y // self.bucket_size))
 
     def add(self, x: float, y: float):
@@ -87,11 +75,11 @@ class ViaSpatialIndex:
             self._buckets[key] = []
         self._buckets[key].append((x, y))
 
-    def add_all(self, vias: List[Tuple[float, float]]):
+    def add_all(self, vias: list[tuple[float, float]]):
         for x, y in vias:
             self.add(x, y)
 
-    def find_nearest(self, x: float, y: float, max_radius: float) -> Optional[Tuple[float, float]]:
+    def find_nearest(self, x: float, y: float, max_radius: float) -> tuple[float, float] | None:
         """Find nearest via within max_radius of (x, y)."""
         best_via = None
         best_dist_sq = max_radius * max_radius
@@ -114,10 +102,8 @@ class ViaSpatialIndex:
 
 
 def find_existing_via_nearby(
-    pad: Pad,
-    existing_vias: List[Tuple[float, float]],
-    max_search_radius: float
-) -> Optional[Tuple[float, float]]:
+    pad: Pad, existing_vias: list[tuple[float, float]], max_search_radius: float
+) -> tuple[float, float] | None:
     """
     Find an existing via on the target net within search radius of the pad.
 
@@ -153,10 +139,10 @@ def find_via_position(
     pad_layer: str = None,
     net_id: int = None,
     verbose: bool = False,
-    failed_route_positions: Optional[Set[Tuple[int, int]]] = None,
-    pending_pads: Optional[List[Dict]] = None,
-    router: Optional[GridRouter] = None
-) -> Optional[Tuple[float, float]]:
+    failed_route_positions: set[tuple[int, int]] | None = None,
+    pending_pads: list[dict] | None = None,
+    router: GridRouter | None = None,
+) -> tuple[float, float] | None:
     """
     Find the closest valid position for a via near a pad.
 
@@ -206,7 +192,7 @@ def find_via_position(
     if pending_pads and config:
         margin = 1.5 * config.via_size + config.clearance
         for pad_info in pending_pads:
-            p = pad_info['pad']
+            p = pad_info["pad"]
             half_w = p.size_x / 2 + margin
             half_h = p.size_y / 2 + margin
             min_gx = coord.to_grid(p.global_x - half_w, 0)[0]
@@ -252,7 +238,9 @@ def find_via_position(
                         if min_gx <= gx <= max_gx and min_gy <= gy <= max_gy:
                             in_zone = True
                             if verbose:
-                                print(f"\n    DEBUG: Skipping ({gx},{gy}) - inside zone {zone_idx}: ({min_gx},{min_gy})-({max_gx},{max_gy})")
+                                print(
+                                    f"\n    DEBUG: Skipping ({gx},{gy}) - inside zone {zone_idx}: ({min_gx},{min_gy})-({max_gx},{max_gy})"
+                                )
                             break
                     if in_zone:
                         continue
@@ -270,7 +258,7 @@ def find_via_position(
         if valid_positions:
             return valid_positions[0][1]
         if verbose:
-            print(f"\n    DEBUG: No valid via positions found (all blocked in obstacle map)")
+            print("\n    DEBUG: No valid via positions found (all blocked in obstacle map)")
             print(f"    DEBUG: Searched {max_radius_grid} grid steps ({max_search_radius}mm) from pad center")
         return None
 
@@ -295,14 +283,12 @@ def find_via_position(
         # Use verbose for first few failures to help debug
         route_verbose = verbose and route_failures < 3
         route_result = route_via_to_pad(
-            via_pos, pad, pad_layer, net_id,
-            routing_obstacles, config, verbose=route_verbose,
-            router=router
+            via_pos, pad, pad_layer, net_id, routing_obstacles, config, verbose=route_verbose, router=router
         )
         if route_result is not None:
             # Routing succeeded - use this position
             if verbose and (route_failures > 0 or skipped_count > 0):
-                print(f"[tried {route_failures+1}, skipped {skipped_count}]", end=" ")
+                print(f"[tried {route_failures + 1}, skipped {skipped_count}]", end=" ")
             return via_pos
 
         # Routing failed - add to failed set so nearby positions are skipped
@@ -314,11 +300,13 @@ def find_via_position(
     if verbose:
         print(f"[tried {route_failures}, skipped {skipped_count}]", end=" ")
         if not valid_positions:
-            print(f"\n    DEBUG: No valid via positions found (all blocked in obstacle map)")
+            print("\n    DEBUG: No valid via positions found (all blocked in obstacle map)")
             print(f"    DEBUG: Searched {max_radius_grid} grid steps ({max_search_radius}mm) from pad center")
         else:
             print(f"\n    DEBUG: Found {len(valid_positions)} unblocked via positions, but routing failed for all")
-            print(f"    DEBUG: Closest unblocked position: ({valid_positions[0][1][0]:.2f}, {valid_positions[0][1][1]:.2f})")
+            print(
+                f"    DEBUG: Closest unblocked position: ({valid_positions[0][1][0]:.2f}, {valid_positions[0][1][1]:.2f})"
+            )
             print(f"    DEBUG: Tried to route on layer {pad_layer}")
 
     return None  # No valid position with routable path
@@ -327,13 +315,14 @@ def find_via_position(
 @dataclass
 class RouteResult:
     """Result of a routing attempt."""
-    segments: Optional[List[Dict]]  # Segments if successful, None if failed
-    blocked_cells: List[Tuple[int, int, int]]  # Blocked cells from frontier (for blocker analysis)
+
+    segments: list[dict] | None  # Segments if successful, None if failed
+    blocked_cells: list[tuple[int, int, int]]  # Blocked cells from frontier (for blocker analysis)
     success: bool
 
 
 def route_via_to_pad(
-    via_pos: Tuple[float, float],
+    via_pos: tuple[float, float],
     pad: Pad,
     pad_layer: str,
     net_id: int,
@@ -342,8 +331,8 @@ def route_via_to_pad(
     max_iterations: int = 10000,
     verbose: bool = False,
     return_blocked_cells: bool = False,
-    router: Optional[GridRouter] = None
-) -> Optional[List[Dict]]:
+    router: GridRouter | None = None,
+) -> list[dict] | None:
     """
     Route from via position to pad center using A* pathfinding.
 
@@ -393,15 +382,17 @@ def route_via_to_pad(
     if verbose:
         blocked_neighbors = 0
         unblocked_dirs = []
-        for dx, dy in [(-1,0), (1,0), (0,-1), (0,1), (-1,-1), (-1,1), (1,-1), (1,1)]:
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]:
             if routing_obstacles.is_blocked(pad_gx + dx, pad_gy + dy, layer_idx):
                 blocked_neighbors += 1
             else:
                 unblocked_dirs.append((dx, dy))
         if blocked_neighbors == 8:
-            print(f"    DEBUG: Target pad is ISOLATED - all 8 neighbors blocked")
+            print("    DEBUG: Target pad is ISOLATED - all 8 neighbors blocked")
         elif blocked_neighbors >= 6:
-            print(f"    DEBUG: Target pad nearly isolated - {blocked_neighbors}/8 neighbors blocked, open: {unblocked_dirs}")
+            print(
+                f"    DEBUG: Target pad nearly isolated - {blocked_neighbors}/8 neighbors blocked, open: {unblocked_dirs}"
+            )
             # Trace along open direction to find where blockage starts
             for dx, dy in unblocked_dirs[:1]:  # Just check first open direction
                 blocked_at = None
@@ -411,7 +402,9 @@ def route_via_to_pad(
                         blocked_at = dist
                         break
                 if blocked_at:
-                    print(f"    DEBUG: Open direction ({dx},{dy}) blocked after {blocked_at} cells at grid ({pad_gx + dx*blocked_at}, {pad_gy + dy*blocked_at})")
+                    print(
+                        f"    DEBUG: Open direction ({dx},{dy}) blocked after {blocked_at} cells at grid ({pad_gx + dx * blocked_at}, {pad_gy + dy * blocked_at})"
+                    )
 
     sources = [(via_gx, via_gy, layer_idx)]
     targets = [(pad_gx, pad_gy, layer_idx)]
@@ -424,16 +417,19 @@ def route_via_to_pad(
             turn_cost=config.turn_cost,
             via_proximity_cost=0,
             layer_costs=config.get_layer_costs(),
-            proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+            proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
         )
 
     path, iterations, blocked_cells = router.route_with_frontier(
-        routing_obstacles, sources, targets, max_iterations,
+        routing_obstacles,
+        sources,
+        targets,
+        max_iterations,
         False,  # collinear_vias
-        0,      # via_exclusion_radius
-        None,   # start_direction
-        None,   # end_direction
-        0       # direction_steps
+        0,  # via_exclusion_radius
+        None,  # start_direction
+        None,  # end_direction
+        0,  # direction_steps
     )
 
     if path is None:
@@ -456,13 +452,15 @@ def route_via_to_pad(
         first_gx, first_gy, _ = path[0]
         first_x, first_y = coord.to_float(first_gx, first_gy)
         if abs(via_pos[0] - first_x) > 0.001 or abs(via_pos[1] - first_y) > 0.001:
-            segments.append({
-                'start': via_pos,
-                'end': (first_x, first_y),
-                'width': config.track_width,
-                'layer': pad_layer,
-                'net_id': net_id
-            })
+            segments.append(
+                {
+                    "start": via_pos,
+                    "end": (first_x, first_y),
+                    "width": config.track_width,
+                    "layer": pad_layer,
+                    "net_id": net_id,
+                }
+            )
 
     # Convert path points to segments
     for i in range(len(path) - 1):
@@ -473,34 +471,37 @@ def route_via_to_pad(
         x2, y2 = coord.to_float(gx2, gy2)
 
         if (x1, y1) != (x2, y2):
-            segments.append({
-                'start': (x1, y1),
-                'end': (x2, y2),
-                'width': config.track_width,
-                'layer': pad_layer,
-                'net_id': net_id
-            })
+            segments.append(
+                {"start": (x1, y1), "end": (x2, y2), "width": config.track_width, "layer": pad_layer, "net_id": net_id}
+            )
 
     # Add connecting segment from last path point to pad center
     if path:
         last_gx, last_gy, _ = path[-1]
         last_x, last_y = coord.to_float(last_gx, last_gy)
         if abs(pad.global_x - last_x) > 0.001 or abs(pad.global_y - last_y) > 0.001:
-            segments.append({
-                'start': (last_x, last_y),
-                'end': (pad.global_x, pad.global_y),
-                'width': config.track_width,
-                'layer': pad_layer,
-                'net_id': net_id
-            })
+            segments.append(
+                {
+                    "start": (last_x, last_y),
+                    "end": (pad.global_x, pad.global_y),
+                    "width": config.track_width,
+                    "layer": pad_layer,
+                    "net_id": net_id,
+                }
+            )
 
     if return_blocked_cells:
         return RouteResult(segments=segments, blocked_cells=[], success=True)
     return segments
 
 
-def _block_route_as_obstacle(obstacles: GridObstacleMap, route_path: List[Tuple[float, float]],
-                              coord: 'GridCoord', layer_idx: int, expansion_grid: int):
+def _block_route_as_obstacle(
+    obstacles: GridObstacleMap,
+    route_path: list[tuple[float, float]],
+    coord: "GridCoord",
+    layer_idx: int,
+    expansion_grid: int,
+):
     """Block a route path as obstacle using batched numpy operations."""
     radius_sq = expansion_grid * expansion_grid
     # Pre-compute the circle template (offsets that fall within the circle)
@@ -560,13 +561,13 @@ def _block_route_as_obstacle(obstacles: GridObstacleMap, route_path: List[Tuple[
 def build_plane_base_obstacles(
     plane_layer: str,
     net_id: int,
-    other_nets_vias: Dict[int, List[Tuple[float, float]]],
+    other_nets_vias: dict[int, list[tuple[float, float]]],
     config: GridRouteConfig,
     pcb_data: PCBData,
     proximity_radius: float = 3.0,
     proximity_cost: float = 2.0,
     track_via_clearance: float = defaults.PLANE_TRACK_VIA_CLEARANCE,
-    previous_routes: Optional[List[List[Tuple[float, float]]]] = None
+    previous_routes: list[list[tuple[float, float]]] | None = None,
 ) -> GridObstacleMap:
     """
     Build base obstacle map for plane routing (reusable across multiple MST edges).
@@ -614,12 +615,7 @@ def build_plane_base_obstacles(
             all_other_vias_grid.append((gx, gy))
 
     if all_other_vias_grid:
-        obstacles.add_stub_proximity_costs_batch(
-            all_other_vias_grid,
-            proximity_radius_grid,
-            proximity_cost_grid,
-            False
-        )
+        obstacles.add_stub_proximity_costs_batch(all_other_vias_grid, proximity_radius_grid, proximity_cost_grid, False)
 
     # Block existing segments on this layer from other nets
     for seg in pcb_data.segments:
@@ -645,11 +641,11 @@ def build_plane_base_obstacles(
 
 
 def route_plane_connection(
-    via_a: Tuple[float, float],
-    via_b: Tuple[float, float],
+    via_a: tuple[float, float],
+    via_b: tuple[float, float],
     plane_layer: str,
     net_id: int,
-    other_nets_vias: Dict[int, List[Tuple[float, float]]],
+    other_nets_vias: dict[int, list[tuple[float, float]]],
     config: GridRouteConfig,
     pcb_data: PCBData,
     proximity_radius: float = 3.0,
@@ -657,10 +653,10 @@ def route_plane_connection(
     track_via_clearance: float = defaults.PLANE_TRACK_VIA_CLEARANCE,
     max_iterations: int = 200000,
     verbose: bool = False,
-    previous_routes: Optional[List[List[Tuple[float, float]]]] = None,
-    base_obstacles: Optional[GridObstacleMap] = None,
-    router: Optional[GridRouter] = None
-) -> Optional[List[Tuple[float, float]]]:
+    previous_routes: list[list[tuple[float, float]]] | None = None,
+    base_obstacles: GridObstacleMap | None = None,
+    router: GridRouter | None = None,
+) -> list[tuple[float, float]] | None:
     """
     Route a trace on the plane layer between two vias, avoiding other nets' vias.
 
@@ -694,8 +690,15 @@ def route_plane_connection(
     else:
         # Backward-compatible: build from scratch
         obstacles = build_plane_base_obstacles(
-            plane_layer, net_id, other_nets_vias, config, pcb_data,
-            proximity_radius, proximity_cost, track_via_clearance, previous_routes
+            plane_layer,
+            net_id,
+            other_nets_vias,
+            config,
+            pcb_data,
+            proximity_radius,
+            proximity_cost,
+            track_via_clearance,
+            previous_routes,
         )
 
     # Set up source and target
@@ -717,16 +720,19 @@ def route_plane_connection(
             turn_cost=config.turn_cost,
             via_proximity_cost=0,
             layer_costs=config.get_layer_costs(),
-            proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+            proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
         )
 
     path, iterations, _ = router.route_with_frontier(
-        obstacles, sources, targets, max_iterations,
+        obstacles,
+        sources,
+        targets,
+        max_iterations,
         False,  # collinear_vias
-        0,      # via_exclusion_radius
-        None,   # start_direction
-        None,   # end_direction
-        0       # direction_steps
+        0,  # via_exclusion_radius
+        None,  # start_direction
+        None,  # end_direction
+        0,  # direction_steps
     )
 
     if path is None:
@@ -748,11 +754,11 @@ def route_plane_connection(
 
 def _generate_multinet_layer_zones(
     layer: str,
-    nets_on_layer: List[str],
+    nets_on_layer: list[str],
     pcb_data: PCBData,
-    all_new_vias: List[Dict],
-    zone_polygon: List[Tuple[float, float]],
-    board_bounds: Tuple[float, float, float, float],
+    all_new_vias: list[dict],
+    zone_polygon: list[tuple[float, float]],
+    board_bounds: tuple[float, float, float, float],
     config: GridRouteConfig,
     zone_clearance: float,
     min_thickness: float,
@@ -763,8 +769,8 @@ def _generate_multinet_layer_zones(
     voronoi_seed_interval: float,
     board_edge_clearance: float,
     debug_lines: bool,
-    verbose: bool
-) -> Tuple[List[str], List[str], List[Dict]]:
+    verbose: bool,
+) -> tuple[list[str], list[str], list[dict]]:
     """
     Generate Voronoi-based zone boundaries for a multi-net layer.
 
@@ -795,8 +801,8 @@ def _generate_multinet_layer_zones(
     zone_data_list = []
 
     # Build vias_by_net for this layer
-    vias_by_net: Dict[int, List[Tuple[float, float]]] = {}
-    vias_by_net_set: Dict[int, Set[Tuple[float, float]]] = {}  # For O(1) dedup
+    vias_by_net: dict[int, list[tuple[float, float]]] = {}
+    vias_by_net_set: dict[int, set[tuple[float, float]]] = {}  # For O(1) dedup
     net_name_to_id = {}
     for net_name in nets_on_layer:
         net_id = next((nid for nid, n in pcb_data.nets.items() if n.name == net_name), None)
@@ -807,9 +813,9 @@ def _generate_multinet_layer_zones(
 
     # Collect via positions for nets on this layer
     for via in all_new_vias:
-        nid = via['net_id']
+        nid = via["net_id"]
         if nid in vias_by_net:
-            pos = (via['x'], via['y'])
+            pos = (via["x"], via["y"])
             vias_by_net[nid].append(pos)
             vias_by_net_set[nid].add(pos)
 
@@ -847,22 +853,24 @@ def _generate_multinet_layer_zones(
                 clearance=zone_clearance,
                 min_thickness=min_thickness,
                 direct_connect=True,
-                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION
+                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION,
             )
             zone_sexprs.append(zone_sexpr)
-            zone_data_list.append({
-                'net_id': net_id,
-                'net_name': net_name,
-                'layer': layer,
-                'polygon_points': zone_polygon,
-                'clearance': zone_clearance,
-                'min_thickness': min_thickness,
-            })
+            zone_data_list.append(
+                {
+                    "net_id": net_id,
+                    "net_name": net_name,
+                    "layer": layer,
+                    "polygon_points": zone_polygon,
+                    "clearance": zone_clearance,
+                    "min_thickness": min_thickness,
+                }
+            )
         return zone_sexprs, debug_line_sexprs, zone_data_list
 
     # Compute MST edges for each net
-    net_mst_edges: Dict[int, List[Tuple[Tuple[float, float], Tuple[float, float]]]] = {}
-    net_debug_layers: Dict[int, str] = {}
+    net_mst_edges: dict[int, list[tuple[tuple[float, float], tuple[float, float]]]] = {}
+    net_debug_layers: dict[int, str] = {}
     for net_idx, net_name in enumerate(nets_with_vias):
         net_id = net_name_to_id[net_name]
         net_vias = vias_by_net.get(net_id, [])
@@ -876,19 +884,19 @@ def _generate_multinet_layer_zones(
     # Iteratively route all nets, reordering to put failed nets first
     max_mst_iterations = 5
     net_order = list(net_mst_edges.keys())
-    failed_nets: Set[int] = set()
+    failed_nets: set[int] = set()
     best_result = None
 
     for mst_iteration in range(max_mst_iterations):
         if mst_iteration > 0:
-            net_order = sorted(net_order, key=lambda nid: (0 if nid in failed_nets else 1))
+            net_order = sorted(net_order, key=lambda nid: 0 if nid in failed_nets else 1)
             failed_net_names = [pcb_data.nets[nid].name for nid in failed_nets if nid in pcb_data.nets]
             print(f"  Retry {mst_iteration + 1}: reordering with failed nets first: {', '.join(failed_net_names)}")
 
         connection_routes = []
-        routed_paths_by_edge: Dict[int, Dict[Tuple[Tuple[float, float], Tuple[float, float]], List[Tuple[float, float]]]] = {
-            net_id: {} for net_id in net_mst_edges.keys()
-        }
+        routed_paths_by_edge: dict[
+            int, dict[tuple[tuple[float, float], tuple[float, float]], list[tuple[float, float]]]
+        ] = {net_id: {} for net_id in net_mst_edges}
         augmented_vias_by_net = {net_id: list(vias) for net_id, vias in vias_by_net.items()}
         debug_lines_for_layer = []
         failed_nets = set()
@@ -901,7 +909,7 @@ def _generate_multinet_layer_zones(
             turn_cost=config.turn_cost,
             via_proximity_cost=0,
             layer_costs=config.get_layer_costs(),
-            proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+            proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
         )
 
         for net_id in net_order:
@@ -910,17 +918,14 @@ def _generate_multinet_layer_zones(
             mst_edges = net_mst_edges[net_id]
             debug_layer = net_debug_layers[net_id]
 
-            other_nets_vias: Dict[int, List[Tuple[float, float]]] = {}
+            other_nets_vias: dict[int, list[tuple[float, float]]] = {}
             for other_net_id, other_vias in augmented_vias_by_net.items():
                 if other_net_id != net_id:
                     other_nets_vias[other_net_id] = other_vias
 
             # Compute other_nets_routes once per net (only contains routes from OTHER nets,
             # so it doesn't change within this net's MST edge loop)
-            other_nets_routes = [
-                route for route_net_id, _, route in connection_routes
-                if route_net_id != net_id
-            ]
+            other_nets_routes = [route for route_net_id, _, route in connection_routes if route_net_id != net_id]
 
             # Build base obstacle map once per net (includes via blocking, segment blocking,
             # other nets' route blocking, and board edges - everything except source/target)
@@ -933,7 +938,7 @@ def _generate_multinet_layer_zones(
                 proximity_radius=plane_proximity_radius,
                 proximity_cost=plane_proximity_cost,
                 track_via_clearance=plane_track_via_clearance,
-                previous_routes=other_nets_routes
+                previous_routes=other_nets_routes,
             )
 
             routed_count = 0
@@ -955,7 +960,7 @@ def _generate_multinet_layer_zones(
                     verbose=verbose,
                     previous_routes=other_nets_routes,
                     base_obstacles=base_obstacles,
-                    router=plane_router
+                    router=plane_router,
                 )
 
                 if route_path:
@@ -965,10 +970,9 @@ def _generate_multinet_layer_zones(
 
                     if debug_lines and len(route_path) >= 2:
                         for i in range(len(route_path) - 1):
-                            debug_lines_for_layer.append(generate_gr_line_sexpr(
-                                route_path[i], route_path[i + 1],
-                                width=0.1, layer=debug_layer
-                            ))
+                            debug_lines_for_layer.append(
+                                generate_gr_line_sexpr(route_path[i], route_path[i + 1], width=0.1, layer=debug_layer)
+                            )
 
                     samples = sample_route_for_voronoi(route_path, sample_interval=voronoi_seed_interval)
                     if samples:
@@ -976,7 +980,9 @@ def _generate_multinet_layer_zones(
                 else:
                     failed_count += 1
                     if verbose:
-                        print(f"    {net_name}: ({via_a[0]:.2f},{via_a[1]:.2f}) -> ({via_b[0]:.2f},{via_b[1]:.2f}) FAILED")
+                        print(
+                            f"    {net_name}: ({via_a[0]:.2f},{via_a[1]:.2f}) -> ({via_b[0]:.2f},{via_b[1]:.2f}) FAILED"
+                        )
 
             if failed_count > 0:
                 failed_nets.add(net_id)
@@ -986,7 +992,13 @@ def _generate_multinet_layer_zones(
                 print(f"    {net_name}: all {routed_count} MST edges routed")
 
         if best_result is None or total_failed_edges < best_result[0]:
-            best_result = (total_failed_edges, connection_routes, augmented_vias_by_net, debug_lines_for_layer, routed_paths_by_edge)
+            best_result = (
+                total_failed_edges,
+                connection_routes,
+                augmented_vias_by_net,
+                debug_lines_for_layer,
+                routed_paths_by_edge,
+            )
 
         if total_failed_edges == 0:
             break
@@ -1004,14 +1016,15 @@ def _generate_multinet_layer_zones(
 
     try:
         zone_polygons, _, _ = compute_zone_boundaries(
-            augmented_vias_by_net, board_bounds,
+            augmented_vias_by_net,
+            board_bounds,
             return_raw_polygons=True,
             board_edge_clearance=board_edge_clearance,
-            verbose=verbose
+            verbose=verbose,
         )
     except ValueError as e:
         print(f"  Error computing zone boundaries: {e}")
-        print(f"  Falling back to full board rectangle for first net")
+        print("  Falling back to full board rectangle for first net")
         net_name = nets_with_vias[0]
         net_id = net_name_to_id[net_name]
         zone_sexpr = generate_zone_sexpr(
@@ -1022,17 +1035,19 @@ def _generate_multinet_layer_zones(
             clearance=zone_clearance,
             min_thickness=min_thickness,
             direct_connect=True,
-            use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION
+            use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION,
         )
         zone_sexprs.append(zone_sexpr)
-        zone_data_list.append({
-            'net_id': net_id,
-            'net_name': net_name,
-            'layer': layer,
-            'polygon_points': zone_polygon,
-            'clearance': zone_clearance,
-            'min_thickness': min_thickness,
-        })
+        zone_data_list.append(
+            {
+                "net_id": net_id,
+                "net_name": net_name,
+                "layer": layer,
+                "polygon_points": zone_polygon,
+                "clearance": zone_clearance,
+                "min_thickness": min_thickness,
+            }
+        )
         return zone_sexprs, debug_line_sexprs, zone_data_list
 
     # Generate zones for each net
@@ -1041,7 +1056,7 @@ def _generate_multinet_layer_zones(
         net_name = net.name if net else f"net_{net_id}"
         for poly_idx, polygon in enumerate(polygons):
             if len(polygons) > 1:
-                print(f"  Creating zone {poly_idx+1}/{len(polygons)} for '{net_name}' with {len(polygon)} vertices")
+                print(f"  Creating zone {poly_idx + 1}/{len(polygons)} for '{net_name}' with {len(polygon)} vertices")
             else:
                 print(f"  Creating zone for '{net_name}' with {len(polygon)} vertices")
             zone_sexpr = generate_zone_sexpr(
@@ -1052,17 +1067,19 @@ def _generate_multinet_layer_zones(
                 clearance=zone_clearance,
                 min_thickness=min_thickness,
                 direct_connect=True,
-                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION
+                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION,
             )
             zone_sexprs.append(zone_sexpr)
-            zone_data_list.append({
-                'net_id': net_id,
-                'net_name': net_name,
-                'layer': layer,
-                'polygon_points': polygon,
-                'clearance': zone_clearance,
-                'min_thickness': min_thickness,
-            })
+            zone_data_list.append(
+                {
+                    "net_id": net_id,
+                    "net_name": net_name,
+                    "layer": layer,
+                    "polygon_points": polygon,
+                    "clearance": zone_clearance,
+                    "min_thickness": min_thickness,
+                }
+            )
 
     # Calculate and print resistance
     resistance_results = {}
@@ -1083,16 +1100,16 @@ def _generate_multinet_layer_zones(
 def _write_output_and_reroute(
     input_file: str,
     output_file: str,
-    all_zone_sexprs: List[str],
-    all_debug_lines: List[str],
-    all_new_vias: List[Dict],
-    all_new_segments: List[Dict],
-    all_ripped_net_ids: List[int],
-    zones_to_replace: List[Tuple[int, str]],
+    all_zone_sexprs: list[str],
+    all_debug_lines: list[str],
+    all_new_vias: list[dict],
+    all_new_segments: list[dict],
+    all_ripped_net_ids: list[int],
+    zones_to_replace: list[tuple[int, str]],
     pcb_data: PCBData,
     reroute_ripped_nets: bool,
-    all_layers: List[str],
-    plane_layers: List[str],
+    all_layers: list[str],
+    plane_layers: list[str],
     track_width: float,
     clearance: float,
     via_size: float,
@@ -1100,9 +1117,9 @@ def _write_output_and_reroute(
     grid_step: float,
     hole_to_hole_clearance: float,
     verbose: bool,
-    power_nets: Optional[List[str]] = None,
-    power_nets_widths: Optional[List[float]] = None,
-    add_teardrops: bool = False
+    power_nets: list[str] | None = None,
+    power_nets_widths: list[float] | None = None,
+    add_teardrops: bool = False,
 ) -> bool:
     """
     Write output file and optionally reroute ripped nets.
@@ -1112,7 +1129,7 @@ def _write_output_and_reroute(
     """
     print(f"\nWriting output to {output_file}...")
     all_sexprs = all_zone_sexprs + all_debug_lines
-    combined_zone_sexpr = '\n'.join(all_sexprs) if all_sexprs else None
+    combined_zone_sexpr = "\n".join(all_sexprs) if all_sexprs else None
     if all_debug_lines:
         print(f"  Adding {len(all_debug_lines)} debug lines on User.4")
 
@@ -1133,10 +1150,18 @@ def _write_output_and_reroute(
                         break
             if name:
                 zone_names_for_replace.append((name, layer))
-    if not write_plane_output(input_file, output_file, combined_zone_sexpr, all_new_vias, all_new_segments,
-                              exclude_net_ids=all_ripped_net_ids, zones_to_replace=zones_to_replace,
-                              add_teardrops=add_teardrops, net_id_to_name=kicad_v10_names,
-                              zone_names_for_replace=zone_names_for_replace):
+    if not write_plane_output(
+        input_file,
+        output_file,
+        combined_zone_sexpr,
+        all_new_vias,
+        all_new_segments,
+        exclude_net_ids=all_ripped_net_ids,
+        zones_to_replace=zones_to_replace,
+        add_teardrops=add_teardrops,
+        net_id_to_name=kicad_v10_names,
+        zone_names_for_replace=zone_names_for_replace,
+    ):
         print("Error writing output file")
         return False
 
@@ -1151,15 +1176,15 @@ def _write_output_and_reroute(
                 ripped_net_names.append(net.name)
 
         if reroute_ripped_nets and ripped_net_names:
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Re-routing {len(ripped_net_names)} ripped net(s)...")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
             old_recursion_limit = sys.getrecursionlimit()
             sys.setrecursionlimit(max(old_recursion_limit, 100000))
             try:
                 routing_layers = [l for l in all_layers if l not in plane_layers]
                 if not routing_layers:
-                    routing_layers = ['F.Cu', 'B.Cu']
+                    routing_layers = ["F.Cu", "B.Cu"]
                 all_copper_layers = list(set(all_layers + plane_layers))
                 routed, failed, route_time = batch_route(
                     input_file=output_file,
@@ -1175,7 +1200,7 @@ def _write_output_and_reroute(
                     verbose=verbose,
                     minimal_obstacle_cache=True,
                     power_nets=power_nets,
-                    power_nets_widths=power_nets_widths
+                    power_nets_widths=power_nets_widths,
                 )
                 print(f"\nRe-routing complete: {routed} routed, {failed} failed in {route_time:.2f}s")
             finally:
@@ -1191,8 +1216,8 @@ def _write_output_and_reroute(
 def create_plane(
     input_file: str,
     output_file: str,
-    net_names: List[str],
-    plane_layers: List[str],
+    net_names: list[str],
+    plane_layers: list[str],
     via_size: float = defaults.VIA_SIZE,
     via_drill: float = defaults.VIA_DRILL,
     track_width: float = defaults.TRACK_WIDTH,
@@ -1204,13 +1229,13 @@ def create_plane(
     max_via_reuse_radius: float = defaults.PLANE_MAX_VIA_REUSE_RADIUS,
     close_via_radius: float = None,
     hole_to_hole_clearance: float = defaults.HOLE_TO_HOLE_CLEARANCE,
-    all_layers: List[str] = None,
+    all_layers: list[str] = None,
     verbose: bool = False,
     dry_run: bool = False,
     rip_blocker_nets: bool = False,
     max_rip_nets: int = defaults.PLANE_MAX_RIP_NETS,
     reroute_ripped_nets: bool = False,
-    layer_nets: Dict[str, List[str]] = None,
+    layer_nets: dict[str, list[str]] = None,
     plane_proximity_radius: float = 3.0,
     plane_proximity_cost: float = 2.0,
     plane_track_via_clearance: float = defaults.PLANE_TRACK_VIA_CLEARANCE,
@@ -1218,15 +1243,15 @@ def create_plane(
     voronoi_seed_interval: float = 2.0,
     plane_max_iterations: int = defaults.MAX_ITERATIONS,
     debug_lines: bool = False,
-    layer_costs: Optional[List[float]] = None,
-    power_nets: Optional[List[str]] = None,
-    power_nets_widths: Optional[List[float]] = None,
+    layer_costs: list[float] | None = None,
+    power_nets: list[str] | None = None,
+    power_nets_widths: list[float] | None = None,
     add_teardrops: bool = False,
-    pcb_data: Optional[PCBData] = None,
+    pcb_data: PCBData | None = None,
     return_results: bool = False,
     same_net_pad_clearance: float = defaults.SAME_NET_PAD_CLEARANCE,
     skip_existing_zones: bool = False,
-) -> Tuple[int, int, int]:
+) -> tuple[int, int, int]:
     """
     Create copper plane zones and place vias to connect target pads for multiple nets.
 
@@ -1258,7 +1283,7 @@ def create_plane(
         (total_vias_placed, total_traces_added, total_pads_needing_vias)
     """
     if all_layers is None:
-        all_layers = ['F.Cu', 'B.Cu']
+        all_layers = ["F.Cu", "B.Cu"]
 
     if len(net_names) != len(plane_layers):
         print(f"Error: Number of nets ({len(net_names)}) must match number of layers ({len(plane_layers)})")
@@ -1281,7 +1306,7 @@ def create_plane(
 
     # Track failed pads per net for retry passes
     # Each entry is (net_id, net_name, plane_layer, pad_info)
-    failed_pad_infos: List[Tuple[int, str, str, Dict]] = []
+    failed_pad_infos: list[tuple[int, str, str, dict]] = []
 
     # Step 2: Check for existing zones on each target layer.
     # Combine zones from the input file with zones already present in the
@@ -1293,7 +1318,7 @@ def create_plane(
     except (FileNotFoundError, OSError):
         existing_zones = []
     seen_keys = {(z.net_name, z.layer) for z in existing_zones}
-    for z in (getattr(pcb_data, 'zones', None) or []):
+    for z in getattr(pcb_data, "zones", None) or []:
         key = (z.net_name, z.layer)
         if key in seen_keys:
             continue
@@ -1307,14 +1332,19 @@ def create_plane(
             # GUI path: never error on existing zones of other nets - in KiCad,
             # zones with different nets may coexist on a layer. Only check for a
             # same-net existing zone and skip in that case.
-            same_net_zone = next((z for z in existing_zones
-                                  if z.layer == plane_layer
-                                  and (z.net_name == net_name or
-                                       (z.net_id and z.net_id == net_id))),
-                                 None)
+            same_net_zone = next(
+                (
+                    z
+                    for z in existing_zones
+                    if z.layer == plane_layer and (z.net_name == net_name or (z.net_id and z.net_id == net_id))
+                ),
+                None,
+            )
             if same_net_zone:
-                print(f"Note: zone for '{net_name}' already exists on {plane_layer} - "
-                      f"keeping it and only placing stitching vias")
+                print(
+                    f"Note: zone for '{net_name}' already exists on {plane_layer} - "
+                    f"keeping it and only placing stitching vias"
+                )
                 should_create_zones.append(False)
             else:
                 should_create_zones.append(True)
@@ -1336,9 +1366,11 @@ def create_plane(
     # Step 3: Get board bounds for zone polygon
     board_bounds = pcb_data.board_info.board_bounds
     if not board_bounds or (board_bounds[2] - board_bounds[0]) <= 0 or (board_bounds[3] - board_bounds[1]) <= 0:
-        print("Error: Could not determine board bounds "
-              "(no Edge.Cuts drawings found, or they have zero extent). "
-              "Add an Edge.Cuts outline to the board before creating planes.")
+        print(
+            "Error: Could not determine board bounds "
+            "(no Edge.Cuts drawings found, or they have zero extent). "
+            "Add an Edge.Cuts outline to the board before creating planes."
+        )
         if return_results:
             return (0, 0, 0, [], [], [])
         return (0, 0, 0)
@@ -1351,7 +1383,7 @@ def create_plane(
         (min_x + board_edge_clearance, min_y + board_edge_clearance),
         (max_x - board_edge_clearance, min_y + board_edge_clearance),
         (max_x - board_edge_clearance, max_y - board_edge_clearance),
-        (min_x + board_edge_clearance, max_y - board_edge_clearance)
+        (min_x + board_edge_clearance, max_y - board_edge_clearance),
     ]
 
     # Step 4: Build config and coordinate system
@@ -1362,7 +1394,7 @@ def create_plane(
         if len(all_layers) >= 4:
             layer_costs = [1.0] * len(all_layers)
         else:
-            layer_costs = [1.0 if layer == 'F.Cu' else 3.0 for layer in all_layers]
+            layer_costs = [1.0 if layer == "F.Cu" else 3.0 for layer in all_layers]
 
     # Validate layer costs are in range [1.0, 1000]
     for i, cost in enumerate(layer_costs):
@@ -1371,7 +1403,7 @@ def create_plane(
             print(f"ERROR: Layer cost for {layer_name} must be between 1.0 and 1000, got {cost}")
             return (0, 0, 0)
 
-    costs_str = ', '.join(f"{all_layers[i]}={layer_costs[i]}x" for i in range(min(len(all_layers), len(layer_costs))))
+    costs_str = ", ".join(f"{all_layers[i]}={layer_costs[i]}x" for i in range(min(len(all_layers), len(layer_costs))))
     print(f"  Layer costs: {costs_str}")
 
     config = GridRouteConfig(
@@ -1382,7 +1414,7 @@ def create_plane(
         grid_step=grid_step,
         hole_to_hole_clearance=hole_to_hole_clearance,
         layers=all_layers,
-        layer_costs=layer_costs
+        layer_costs=layer_costs,
     )
     coord = GridCoord(grid_step)
 
@@ -1393,7 +1425,7 @@ def create_plane(
         turn_cost=config.turn_cost,
         via_proximity_cost=0,
         layer_costs=config.get_layer_costs(),
-        proximity_heuristic_cost=config.get_proximity_heuristic_cost()
+        proximity_heuristic_cost=config.get_proximity_heuristic_cost(),
     )
 
     # Accumulated results across all nets
@@ -1407,36 +1439,36 @@ def create_plane(
     total_traces_added = 0
     total_failed_pads = 0
     total_pads_needing_vias = 0
-    all_ripped_net_ids: List[int] = []
+    all_ripped_net_ids: list[int] = []
 
     # Collect ALL pads from ALL power nets that need vias (for cross-net protection)
     # This ensures when routing GND, we also protect +3.3V pad zones and vice versa
-    all_power_pads_needing_vias: List[Dict] = []
+    all_power_pads_needing_vias: list[dict] = []
     for net_id_tmp, plane_layer_tmp in zip(net_ids, plane_layers):
         target_pads_tmp = identify_target_pads(pcb_data, net_id_tmp, plane_layer_tmp)
         for p in target_pads_tmp:
-            if p['needs_via']:
-                p['_net_id'] = net_id_tmp  # Tag with net ID for filtering later
+            if p["needs_via"]:
+                p["_net_id"] = net_id_tmp  # Tag with net ID for filtering later
                 all_power_pads_needing_vias.append(p)
 
     # Set to track pads that have been successfully processed (via placed)
-    processed_pad_ids: Set[Tuple[float, float]] = set()  # (global_x, global_y) as key
+    processed_pad_ids: set[tuple[float, float]] = set()  # (global_x, global_y) as key
 
     # Process each net/layer pair
     for net_idx, (net_name, plane_layer, net_id, should_create_zone) in enumerate(
-            zip(net_names, plane_layers, net_ids, should_create_zones)):
-
-        print(f"\n{'='*60}")
+        zip(net_names, plane_layers, net_ids, should_create_zones)
+    ):
+        print(f"\n{'=' * 60}")
         print(f"Processing net '{net_name}' on layer {plane_layer}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Step 5: Identify target pads for this net
         target_pads = identify_target_pads(pcb_data, net_id, plane_layer)
 
-        pads_through_hole = sum(1 for p in target_pads if p['type'] == 'through_hole')
-        pads_direct = sum(1 for p in target_pads if p['type'] == 'direct')
-        pads_already_connected = sum(1 for p in target_pads if p['type'] == 'already_connected')
-        pads_need_via = sum(1 for p in target_pads if p['type'] == 'via_needed')
+        pads_through_hole = sum(1 for p in target_pads if p["type"] == "through_hole")
+        pads_direct = sum(1 for p in target_pads if p["type"] == "direct")
+        pads_already_connected = sum(1 for p in target_pads if p["type"] == "already_connected")
+        pads_need_via = sum(1 for p in target_pads if p["type"] == "via_needed")
         total_pads_needing_vias += pads_need_via
 
         print(f"\nPad analysis for net '{net_name}':")
@@ -1447,7 +1479,7 @@ def create_plane(
         print(f"  SMD pads on other layers (via needed): {pads_need_via}")
 
         # Step 6: Collect existing vias on target net (for reuse)
-        existing_net_vias: List[Tuple[float, float]] = []
+        existing_net_vias: list[tuple[float, float]] = []
         for via in pcb_data.vias:
             if via.net_id == net_id:
                 existing_net_vias.append((via.x, via.y))
@@ -1458,17 +1490,17 @@ def create_plane(
         # Step 7: Build obstacle map for via placement (exclude current net)
         if pads_need_via > 0:
             print("\nBuilding obstacle map for via placement...")
-            obstacles = build_via_obstacle_map(pcb_data, config, net_id,
-                                               same_net_pad_clearance=same_net_pad_clearance)
+            obstacles = build_via_obstacle_map(pcb_data, config, net_id, same_net_pad_clearance=same_net_pad_clearance)
             # Also block positions of vias we've already placed in previous nets
             for placed_via in all_new_vias:
-                block_via_position(obstacles, placed_via['x'], placed_via['y'], coord,
-                                   hole_to_hole_clearance, via_drill)
+                block_via_position(
+                    obstacles, placed_via["x"], placed_via["y"], coord, hole_to_hole_clearance, via_drill
+                )
         else:
             obstacles = None
 
         # Step 8: Build routing obstacle maps (cached per layer, but rebuild for each net)
-        routing_obstacles_cache: Dict[str, GridObstacleMap] = {}
+        routing_obstacles_cache: dict[str, GridObstacleMap] = {}
         if verbose:
             print(f"  pcb_data has {len(pcb_data.vias)} vias, {len(pcb_data.segments)} segments")
 
@@ -1489,21 +1521,21 @@ def create_plane(
         vias_reused = 0
         traces_added = 0
         failed_pads = 0
-        ripped_net_ids: List[int] = []  # Nets ripped for this net
+        ripped_net_ids: list[int] = []  # Nets ripped for this net
 
         # Track all available vias (existing + newly placed) for reuse
         available_vias = list(existing_net_vias)
         # Also include vias placed earlier for THIS net (not other nets!)
         for placed_via in all_new_vias:
-            if placed_via['net_id'] == net_id:
-                available_vias.append((placed_via['x'], placed_via['y']))
+            if placed_via["net_id"] == net_id:
+                available_vias.append((placed_via["x"], placed_via["y"]))
         # Build spatial index for fast nearest-via queries
         via_index = ViaSpatialIndex(bucket_size=max_search_radius)
         via_index.add_all(available_vias)
 
         # Cache for incremental obstacle updates during rip-up
         # Computed lazily when we first encounter each blocker net
-        via_obstacle_cache: Dict[int, ViaPlacementObstacleData] = {}
+        via_obstacle_cache: dict[int, ViaPlacementObstacleData] = {}
 
         def ensure_via_obstacle_cache(blocker_net_id: int):
             """Ensure we have cached obstacles for a net (computed lazily)."""
@@ -1513,13 +1545,15 @@ def create_plane(
                 )
 
         # Build list of pads needing vias for this net
-        pads_needing_vias = [p for p in target_pads if p['needs_via']]
+        pads_needing_vias = [p for p in target_pads if p["needs_via"]]
 
         # Draw all pad exclusion zones on User.9 once at the start of FIRST net (for debugging)
         if debug_lines and net_idx == 0 and all_power_pads_needing_vias:
-            margin = 1.5 * via_size + clearance  # via_size/2 for placed via + via_size/2 for future via + via_size/2 extra + clearance
+            margin = (
+                1.5 * via_size + clearance
+            )  # via_size/2 for placed via + via_size/2 for future via + via_size/2 extra + clearance
             for pp_info in all_power_pads_needing_vias:
-                pp = pp_info['pad']
+                pp = pp_info["pad"]
                 half_w = pp.size_x / 2 + margin
                 half_h = pp.size_y / 2 + margin
                 x1, y1 = pp.global_x - half_w, pp.global_y - half_h
@@ -1537,7 +1571,7 @@ def create_plane(
                 continue
             other_pads = pcb_data.pads_by_net.get(other_net_id, [])
             for op in other_pads:
-                base_pending_pads.append({'pad': op, 'needs_via': False})
+                base_pending_pads.append({"pad": op, "needs_via": False})
 
         # Track ripped net pads incrementally
         ripped_pending_pads = []
@@ -1547,8 +1581,8 @@ def create_plane(
             print(f"\nConnecting {len(pads_needing_vias)} pads to {plane_layer} plane:")
 
         for pad_idx, pad_info in enumerate(pads_needing_vias):
-            pad = pad_info['pad']
-            pad_layer = pad_info.get('pad_layer')
+            pad = pad_info["pad"]
+            pad_layer = pad_info.get("pad_layer")
             current_pad_key = (pad.global_x, pad.global_y)
 
             # Skip pads already processed in previous layer passes
@@ -1561,20 +1595,22 @@ def create_plane(
                 for ripped_id in all_ripped_net_ids[last_ripped_count:]:
                     ripped_pads = pcb_data.pads_by_net.get(ripped_id, [])
                     for rp in ripped_pads:
-                        ripped_pending_pads.append({'pad': rp, 'needs_via': True})
+                        ripped_pending_pads.append({"pad": rp, "needs_via": True})
                 last_ripped_count = len(all_ripped_net_ids)
 
             # Filter base + ripped pending pads by current state
             pending_pads = [
-                pp for pp in base_pending_pads
-                if (pp['pad'].global_x, pp['pad'].global_y) != current_pad_key
-                and (pp['pad'].global_x, pp['pad'].global_y) not in processed_pad_ids
+                pp
+                for pp in base_pending_pads
+                if (pp["pad"].global_x, pp["pad"].global_y) != current_pad_key
+                and (pp["pad"].global_x, pp["pad"].global_y) not in processed_pad_ids
             ]
             if ripped_pending_pads:
                 pending_pads.extend(
-                    pp for pp in ripped_pending_pads
-                    if (pp['pad'].global_x, pp['pad'].global_y) != current_pad_key
-                    and (pp['pad'].global_x, pp['pad'].global_y) not in processed_pad_ids
+                    pp
+                    for pp in ripped_pending_pads
+                    if (pp["pad"].global_x, pp["pad"].global_y) != current_pad_key
+                    and (pp["pad"].global_x, pp["pad"].global_y) not in processed_pad_ids
                 )
 
             print(f"  Pad {pad.component_ref}.{pad.pad_number}...", end=" ")
@@ -1587,20 +1623,30 @@ def create_plane(
             if nearby_via:
                 # Via already very close - try to reuse it
                 via_pos = nearby_via
-                dist = ((via_pos[0] - pad.global_x)**2 + (via_pos[1] - pad.global_y)**2)**0.5
+                dist = ((via_pos[0] - pad.global_x) ** 2 + (via_pos[1] - pad.global_y) ** 2) ** 0.5
 
                 if pad_layer:
                     routing_obs = get_routing_obstacles(pad_layer)
-                    route_result = route_via_to_pad(via_pos, pad, pad_layer, net_id,
-                                                   routing_obs, config, verbose=verbose,
-                                                   return_blocked_cells=True, router=via_pad_router)
+                    route_result = route_via_to_pad(
+                        via_pos,
+                        pad,
+                        pad_layer,
+                        net_id,
+                        routing_obs,
+                        config,
+                        verbose=verbose,
+                        return_blocked_cells=True,
+                        router=via_pad_router,
+                    )
                     trace_segments = route_result.segments if route_result.success else None
                     if trace_segments is not None:
                         if trace_segments:
                             new_segments.extend(trace_segments)
                             traces_added += len(trace_segments)
                         vias_reused += 1
-                        print(f"reused nearby via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), {dist:.2f}mm away, routed {len(trace_segments) if trace_segments else 0} segments to pad")
+                        print(
+                            f"reused nearby via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), {dist:.2f}mm away, routed {len(trace_segments) if trace_segments else 0} segments to pad"
+                        )
                         processed_pad_ids.add(current_pad_key)
                         continue  # Move to next pad
                 else:
@@ -1648,19 +1694,23 @@ def create_plane(
             if via_in_pad:
                 # Found position within pad - place via there (no trace needed)
                 # KiCad vias only specify start/end layers, not intermediate
-                new_vias.append({
-                    'x': via_in_pad[0], 'y': via_in_pad[1],
-                    'size': via_size, 'drill': via_drill,
-                    'layers': ['F.Cu', 'B.Cu'], 'net_id': net_id
-                })
+                new_vias.append(
+                    {
+                        "x": via_in_pad[0],
+                        "y": via_in_pad[1],
+                        "size": via_size,
+                        "drill": via_drill,
+                        "layers": ["F.Cu", "B.Cu"],
+                        "net_id": net_id,
+                    }
+                )
                 available_vias.append(via_in_pad)
                 via_index.add(via_in_pad[0], via_in_pad[1])
                 vias_placed += 1
                 # Block this via position for hole-to-hole clearance
-                block_via_position(obstacles, via_in_pad[0], via_in_pad[1], coord,
-                                   hole_to_hole_clearance, via_drill)
+                block_via_position(obstacles, via_in_pad[0], via_in_pad[1], coord, hole_to_hole_clearance, via_drill)
                 if via_in_pad == (pad.global_x, pad.global_y):
-                    print(f"placed via at pad center (no trace needed)")
+                    print("placed via at pad center (no trace needed)")
                 else:
                     print(f"placed via at ({via_in_pad[0]:.2f}, {via_in_pad[1]:.2f}) within pad (no trace needed)")
                 processed_pad_ids.add(current_pad_key)
@@ -1676,25 +1726,35 @@ def create_plane(
 
                 if pad_layer:
                     routing_obs = get_routing_obstacles(pad_layer)
-                    route_result = route_via_to_pad(via_pos, pad, pad_layer, net_id,
-                                                       routing_obs, config, verbose=verbose,
-                                                       return_blocked_cells=True, router=via_pad_router)
+                    route_result = route_via_to_pad(
+                        via_pos,
+                        pad,
+                        pad_layer,
+                        net_id,
+                        routing_obs,
+                        config,
+                        verbose=verbose,
+                        return_blocked_cells=True,
+                        router=via_pad_router,
+                    )
                     trace_segments = route_result.segments if route_result.success else None
                     if trace_segments is None:
                         # Routing to existing via failed - fall back to placing new via
-                        print(f"can't route to existing via, ", end="")
+                        print("can't route to existing via, ", end="")
                         existing_via = None  # Trigger new via placement below
                     elif trace_segments:
                         new_segments.extend(trace_segments)
                         traces_added += len(trace_segments)
                         vias_reused += 1
                         reuse_success = True
-                        dist = ((via_pos[0] - pad.global_x)**2 + (via_pos[1] - pad.global_y)**2)**0.5
-                        print(f"reused existing via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), {dist:.2f}mm away, routed {len(trace_segments)} segments to pad")
+                        dist = ((via_pos[0] - pad.global_x) ** 2 + (via_pos[1] - pad.global_y) ** 2) ** 0.5
+                        print(
+                            f"reused existing via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), {dist:.2f}mm away, routed {len(trace_segments)} segments to pad"
+                        )
                     else:
                         vias_reused += 1
                         reuse_success = True
-                        print(f"reused via at pad center")
+                        print("reused via at pad center")
                 else:
                     vias_reused += 1
                     reuse_success = True
@@ -1706,9 +1766,12 @@ def create_plane(
 
             # Need to place a new via (pad center blocked, and either no existing via or reuse failed)
             routing_obs = get_routing_obstacles(pad_layer) if pad_layer else None
-            failed_route_positions: Set[Tuple[int, int]] = set()  # Track failed positions for this pad
+            failed_route_positions: set[tuple[int, int]] = set()  # Track failed positions for this pad
             via_pos = find_via_position(
-                pad, obstacles, coord, max_search_radius,
+                pad,
+                obstacles,
+                coord,
+                max_search_radius,
                 routing_obstacles=routing_obs,
                 config=config,
                 pad_layer=pad_layer,
@@ -1716,7 +1779,7 @@ def create_plane(
                 verbose=verbose,
                 failed_route_positions=failed_route_positions,
                 pending_pads=pending_pads,
-                router=via_pad_router
+                router=via_pad_router,
             )
 
             placement_success = False
@@ -1725,15 +1788,22 @@ def create_plane(
             blocked_cells = []
 
             if via_pos:
-                via_at_pad_center = (abs(via_pos[0] - pad.global_x) < 0.001 and
-                                     abs(via_pos[1] - pad.global_y) < 0.001)
+                via_at_pad_center = abs(via_pos[0] - pad.global_x) < 0.001 and abs(via_pos[1] - pad.global_y) < 0.001
 
                 if via_at_pad_center:
                     placement_success = True
                 elif pad_layer:
-                    route_result = route_via_to_pad(via_pos, pad, pad_layer, net_id,
-                                                       routing_obs, config, verbose=verbose,
-                                                       return_blocked_cells=True, router=via_pad_router)
+                    route_result = route_via_to_pad(
+                        via_pos,
+                        pad,
+                        pad_layer,
+                        net_id,
+                        routing_obs,
+                        config,
+                        verbose=verbose,
+                        return_blocked_cells=True,
+                        router=via_pad_router,
+                    )
                     if route_result.success:
                         trace_segments = route_result.segments
                         placement_success = True
@@ -1744,22 +1814,33 @@ def create_plane(
 
             # If fast path failed and rip_blocker_nets enabled, try iterative rip-up
             if not placement_success and rip_blocker_nets:
-                print(f"blocked, trying rip-up...", end=" ")
+                print("blocked, trying rip-up...", end=" ")
                 result = try_place_via_with_ripup(
-                    pad, pad_layer, net_id, pcb_data, config, coord,
-                    max_search_radius, max_rip_nets,
-                    obstacles, routing_obs,
-                    via_obstacle_cache, routing_obstacles_cache, all_layers,
+                    pad,
+                    pad_layer,
+                    net_id,
+                    pcb_data,
+                    config,
+                    coord,
+                    max_search_radius,
+                    max_rip_nets,
+                    obstacles,
+                    routing_obs,
+                    via_obstacle_cache,
+                    routing_obstacles_cache,
+                    all_layers,
                     via_blocked=via_blocked,
                     blocked_cells=blocked_cells,
                     new_vias=new_vias,
                     hole_to_hole_clearance=hole_to_hole_clearance,
                     via_drill=via_drill,
-                    protected_net_ids=set(net_ids),  # Protect all nets being routed (don't rip power nets we're routing)
+                    protected_net_ids=set(
+                        net_ids
+                    ),  # Protect all nets being routed (don't rip power nets we're routing)
                     verbose=verbose,
                     find_via_position_fn=find_via_position,
                     route_via_to_pad_fn=route_via_to_pad,
-                    pending_pads=pending_pads
+                    pending_pads=pending_pads,
                 )
 
                 if result.success:
@@ -1769,25 +1850,33 @@ def create_plane(
                             ripped_net_ids.append(rid)
                         # Remove ripped net's vias and segments from accumulator lists
                         # (they were removed from pcb_data during rip-up)
-                        all_new_vias[:] = [v for v in all_new_vias if v['net_id'] != rid]
-                        all_new_segments[:] = [s for s in all_new_segments if s['net_id'] != rid]
+                        all_new_vias[:] = [v for v in all_new_vias if v["net_id"] != rid]
+                        all_new_segments[:] = [s for s in all_new_segments if s["net_id"] != rid]
                     # Note: obstacle maps were already updated incrementally in try_place_via_with_ripup
 
                     # Add via
-                    new_vias.append({
-                        'x': result.via_pos[0], 'y': result.via_pos[1],
-                        'size': via_size, 'drill': via_drill,
-                        'layers': ['F.Cu', 'B.Cu'], 'net_id': net_id
-                    })
+                    new_vias.append(
+                        {
+                            "x": result.via_pos[0],
+                            "y": result.via_pos[1],
+                            "size": via_size,
+                            "drill": via_drill,
+                            "layers": ["F.Cu", "B.Cu"],
+                            "net_id": net_id,
+                        }
+                    )
                     vias_placed += 1
                     processed_pad_ids.add(current_pad_key)
                     available_vias.append(result.via_pos)
                     via_index.add(result.via_pos[0], result.via_pos[1])
                     new_segments.extend(result.segments)
                     traces_added += len(result.segments)
-                    block_via_position(obstacles, result.via_pos[0], result.via_pos[1], coord,
-                                       hole_to_hole_clearance, via_drill)
-                    print(f"{GREEN}placed via at ({result.via_pos[0]:.2f}, {result.via_pos[1]:.2f}) after ripping {len(result.ripped_net_ids)} nets{RESET}")
+                    block_via_position(
+                        obstacles, result.via_pos[0], result.via_pos[1], coord, hole_to_hole_clearance, via_drill
+                    )
+                    print(
+                        f"{GREEN}placed via at ({result.via_pos[0]:.2f}, {result.via_pos[1]:.2f}) after ripping {len(result.ripped_net_ids)} nets{RESET}"
+                    )
                 else:
                     failed_pads += 1
                     failed_pad_infos.append((net_id, net_name, plane_layer, pad_info))
@@ -1799,13 +1888,17 @@ def create_plane(
 
             elif placement_success:
                 # Fast path succeeded
-                via_at_pad_center = (abs(via_pos[0] - pad.global_x) < 0.001 and
-                                     abs(via_pos[1] - pad.global_y) < 0.001)
-                new_vias.append({
-                    'x': via_pos[0], 'y': via_pos[1],
-                    'size': via_size, 'drill': via_drill,
-                    'layers': ['F.Cu', 'B.Cu'], 'net_id': net_id
-                })
+                via_at_pad_center = abs(via_pos[0] - pad.global_x) < 0.001 and abs(via_pos[1] - pad.global_y) < 0.001
+                new_vias.append(
+                    {
+                        "x": via_pos[0],
+                        "y": via_pos[1],
+                        "size": via_size,
+                        "drill": via_drill,
+                        "layers": ["F.Cu", "B.Cu"],
+                        "net_id": net_id,
+                    }
+                )
                 vias_placed += 1
                 processed_pad_ids.add(current_pad_key)
                 available_vias.append(via_pos)
@@ -1813,13 +1906,14 @@ def create_plane(
                 if trace_segments:
                     new_segments.extend(trace_segments)
                     traces_added += len(trace_segments)
-                block_via_position(obstacles, via_pos[0], via_pos[1], coord,
-                                   hole_to_hole_clearance, via_drill)
+                block_via_position(obstacles, via_pos[0], via_pos[1], coord, hole_to_hole_clearance, via_drill)
 
                 if via_at_pad_center:
-                    print(f"placed via at pad center (no trace needed)")
+                    print("placed via at pad center (no trace needed)")
                 else:
-                    print(f"placed via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), routed {len(trace_segments) if trace_segments else 0} segments to pad")
+                    print(
+                        f"placed via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), routed {len(trace_segments) if trace_segments else 0} segments to pad"
+                    )
 
             elif not rip_blocker_nets:
                 # Fast path failed, no rip-up enabled - try fallback via reuse
@@ -1828,9 +1922,9 @@ def create_plane(
                     via_pos = fallback_via
                     if pad_layer:
                         routing_obs = get_routing_obstacles(pad_layer)
-                        trace_segments = route_via_to_pad(via_pos, pad, pad_layer, net_id,
-                                                           routing_obs, config, verbose=verbose,
-                                                           router=via_pad_router)
+                        trace_segments = route_via_to_pad(
+                            via_pos, pad, pad_layer, net_id, routing_obs, config, verbose=verbose, router=via_pad_router
+                        )
                         if trace_segments is None:
                             print(f"{RED}ROUTING FAILED{RESET}")
                             failed_pads += 1
@@ -1840,7 +1934,9 @@ def create_plane(
                             traces_added += len(trace_segments)
                             vias_reused += 1
                             processed_pad_ids.add(current_pad_key)
-                            print(f"reused fallback via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), routed {len(trace_segments)} segments to pad")
+                            print(
+                                f"reused fallback via at ({via_pos[0]:.2f}, {via_pos[1]:.2f}), routed {len(trace_segments)} segments to pad"
+                            )
                         else:
                             vias_reused += 1
                             processed_pad_ids.add(current_pad_key)
@@ -1872,17 +1968,19 @@ def create_plane(
                 clearance=zone_clearance,
                 min_thickness=min_thickness,
                 direct_connect=True,
-                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION
+                use_net_name=pcb_data.kicad_version >= KICAD_10_MIN_VERSION,
             )
             all_zone_sexprs.append(zone_sexpr)
-            all_zone_data.append({
-                'net_id': net_id,
-                'net_name': net_name,
-                'layer': plane_layer,
-                'polygon_points': zone_polygon,
-                'clearance': zone_clearance,
-                'min_thickness': min_thickness,
-            })
+            all_zone_data.append(
+                {
+                    "net_id": net_id,
+                    "net_name": net_name,
+                    "layer": plane_layer,
+                    "polygon_points": zone_polygon,
+                    "clearance": zone_clearance,
+                    "min_thickness": min_thickness,
+                }
+            )
 
             # Calculate and print resistance for single-net layer
             result = analyze_single_net_plane(zone_polygon, plane_layer)
@@ -1916,18 +2014,23 @@ def create_plane(
 
         # Add new vias/segments to pcb_data so subsequent nets will avoid them
         for v in new_vias:
-            pcb_data.vias.append(Via(
-                x=v['x'], y=v['y'], size=v['size'], drill=v['drill'],
-                layers=v['layers'], net_id=v['net_id']
-            ))
+            pcb_data.vias.append(
+                Via(x=v["x"], y=v["y"], size=v["size"], drill=v["drill"], layers=v["layers"], net_id=v["net_id"])
+            )
         for s in new_segments:
-            start = s['start']
-            end = s['end']
-            pcb_data.segments.append(Segment(
-                start_x=start[0], start_y=start[1],
-                end_x=end[0], end_y=end[1],
-                width=s['width'], layer=s['layer'], net_id=s['net_id']
-            ))
+            start = s["start"]
+            end = s["end"]
+            pcb_data.segments.append(
+                Segment(
+                    start_x=start[0],
+                    start_y=start[1],
+                    end_x=end[0],
+                    end_y=end[1],
+                    width=s["width"],
+                    layer=s["layer"],
+                    net_id=s["net_id"],
+                )
+            )
 
     # End of per-net loop
 
@@ -1935,10 +2038,10 @@ def create_plane(
     if layer_nets:
         for layer, nets_on_layer in layer_nets.items():
             if len(nets_on_layer) > 1:
-                print(f"\n{'='*60}")
+                print(f"\n{'=' * 60}")
                 print(f"Computing zone boundaries for multi-net layer {layer}")
                 print(f"Nets: {', '.join(nets_on_layer)}")
-                print(f"{'='*60}")
+                print(f"{'=' * 60}")
 
                 zone_sexprs, debug_line_sexprs, zone_data = _generate_multinet_layer_zones(
                     layer=layer,
@@ -1957,7 +2060,7 @@ def create_plane(
                     voronoi_seed_interval=voronoi_seed_interval,
                     board_edge_clearance=board_edge_clearance,
                     debug_lines=debug_lines,
-                    verbose=verbose
+                    verbose=verbose,
                 )
                 all_zone_sexprs.extend(zone_sexprs)
                 all_debug_lines.extend(debug_line_sexprs)
@@ -1965,9 +2068,9 @@ def create_plane(
 
     # Print overall totals only if multiple nets were processed
     if len(net_names) > 1:
-        print(f"\n{'='*60}")
-        print(f"OVERALL TOTALS")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print("OVERALL TOTALS")
+        print(f"{'=' * 60}")
         print(f"  Nets processed: {len(net_names)}")
         print(f"  Total new vias placed: {total_vias_placed}")
         print(f"  Total existing vias reused: {total_vias_reused}")
@@ -2007,12 +2110,19 @@ def create_plane(
             verbose=verbose,
             power_nets=power_nets,
             power_nets_widths=power_nets_widths,
-            add_teardrops=add_teardrops
+            add_teardrops=add_teardrops,
         )
 
     if return_results:
-        return (total_vias_placed, total_traces_added, total_pads_needing_vias,
-                all_new_vias, all_new_segments, all_zone_data, total_failed_pads)
+        return (
+            total_vias_placed,
+            total_traces_added,
+            total_pads_needing_vias,
+            all_new_vias,
+            all_new_segments,
+            all_zone_data,
+            total_failed_pads,
+        )
     return (total_vias_placed, total_traces_added, total_pads_needing_vias)
 
 
@@ -2030,98 +2140,191 @@ Examples:
 
     # With rip-up and automatic re-routing:
     python route_planes.py input.kicad_pcb output.kicad_pcb --nets GND VCC --plane-layers In1.Cu In2.Cu --rip-blocker-nets --reroute-ripped-nets
-"""
+""",
     )
     parser.add_argument("input_file", help="Input KiCad PCB file")
     parser.add_argument("output_file", nargs="?", help="Output KiCad PCB file (default: input_routed.kicad_pcb)")
-    parser.add_argument("--overwrite", "-O", action="store_true",
-                        help="Overwrite input file instead of creating _routed copy")
+    parser.add_argument(
+        "--overwrite", "-O", action="store_true", help="Overwrite input file instead of creating _routed copy"
+    )
 
     # Required options (can be multiple)
-    parser.add_argument("--nets", "-n", nargs="+", required=True,
-                        help="Net name(s) for the plane(s) (e.g., GND VCC)")
-    parser.add_argument("--plane-layers", "-p", nargs="+", required=True,
-                        help="Plane layer(s) for the zone(s), one per net (e.g., In1.Cu In2.Cu)")
+    parser.add_argument("--nets", "-n", nargs="+", required=True, help="Net name(s) for the plane(s) (e.g., GND VCC)")
+    parser.add_argument(
+        "--plane-layers",
+        "-p",
+        nargs="+",
+        required=True,
+        help="Plane layer(s) for the zone(s), one per net (e.g., In1.Cu In2.Cu)",
+    )
 
     # Via and track geometry
     parser.add_argument("--via-size", type=float, default=0.5, help="Via outer diameter in mm (default: 0.5)")
     parser.add_argument("--via-drill", type=float, default=0.3, help="Via drill size in mm (default: 0.3)")
-    parser.add_argument("--track-width", type=float, default=0.3, help="Track width for via-to-pad connections in mm (default: 0.3)")
+    parser.add_argument(
+        "--track-width", type=float, default=0.3, help="Track width for via-to-pad connections in mm (default: 0.3)"
+    )
     parser.add_argument("--clearance", type=float, default=0.25, help="Clearance in mm (default: 0.25)")
 
     # Zone options
-    parser.add_argument("--zone-clearance", type=float, default=0.2, help="Zone clearance from other copper in mm (default: 0.2)")
-    parser.add_argument("--min-thickness", type=float, default=0.1, help="Minimum zone copper thickness in mm (default: 0.1)")
+    parser.add_argument(
+        "--zone-clearance", type=float, default=0.2, help="Zone clearance from other copper in mm (default: 0.2)"
+    )
+    parser.add_argument(
+        "--min-thickness", type=float, default=0.1, help="Minimum zone copper thickness in mm (default: 0.1)"
+    )
 
     # Algorithm options
     parser.add_argument("--grid-step", type=float, default=0.1, help="Grid resolution in mm (default: 0.1)")
-    parser.add_argument("--max-search-radius", type=float, default=10.0, help="Max radius to search for valid via position in mm (default: 10.0)")
-    parser.add_argument("--max-via-reuse-radius", type=float, default=1.0, help="Max radius to reuse existing via instead of placing new one in mm (default: 1.0)")
-    parser.add_argument("--close-via-radius", type=float, default=None, help="Radius to check for nearby vias before placing new one (default: 2.5 * via-size)")
-    parser.add_argument("--hole-to-hole-clearance", type=float, default=0.2, help="Minimum clearance between drill holes in mm (default: 0.2)")
-    parser.add_argument("--layers", "-l", nargs="+", default=None,
-                        help="All copper layers for routing and via span (default: F.Cu + plane-layers + B.Cu)")
-    parser.add_argument("--layer-costs", nargs="+", type=float, default=[],
-                        help="Per-layer routing cost multipliers (1.0-1000). "
-                             "Order matches --layers. Example: --layer-costs 1.0 3.0 3.0 3.0")
+    parser.add_argument(
+        "--max-search-radius",
+        type=float,
+        default=10.0,
+        help="Max radius to search for valid via position in mm (default: 10.0)",
+    )
+    parser.add_argument(
+        "--max-via-reuse-radius",
+        type=float,
+        default=1.0,
+        help="Max radius to reuse existing via instead of placing new one in mm (default: 1.0)",
+    )
+    parser.add_argument(
+        "--close-via-radius",
+        type=float,
+        default=None,
+        help="Radius to check for nearby vias before placing new one (default: 2.5 * via-size)",
+    )
+    parser.add_argument(
+        "--hole-to-hole-clearance",
+        type=float,
+        default=0.2,
+        help="Minimum clearance between drill holes in mm (default: 0.2)",
+    )
+    parser.add_argument(
+        "--layers",
+        "-l",
+        nargs="+",
+        default=None,
+        help="All copper layers for routing and via span (default: F.Cu + plane-layers + B.Cu)",
+    )
+    parser.add_argument(
+        "--layer-costs",
+        nargs="+",
+        type=float,
+        default=[],
+        help="Per-layer routing cost multipliers (1.0-1000). "
+        "Order matches --layers. Example: --layer-costs 1.0 3.0 3.0 3.0",
+    )
 
     # Blocker rip-up options
-    parser.add_argument("--rip-blocker-nets", action="store_true",
-                        help="Identify and rip up nets blocking via placement, then retry. Ripped nets are excluded from output.")
-    parser.add_argument("--max-rip-nets", type=int, default=3,
-                        help="Maximum number of blocker nets to rip up (default: 3)")
-    parser.add_argument("--reroute-ripped-nets", action="store_true",
-                        help="Automatically re-route ripped nets after via placement")
-    parser.add_argument("--power-nets", nargs="+", default=None,
-                        help="Glob patterns for power nets to route with wider tracks (e.g., '*GND*' '*VCC*')")
-    parser.add_argument("--power-nets-widths", nargs="+", type=float, default=None,
-                        help="Track widths in mm for each power-net pattern (must match --power-nets length)")
+    parser.add_argument(
+        "--rip-blocker-nets",
+        action="store_true",
+        help="Identify and rip up nets blocking via placement, then retry. Ripped nets are excluded from output.",
+    )
+    parser.add_argument(
+        "--max-rip-nets", type=int, default=3, help="Maximum number of blocker nets to rip up (default: 3)"
+    )
+    parser.add_argument(
+        "--reroute-ripped-nets", action="store_true", help="Automatically re-route ripped nets after via placement"
+    )
+    parser.add_argument(
+        "--power-nets",
+        nargs="+",
+        default=None,
+        help="Glob patterns for power nets to route with wider tracks (e.g., '*GND*' '*VCC*')",
+    )
+    parser.add_argument(
+        "--power-nets-widths",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Track widths in mm for each power-net pattern (must match --power-nets length)",
+    )
 
     # Multi-net layer connection options
-    parser.add_argument("--plane-proximity-radius", type=float, default=3.0,
-                        help="Radius around other nets' vias to add proximity cost when routing plane connections (mm, default: 3.0)")
-    parser.add_argument("--plane-proximity-cost", type=float, default=2.0,
-                        help="Maximum proximity cost around other nets' vias when routing plane connections (mm equivalent, default: 2.0)")
-    parser.add_argument("--plane-track-via-clearance", type=float, default=0.8,
-                        help="Clearance from track center to other nets' via centers when routing MST connections (mm, default: 0.8)")
-    parser.add_argument("--voronoi-seed-interval", type=float, default=2.0,
-                        help="Sample interval for Voronoi seed points along plane connection routes (mm, default: 2.0)")
-    parser.add_argument("--plane-max-iterations", type=int, default=200000,
-                        help="Max A* iterations for routing plane connections (default: 200000)")
+    parser.add_argument(
+        "--plane-proximity-radius",
+        type=float,
+        default=3.0,
+        help="Radius around other nets' vias to add proximity cost when routing plane connections (mm, default: 3.0)",
+    )
+    parser.add_argument(
+        "--plane-proximity-cost",
+        type=float,
+        default=2.0,
+        help="Maximum proximity cost around other nets' vias when routing plane connections (mm equivalent, default: 2.0)",
+    )
+    parser.add_argument(
+        "--plane-track-via-clearance",
+        type=float,
+        default=0.8,
+        help="Clearance from track center to other nets' via centers when routing MST connections (mm, default: 0.8)",
+    )
+    parser.add_argument(
+        "--voronoi-seed-interval",
+        type=float,
+        default=2.0,
+        help="Sample interval for Voronoi seed points along plane connection routes (mm, default: 2.0)",
+    )
+    parser.add_argument(
+        "--plane-max-iterations",
+        type=int,
+        default=200000,
+        help="Max A* iterations for routing plane connections (default: 200000)",
+    )
 
     # Board edge clearance
-    parser.add_argument("--board-edge-clearance", type=float, default=0.5,
-                        help="Clearance from board edge for zones in mm (default: 0.5)")
+    parser.add_argument(
+        "--board-edge-clearance",
+        type=float,
+        default=0.5,
+        help="Clearance from board edge for zones in mm (default: 0.5)",
+    )
 
     # Same-net pad clearance (avoid via-in-pad)
-    parser.add_argument("--same-net-pad-clearance", type=float,
-                        default=defaults.SAME_NET_PAD_CLEARANCE,
-                        help="Edge-to-edge clearance (mm) between stitching vias and same-net pads. "
-                             "-1 (default) allows via-in-pad placement; any value >= 0 forces vias "
-                             "outside same-net pads with that clearance.")
+    parser.add_argument(
+        "--same-net-pad-clearance",
+        type=float,
+        default=defaults.SAME_NET_PAD_CLEARANCE,
+        help="Edge-to-edge clearance (mm) between stitching vias and same-net pads. "
+        "-1 (default) allows via-in-pad placement; any value >= 0 forces vias "
+        "outside same-net pads with that clearance.",
+    )
 
     # Debug options
     parser.add_argument("--dry-run", action="store_true", help="Analyze without writing output")
-    parser.add_argument("--skip-existing-zones", action="store_true",
-                        help="Keep an existing same-net zone (don't recreate) and only place stitching vias; "
-                             "tolerate other-net zones on the same layer (e.g. a GND island under an RF feed)")
+    parser.add_argument(
+        "--skip-existing-zones",
+        action="store_true",
+        help="Keep an existing same-net zone (don't recreate) and only place stitching vias; "
+        "tolerate other-net zones on the same layer (e.g. a GND island under an RF feed)",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Print detailed DEBUG messages")
     parser.add_argument("--debug-lines", action="store_true", help="Output MST routes on User.1, User.2, etc. per net")
     parser.add_argument("--add-teardrops", action="store_true", help="Add teardrop settings to all pads in output file")
 
     # GND return vias
-    parser.add_argument("--add-gnd-vias", action="store_true",
-        help="Add GND vias near signal vias for return current path")
-    parser.add_argument("--gnd-via-net", type=str, default="GND",
-        help="Net name for GND vias (default: GND)")
-    parser.add_argument("--gnd-via-distance", type=float, default=2.0,
-        help="Maximum distance from signal via to place GND via in mm (default: 2.0)")
+    parser.add_argument(
+        "--add-gnd-vias", action="store_true", help="Add GND vias near signal vias for return current path"
+    )
+    parser.add_argument("--gnd-via-net", type=str, default="GND", help="Net name for GND vias (default: GND)")
+    parser.add_argument(
+        "--gnd-via-distance",
+        type=float,
+        default=2.0,
+        help="Maximum distance from signal via to place GND via in mm (default: 2.0)",
+    )
 
     # Zone island stitching (requires pcbnew + shapely)
-    parser.add_argument("--stitch-islands", action="store_true",
-        help="After zone fill, find isolated copper islands and add stitching vias (requires pcbnew)")
-    parser.add_argument("--stitch-layer", type=str, default="F.Cu",
-        help="Layer to check for zone islands (default: F.Cu)")
+    parser.add_argument(
+        "--stitch-islands",
+        action="store_true",
+        help="After zone fill, find isolated copper islands and add stitching vias (requires pcbnew)",
+    )
+    parser.add_argument(
+        "--stitch-layer", type=str, default="F.Cu", help="Layer to check for zone islands (default: F.Cu)"
+    )
 
     args = parser.parse_args()
 
@@ -2132,21 +2335,25 @@ Examples:
         else:
             # Auto-generate output filename: input.kicad_pcb -> input_routed.kicad_pcb
             base, ext = os.path.splitext(args.input_file)
-            args.output_file = base + '_routed' + ext
+            args.output_file = base + "_routed" + ext
             print(f"Output file: {args.output_file}")
 
     # Default layers to F.Cu + plane-layers + B.Cu (need outer layers to reach pads)
     if args.layers is None:
-        layers = ['F.Cu'] + args.plane_layers + ['B.Cu']
+        layers = ["F.Cu"] + args.plane_layers + ["B.Cu"]
         # Remove duplicates while preserving order
         seen = set()
         args.layers = [l for l in layers if not (l in seen or seen.add(l))]
 
     # Validate net/plane-layer counts match
     if len(args.nets) != len(args.plane_layers):
-        print(f"Error: Number of net arguments ({len(args.nets)}) must match number of plane layers ({len(args.plane_layers)})")
+        print(
+            f"Error: Number of net arguments ({len(args.nets)}) must match number of plane layers ({len(args.plane_layers)})"
+        )
         print("Each net argument needs a corresponding plane layer")
-        print("Use | to separate multiple nets on the same layer (e.g., --nets GND 'VA19|VA11' --plane-layers In4.Cu In5.Cu)")
+        print(
+            "Use | to separate multiple nets on the same layer (e.g., --nets GND 'VA19|VA11' --plane-layers In4.Cu In5.Cu)"
+        )
         return
 
     # Parse --nets arguments: detect | separator for multi-net layers
@@ -2159,7 +2366,7 @@ Examples:
     layer_nets = {}
 
     for net_arg, layer in zip(args.nets, args.plane_layers):
-        nets_on_layer = [n.strip() for n in net_arg.split('|')]
+        nets_on_layer = [n.strip() for n in net_arg.split("|")]
         for net in nets_on_layer:
             net_names.append(net)
             plane_layers.append(layer)
@@ -2214,13 +2421,13 @@ Examples:
 
     # Add GND return vias if requested
     if args.add_gnd_vias and not args.dry_run:
-        from kicad_parser import parse_kicad_pcb
-        from routing_config import GridRouteConfig, GridCoord
-        from obstacle_map import build_base_obstacle_map
         from add_gnd_vias import add_gnd_vias_to_existing_board
+        from kicad_parser import parse_kicad_pcb
         from kicad_writer import add_tracks_and_vias_to_pcb
+        from obstacle_map import build_base_obstacle_map
+        from routing_config import GridCoord, GridRouteConfig
 
-        print(f"\nAdding GND return vias near signal vias...")
+        print("\nAdding GND return vias near signal vias...")
 
         # Parse the output file (which now has planes)
         pcb_data = parse_kicad_pcb(args.output_file)
@@ -2232,7 +2439,7 @@ Examples:
             track_width=args.track_width,
             clearance=args.clearance,
             grid_step=args.grid_step,
-            layers=args.layers
+            layers=args.layers,
         )
         coord = GridCoord(gnd_config.grid_step)
 
@@ -2241,71 +2448,70 @@ Examples:
 
         # Add GND vias
         gnd_vias = add_gnd_vias_to_existing_board(
-            pcb_data,
-            args.gnd_via_net,
-            args.gnd_via_distance,
-            gnd_config,
-            obstacles,
-            coord
+            pcb_data, args.gnd_via_net, args.gnd_via_distance, gnd_config, obstacles, coord
         )
 
         if gnd_vias:
             # Convert Via objects to dict format for writer
-            via_dicts = [{
-                'x': v.x,
-                'y': v.y,
-                'size': v.size,
-                'drill': v.drill,
-                'net_id': v.net_id,
-                'layers': v.layers,
-                'free': getattr(v, 'free', False)
-            } for v in gnd_vias]
+            via_dicts = [
+                {
+                    "x": v.x,
+                    "y": v.y,
+                    "size": v.size,
+                    "drill": v.drill,
+                    "net_id": v.net_id,
+                    "layers": v.layers,
+                    "free": getattr(v, "free", False),
+                }
+                for v in gnd_vias
+            ]
 
             # Write vias to output file
-            add_tracks_and_vias_to_pcb(
-                args.output_file,
-                args.output_file,
-                tracks=[],
-                vias=via_dicts
-            )
+            add_tracks_and_vias_to_pcb(args.output_file, args.output_file, tracks=[], vias=via_dicts)
             print(f"Wrote {len(gnd_vias)} GND vias to {args.output_file}")
-
 
     # Stitch zone islands if requested
     if args.stitch_islands and not args.dry_run:
         print(f"\nStitching isolated zone islands on {args.stitch_layer}...")
         from stitch_zone_islands import find_and_stitch_islands
+
         net_name = args.nets[0] if len(args.nets) == 1 else args.gnd_via_net
         find_and_stitch_islands(
-            args.output_file, args.output_file,
-            net_name=net_name, layer_name=args.stitch_layer,
-            via_size=args.via_size, via_drill=args.via_drill
+            args.output_file,
+            args.output_file,
+            net_name=net_name,
+            layer_name=args.stitch_layer,
+            via_size=args.via_size,
+            via_drill=args.via_drill,
         )
 
     # Remove micro-stub track artifacts (< 0.05mm segments from router termination)
     if not args.dry_run and os.path.exists(args.output_file):
         import re as _re
-        with open(args.output_file, 'r') as f:
+
+        with open(args.output_file) as f:
             content = f.read()
-        segments = list(_re.finditer(
-            r'\(segment\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s*\(end\s+([\d.-]+)\s+([\d.-]+)\)', content))
+        segments = list(
+            _re.finditer(r"\(segment\s+\(start\s+([\d.-]+)\s+([\d.-]+)\)\s*\(end\s+([\d.-]+)\s+([\d.-]+)\)", content)
+        )
         to_remove = []
         for m in segments:
             x1, y1, x2, y2 = float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4))
-            if ((x2-x1)**2 + (y2-y1)**2) ** 0.5 < 0.05:
+            if ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 < 0.05:
                 start = m.start()
                 depth = 0
                 for i, c in enumerate(content[start:], start):
-                    if c == '(': depth += 1
-                    elif c == ')':
+                    if c == "(":
+                        depth += 1
+                    elif c == ")":
                         depth -= 1
                         if depth == 0:
-                            to_remove.append((start, i+1))
+                            to_remove.append((start, i + 1))
                             break
         if to_remove:
             for s, e in sorted(to_remove, reverse=True):
                 content = content[:s] + content[e:]
-            with open(args.output_file, 'w') as f:
+            with open(args.output_file, "w") as f:
                 f.write(content)
             print(f"\nRemoved {len(to_remove)} micro-stub track artifacts (< 0.05mm)")
 

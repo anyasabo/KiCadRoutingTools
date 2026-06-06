@@ -5,19 +5,18 @@ Handles track proximity costs, stub proximity costs, BGA proximity costs,
 and cross-layer track alignment tracking.
 """
 
-from typing import List, Tuple, Dict, Set
 import numpy as np
 
-from kicad_parser import PCBData
-from routing_config import GridRouteConfig, GridCoord
 from bresenham_utils import walk_line
+from kicad_parser import PCBData
+from routing_config import GridCoord, GridRouteConfig
 
 # Module-level cache for pre-computed proximity offset tables
 # Key: (radius_grid, cost_grid) -> List of (ex, ey, cost) tuples
-_proximity_offset_cache: Dict[Tuple[int, int], List[Tuple[int, int, int]]] = {}
+_proximity_offset_cache: dict[tuple[int, int], list[tuple[int, int, int]]] = {}
 
 
-def _get_proximity_offsets(radius_grid: int, cost_grid: int) -> List[Tuple[int, int, int]]:
+def _get_proximity_offsets(radius_grid: int, cost_grid: int) -> list[tuple[int, int, int]]:
     """Get pre-computed proximity offsets and costs for a given radius.
 
     Returns a list of (ex, ey, cost) tuples for all grid cells within the radius.
@@ -34,7 +33,7 @@ def _get_proximity_offsets(radius_grid: int, cost_grid: int) -> List[Tuple[int, 
         for ey in range(-radius_grid, radius_grid + 1):
             dist_sq = ex * ex + ey * ey
             if dist_sq <= radius_sq:
-                dist = dist_sq ** 0.5
+                dist = dist_sq**0.5
                 # Use exact same formula as original to avoid floating-point differences
                 proximity = 1.0 - (dist / radius_grid) if radius_grid > 0 else 1.0
                 cost = int(proximity * cost_grid)
@@ -45,9 +44,10 @@ def _get_proximity_offsets(radius_grid: int, cost_grid: int) -> List[Tuple[int, 
 
 
 # Import Rust router
-import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
 try:
     from grid_router import GridObstacleMap
@@ -55,8 +55,9 @@ except ImportError:
     GridObstacleMap = None
 
 
-def add_stub_proximity_costs(obstacles: GridObstacleMap, unrouted_stubs: List[Tuple[float, float]],
-                              config: GridRouteConfig):
+def add_stub_proximity_costs(
+    obstacles: GridObstacleMap, unrouted_stubs: list[tuple[float, float]], config: GridRouteConfig
+):
     """Add stub proximity costs to the obstacle map.
 
     When via_proximity_cost == 0, vias are blocked within stub proximity radius.
@@ -69,7 +70,7 @@ def add_stub_proximity_costs(obstacles: GridObstacleMap, unrouted_stubs: List[Tu
     coord = GridCoord(config.grid_step)
     stub_radius_grid = coord.to_grid_dist(config.stub_proximity_radius)
     stub_cost_grid = int(config.stub_proximity_cost * 1000 / config.grid_step)
-    block_vias = (config.via_proximity_cost == 0)
+    block_vias = config.via_proximity_cost == 0
 
     # Convert stub positions to grid coordinates
     stub_grid_positions = []
@@ -79,9 +80,7 @@ def add_stub_proximity_costs(obstacles: GridObstacleMap, unrouted_stubs: List[Tu
         stub_grid_positions.append((gcx, gcy))
 
     # Use batch Rust method for performance
-    obstacles.add_stub_proximity_costs_batch(
-        stub_grid_positions, stub_radius_grid, stub_cost_grid, block_vias
-    )
+    obstacles.add_stub_proximity_costs_batch(stub_grid_positions, stub_radius_grid, stub_cost_grid, block_vias)
 
 
 def add_bga_proximity_costs(obstacles: GridObstacleMap, config: GridRouteConfig):
@@ -121,8 +120,9 @@ def add_bga_proximity_costs(obstacles: GridObstacleMap, config: GridRouteConfig)
                     obstacles.set_stub_proximity(gx, gy, cost)
 
 
-def compute_track_proximity_for_net(pcb_data: PCBData, net_id: int, config: GridRouteConfig,
-                                     layer_map: Dict[str, int]) -> np.ndarray:
+def compute_track_proximity_for_net(
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig, layer_map: dict[str, int]
+) -> np.ndarray:
     """Compute track proximity costs for a single net's segments.
 
     Returns a numpy array with columns [layer, gx, gy, cost] for efficient storage and batch merge.
@@ -138,7 +138,7 @@ def compute_track_proximity_for_net(pcb_data: PCBData, net_id: int, config: Grid
         numpy array of shape (N, 4) with columns [layer, gx, gy, cost], dtype int32
     """
     # Use dict internally for efficient max tracking, convert to numpy at end
-    result: Dict[Tuple[int, int, int], int] = {}  # (layer, gx, gy) -> cost
+    result: dict[tuple[int, int, int], int] = {}  # (layer, gx, gy) -> cost
 
     if config.track_proximity_distance <= 0 or config.track_proximity_cost <= 0:
         return np.empty((0, 4), dtype=np.int32)  # Feature disabled
@@ -204,8 +204,7 @@ def compute_track_proximity_for_net(pcb_data: PCBData, net_id: int, config: Grid
     return arr
 
 
-def merge_track_proximity_costs(obstacles: GridObstacleMap,
-                                 per_net_costs: Dict[int, np.ndarray]):
+def merge_track_proximity_costs(obstacles: GridObstacleMap, per_net_costs: dict[int, np.ndarray]):
     """Merge pre-computed per-net track proximity costs into the obstacle map.
 
     Args:
@@ -221,9 +220,13 @@ def merge_track_proximity_costs(obstacles: GridObstacleMap,
     obstacles.set_layer_proximity_batch(all_costs)
 
 
-def add_cross_layer_tracks(obstacles: GridObstacleMap, pcb_data: PCBData,
-                            config: GridRouteConfig, layer_map: Dict[str, int],
-                            exclude_net_ids: Set[int] = None):
+def add_cross_layer_tracks(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    layer_map: dict[str, int],
+    exclude_net_ids: set[int] = None,
+):
     """Populate cross-layer track positions for vertical alignment attraction.
 
     Adds positions of all routed tracks (excluding specified nets) to the
@@ -257,8 +260,9 @@ def add_cross_layer_tracks(obstacles: GridObstacleMap, pcb_data: PCBData,
         _add_segment_cross_layer_track(obstacles, seg, coord, layer_idx, sample_interval)
 
 
-def _add_segment_cross_layer_track(obstacles: GridObstacleMap, seg, coord: GridCoord,
-                                    layer_idx: int, sample_interval: int):
+def _add_segment_cross_layer_track(
+    obstacles: GridObstacleMap, seg, coord: GridCoord, layer_idx: int, sample_interval: int
+):
     """Add a single segment's positions to the cross-layer track data."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
@@ -268,10 +272,9 @@ def _add_segment_cross_layer_track(obstacles: GridObstacleMap, seg, coord: GridC
             obstacles.add_cross_layer_track(gx, gy, layer_idx)
 
 
-def add_routed_path_cross_layer_tracks(obstacles: GridObstacleMap,
-                                        new_segments: List,
-                                        config: GridRouteConfig,
-                                        layer_map: Dict[str, int]):
+def add_routed_path_cross_layer_tracks(
+    obstacles: GridObstacleMap, new_segments: list, config: GridRouteConfig, layer_map: dict[str, int]
+):
     """Add newly routed path segments to the cross-layer track data.
 
     Call this after successfully routing a path to make it an attractor
@@ -296,9 +299,13 @@ def add_routed_path_cross_layer_tracks(obstacles: GridObstacleMap,
         _add_segment_cross_layer_track(obstacles, seg, coord, layer_idx, sample_interval)
 
 
-def add_track_proximity_costs(obstacles: GridObstacleMap, pcb_data: PCBData,
-                               routed_net_ids: List[int], config: GridRouteConfig,
-                               layer_map: Dict[str, int]):
+def add_track_proximity_costs(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    routed_net_ids: list[int],
+    config: GridRouteConfig,
+    layer_map: dict[str, int],
+):
     """Add track proximity costs around previously routed tracks (same layer only).
 
     DEPRECATED: Use compute_track_proximity_for_net() + merge_track_proximity_costs()
@@ -317,8 +324,9 @@ def add_track_proximity_costs(obstacles: GridObstacleMap, pcb_data: PCBData,
     merge_track_proximity_costs(obstacles, per_net_costs)
 
 
-def compute_ripped_route_costs(saved_result: dict, config: GridRouteConfig,
-                                layer_map: Dict[str, int]) -> Tuple[np.ndarray, List[Tuple[int, int]]]:
+def compute_ripped_route_costs(
+    saved_result: dict, config: GridRouteConfig, layer_map: dict[str, int]
+) -> tuple[np.ndarray, list[tuple[int, int]]]:
     """Compute avoidance costs for a ripped route's former segment/via locations.
 
     When a net is ripped up to route another net, we want to apply soft penalties
@@ -347,13 +355,13 @@ def compute_ripped_route_costs(saved_result: dict, config: GridRouteConfig,
     offsets = _get_proximity_offsets(radius_grid, cost_grid)
 
     # Use dict internally for efficient max tracking
-    result: Dict[Tuple[int, int, int], int] = {}  # (layer, gx, gy) -> cost
+    result: dict[tuple[int, int, int], int] = {}  # (layer, gx, gy) -> cost
 
     # Sample every ~1mm along segments (not every grid step) for performance
     sample_interval = max(1, int(1.0 / config.grid_step))
 
     # Process segments (layer-specific costs)
-    new_segments = saved_result.get('new_segments', [])
+    new_segments = saved_result.get("new_segments", [])
     for seg in new_segments:
         layer_idx = layer_map.get(seg.layer)
         if layer_idx is None:
@@ -381,7 +389,7 @@ def compute_ripped_route_costs(saved_result: dict, config: GridRouteConfig,
 
     # Extract via positions (grid coords)
     via_positions = []
-    new_vias = saved_result.get('new_vias', [])
+    new_vias = saved_result.get("new_vias", [])
     for via in new_vias:
         gx, gy = coord.to_grid(via.x, via.y)
         via_positions.append((gx, gy))

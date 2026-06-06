@@ -5,17 +5,16 @@ This module handles swapping the P/N polarity of differential pairs when
 the routing algorithm determines that a swap is needed to achieve a valid route.
 """
 
-from typing import Dict, List, Optional, Set, Tuple
-
-from kicad_parser import PCBData, Pad
+from connectivity import find_connected_segment_positions
+from kicad_parser import PCBData
+from net_queries import find_pad_nearest_to_position
 from routing_config import DiffPairNet
 from routing_utils import pos_key
-from connectivity import find_connected_segment_positions
-from net_queries import find_pad_nearest_to_position
 
 
-def apply_polarity_swap(pcb_data: PCBData, result: dict, pad_swaps: List[dict],
-                        pair_name: str = None, already_swapped: Set[str] = None) -> bool:
+def apply_polarity_swap(
+    pcb_data: PCBData, result: dict, pad_swaps: list[dict], pair_name: str = None, already_swapped: set[str] = None
+) -> bool:
     """
     Apply polarity swap for a diff pair route result.
 
@@ -37,7 +36,7 @@ def apply_polarity_swap(pcb_data: PCBData, result: dict, pad_swaps: List[dict],
     Returns:
         True if swap was applied, False if not needed or failed.
     """
-    if not result.get('polarity_fixed') or not result.get('swap_target_pads'):
+    if not result.get("polarity_fixed") or not result.get("swap_target_pads"):
         return False
 
     # Skip if this pair was already polarity-swapped (prevents double-swap on reroute)
@@ -47,11 +46,11 @@ def apply_polarity_swap(pcb_data: PCBData, result: dict, pad_swaps: List[dict],
             return False
         already_swapped.add(pair_name)
 
-    swap_info = result['swap_target_pads']
-    p_pos = swap_info['p_pos']
-    n_pos = swap_info['n_pos']
-    p_net_id = swap_info['p_net_id']
-    n_net_id = swap_info['n_net_id']
+    swap_info = result["swap_target_pads"]
+    p_pos = swap_info["p_pos"]
+    n_pos = swap_info["n_pos"]
+    p_net_id = swap_info["p_net_id"]
+    n_net_id = swap_info["n_net_id"]
 
     # Find segments connected to each stub position and swap their net IDs
     p_stub_positions = find_connected_segment_positions(pcb_data, p_pos[0], p_pos[1], p_net_id)
@@ -78,18 +77,22 @@ def apply_polarity_swap(pcb_data: PCBData, result: dict, pad_swaps: List[dict],
     pad_n = find_pad_nearest_to_position(pcb_data, n_net_id, n_pos[0], n_pos[1])
 
     if pad_p and pad_n:
-        pad_swaps.append({
-            'pad_p': pad_p,
-            'pad_n': pad_n,
-            'p_net_id': p_net_id,
-            'n_net_id': n_net_id,
-            'p_stub_positions': p_stub_positions,
-            'n_stub_positions': n_stub_positions,
-        })
-        print(f"  Polarity fixed: will swap nets of {pad_p.component_ref}:{pad_p.pad_number} <-> {pad_n.component_ref}:{pad_n.pad_number}")
+        pad_swaps.append(
+            {
+                "pad_p": pad_p,
+                "pad_n": pad_n,
+                "p_net_id": p_net_id,
+                "n_net_id": n_net_id,
+                "p_stub_positions": p_stub_positions,
+                "n_stub_positions": n_stub_positions,
+            }
+        )
+        print(
+            f"  Polarity fixed: will swap nets of {pad_p.component_ref}:{pad_p.pad_number} <-> {pad_n.component_ref}:{pad_n.pad_number}"
+        )
         return True
     else:
-        print(f"  WARNING: Could not find target pads to swap for polarity fix")
+        print("  WARNING: Could not find target pads to swap for polarity fix")
         if not pad_p:
             print(f"    Missing P pad (net {p_net_id}) near {p_pos}")
         if not pad_n:
@@ -97,7 +100,7 @@ def apply_polarity_swap(pcb_data: PCBData, result: dict, pad_swaps: List[dict],
         return False
 
 
-def get_canonical_net_id(net_id: int, diff_pair_by_net_id: Dict[int, Tuple[str, DiffPairNet]]) -> int:
+def get_canonical_net_id(net_id: int, diff_pair_by_net_id: dict[int, tuple[str, DiffPairNet]]) -> int:
     """Get canonical net ID for loop prevention tracking.
 
     For diff pairs, returns P net_id. For single nets, returns net_id as-is.

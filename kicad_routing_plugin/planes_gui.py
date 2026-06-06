@@ -6,6 +6,7 @@ Provides wx-based panels for power/ground plane creation and repair.
 
 import os
 import sys
+
 import wx
 
 # Add parent directory to path
@@ -15,6 +16,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 import routing_defaults as defaults
+
 from .fanout_gui import NetSelectionPanel
 from .gui_utils import StdoutRedirector
 
@@ -90,12 +92,12 @@ class PlaneAssignmentPanel(wx.Panel):
     def _get_copper_layers(self):
         """Get list of copper layer names from PCB data."""
         # Try to get from board_info if available
-        if hasattr(self.pcb_data, 'board_info') and self.pcb_data.board_info:
-            if hasattr(self.pcb_data.board_info, 'copper_layers'):
+        if hasattr(self.pcb_data, "board_info") and self.pcb_data.board_info:
+            if hasattr(self.pcb_data.board_info, "copper_layers"):
                 return self.pcb_data.board_info.copper_layers
 
         # Fallback to common layer names
-        return ['F.Cu', 'In1.Cu', 'In2.Cu', 'In3.Cu', 'In4.Cu', 'B.Cu']
+        return ["F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "In4.Cu", "B.Cu"]
 
     def _get_selected_layers(self):
         """Get list of currently checked layer names."""
@@ -105,20 +107,12 @@ class PlaneAssignmentPanel(wx.Panel):
         """Add selected nets as a new assignment."""
         selected_nets = list(self.get_selected_nets())
         if not selected_nets:
-            wx.MessageBox(
-                "Please select nets from the left panel first.",
-                "No Nets Selected",
-                wx.OK | wx.ICON_WARNING
-            )
+            wx.MessageBox("Please select nets from the left panel first.", "No Nets Selected", wx.OK | wx.ICON_WARNING)
             return
 
         selected_layers = self._get_selected_layers()
         if not selected_layers:
-            wx.MessageBox(
-                "Please check at least one target layer.",
-                "No Layers Selected",
-                wx.OK | wx.ICON_WARNING
-            )
+            wx.MessageBox("Please check at least one target layer.", "No Layers Selected", wx.OK | wx.ICON_WARNING)
             return
 
         # Add assignment
@@ -191,31 +185,35 @@ class CreatePlanesOptionsPanel(wx.Panel):
 
         # Zone clearance
         grid.Add(wx.StaticText(self, label="Zone Clearance (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['plane_zone_clearance']
-        self.zone_clearance = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                 initial=defaults.PLANE_ZONE_CLEARANCE, inc=r['inc'])
-        self.zone_clearance.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["plane_zone_clearance"]
+        self.zone_clearance = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.PLANE_ZONE_CLEARANCE, inc=r["inc"]
+        )
+        self.zone_clearance.SetDigits(r["digits"])
         self.zone_clearance.SetToolTip("Clearance from zone fill to other copper")
         grid.Add(self.zone_clearance, 0, wx.EXPAND)
 
         # Max search radius
         grid.Add(wx.StaticText(self, label="Max Search Radius (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['plane_max_search_radius']
-        self.max_search_radius = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                    initial=defaults.PLANE_MAX_SEARCH_RADIUS, inc=r['inc'])
-        self.max_search_radius.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["plane_max_search_radius"]
+        self.max_search_radius = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.PLANE_MAX_SEARCH_RADIUS, inc=r["inc"]
+        )
+        self.max_search_radius.SetDigits(r["digits"])
         self.max_search_radius.SetToolTip("Maximum radius to search for valid via placement")
         grid.Add(self.max_search_radius, 0, wx.EXPAND)
 
         # Same-net pad clearance (default = main clearance; checkbox below overrides to via-in-pad)
         grid.Add(wx.StaticText(self, label="Same-net Pad Clearance (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['same_net_pad_clearance']
-        self.same_net_pad_clearance = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                        initial=defaults.CLEARANCE, inc=r['inc'])
-        self.same_net_pad_clearance.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["same_net_pad_clearance"]
+        self.same_net_pad_clearance = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.CLEARANCE, inc=r["inc"]
+        )
+        self.same_net_pad_clearance.SetDigits(r["digits"])
         self.same_net_pad_clearance.SetToolTip(
             "Edge-to-edge clearance between stitching vias and same-net pads. "
-            "Disabled if 'Allow via-in-pad' is checked.")
+            "Disabled if 'Allow via-in-pad' is checked."
+        )
         grid.Add(self.same_net_pad_clearance, 0, wx.EXPAND)
 
         zone_sizer.Add(grid, 0, wx.EXPAND | wx.ALL, 5)
@@ -224,8 +222,8 @@ class CreatePlanesOptionsPanel(wx.Panel):
         # (and Same-net Pad Clearance is disabled / passed as -1).
         self.via_in_pad_check = wx.CheckBox(self, label="Allow via-in-pad (override clearance)")
         self.via_in_pad_check.SetToolTip(
-            "When checked, stitching vias may be placed on top of same-net pads, "
-            "ignoring 'Same-net Pad Clearance'.")
+            "When checked, stitching vias may be placed on top of same-net pads, ignoring 'Same-net Pad Clearance'."
+        )
         self.via_in_pad_check.SetValue(False)
         self.via_in_pad_check.Bind(wx.EVT_CHECKBOX, self._on_via_in_pad_toggle)
         zone_sizer.Add(self.via_in_pad_check, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
@@ -237,7 +235,9 @@ class CreatePlanesOptionsPanel(wx.Panel):
         ripup_sizer = wx.StaticBoxSizer(ripup_box, wx.VERTICAL)
 
         self.rip_blocker_check = wx.CheckBox(self, label="Rip up blocking nets")
-        self.rip_blocker_check.SetToolTip("Remove nets that block via placement, then retry (uses Max Rip-up from Basic tab)")
+        self.rip_blocker_check.SetToolTip(
+            "Remove nets that block via placement, then retry (uses Max Rip-up from Basic tab)"
+        )
         ripup_sizer.Add(self.rip_blocker_check, 0, wx.ALL, 5)
 
         self.reroute_ripped_check = wx.CheckBox(self, label="Auto-reroute ripped nets")
@@ -259,10 +259,11 @@ class CreatePlanesOptionsPanel(wx.Panel):
         gnd_grid.AddGrowableCol(1)
 
         gnd_grid.Add(wx.StaticText(self, label="Max Distance (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['gnd_via_distance']
-        self.gnd_via_distance = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                   initial=defaults.GND_VIA_DISTANCE, inc=r['inc'])
-        self.gnd_via_distance.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["gnd_via_distance"]
+        self.gnd_via_distance = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.GND_VIA_DISTANCE, inc=r["inc"]
+        )
+        self.gnd_via_distance.SetDigits(r["digits"])
         self.gnd_via_distance.SetToolTip("Maximum distance from signal via to place GND via")
         gnd_grid.Add(self.gnd_via_distance, 0, wx.EXPAND)
 
@@ -287,14 +288,14 @@ class CreatePlanesOptionsPanel(wx.Panel):
         else:
             same_net_clr = self.same_net_pad_clearance.GetValue()
         return {
-            'zone_clearance': self.zone_clearance.GetValue(),
-            'max_search_radius': self.max_search_radius.GetValue(),
-            'rip_blocker_nets': self.rip_blocker_check.GetValue(),
-            'reroute_ripped_nets': self.reroute_ripped_check.GetValue(),
-            'add_gnd_vias': self.add_gnd_vias_check.GetValue(),
-            'gnd_via_distance': self.gnd_via_distance.GetValue(),
-            'gnd_via_net': self.gnd_via_net.GetValue(),
-            'same_net_pad_clearance': same_net_clr,
+            "zone_clearance": self.zone_clearance.GetValue(),
+            "max_search_radius": self.max_search_radius.GetValue(),
+            "rip_blocker_nets": self.rip_blocker_check.GetValue(),
+            "reroute_ripped_nets": self.reroute_ripped_check.GetValue(),
+            "add_gnd_vias": self.add_gnd_vias_check.GetValue(),
+            "gnd_via_distance": self.gnd_via_distance.GetValue(),
+            "gnd_via_net": self.gnd_via_net.GetValue(),
+            "same_net_pad_clearance": same_net_clr,
         }
 
 
@@ -325,20 +326,22 @@ class RepairPlanesOptionsPanel(wx.Panel):
 
         # Max track width
         grid.Add(wx.StaticText(self, label="Max Track Width (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['repair_max_track_width']
-        self.max_track_width = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                  initial=defaults.REPAIR_MAX_TRACK_WIDTH, inc=r['inc'])
-        self.max_track_width.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["repair_max_track_width"]
+        self.max_track_width = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.REPAIR_MAX_TRACK_WIDTH, inc=r["inc"]
+        )
+        self.max_track_width.SetDigits(r["digits"])
         self.max_track_width.SetToolTip("Maximum track width for region connections (must be >= Track Width)")
         self.max_track_width.Bind(wx.EVT_SPINCTRLDOUBLE, self._on_max_track_width_changed)
         grid.Add(self.max_track_width, 0, wx.EXPAND)
 
         # Analysis grid step
         grid.Add(wx.StaticText(self, label="Analysis Grid (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['repair_analysis_grid_step']
-        self.analysis_grid = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                initial=defaults.REPAIR_ANALYSIS_GRID_STEP, inc=r['inc'])
-        self.analysis_grid.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["repair_analysis_grid_step"]
+        self.analysis_grid = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.REPAIR_ANALYSIS_GRID_STEP, inc=r["inc"]
+        )
+        self.analysis_grid.SetDigits(r["digits"])
         self.analysis_grid.SetToolTip("Grid step for connectivity analysis (coarser = faster)")
         grid.Add(self.analysis_grid, 0, wx.EXPAND)
 
@@ -355,8 +358,8 @@ class RepairPlanesOptionsPanel(wx.Panel):
     def get_config(self):
         """Get the configuration values."""
         return {
-            'max_track_width': self.max_track_width.GetValue(),
-            'analysis_grid_step': self.analysis_grid.GetValue(),
+            "max_track_width": self.max_track_width.GetValue(),
+            "analysis_grid_step": self.analysis_grid.GetValue(),
         }
 
     def _on_max_track_width_changed(self, event):
@@ -372,7 +375,7 @@ class RepairPlanesOptionsPanel(wx.Panel):
             wx.MessageBox(
                 f"Max Track Width cannot be less than Track Width ({track_width:.2f} mm)",
                 "Invalid Value",
-                wx.OK | wx.ICON_WARNING
+                wx.OK | wx.ICON_WARNING,
             )
             self.max_track_width.SetValue(track_width)
         else:
@@ -382,10 +385,17 @@ class RepairPlanesOptionsPanel(wx.Panel):
 class PlanesTab(wx.Panel):
     """Tab for copper plane creation and repair."""
 
-    def __init__(self, parent, pcb_data, board_filename,
-                 get_shared_params=None, on_planes_complete=None,
-                 get_connectivity_check=None, append_log=None,
-                 sync_pcb_data_callback=None):
+    def __init__(
+        self,
+        parent,
+        pcb_data,
+        board_filename,
+        get_shared_params=None,
+        on_planes_complete=None,
+        get_connectivity_check=None,
+        append_log=None,
+        sync_pcb_data_callback=None,
+    ):
         """
         Create the planes tab.
 
@@ -425,7 +435,8 @@ class PlanesTab(wx.Panel):
         net_box_sizer = wx.StaticBoxSizer(net_box, wx.VERTICAL)
 
         self.net_panel = NetSelectionPanel(
-            self, self.pcb_data,
+            self,
+            self.pcb_data,
             instructions="Select nets for plane creation (e.g., GND, VCC)...",
             show_hide_checkbox=True,
             show_component_dropdown=True,
@@ -442,10 +453,7 @@ class PlanesTab(wx.Panel):
         mode_box = wx.StaticBox(self, label="Mode")
         mode_sizer = wx.StaticBoxSizer(mode_box, wx.VERTICAL)
 
-        self.mode_selector = wx.RadioBox(
-            self, choices=["Create Planes", "Repair Disconnected"],
-            style=wx.RA_HORIZONTAL
-        )
+        self.mode_selector = wx.RadioBox(self, choices=["Create Planes", "Repair Disconnected"], style=wx.RA_HORIZONTAL)
         self.mode_selector.SetToolTip("Create: Add zones with via stitching\nRepair: Connect disconnected regions")
         self.mode_selector.Bind(wx.EVT_RADIOBOX, self._on_mode_changed)
         mode_sizer.Add(self.mode_selector, 0, wx.EXPAND | wx.ALL, 5)
@@ -457,8 +465,7 @@ class PlanesTab(wx.Panel):
         self.assign_sizer = wx.StaticBoxSizer(self.assign_box, wx.VERTICAL)
 
         self.assignment_panel = PlaneAssignmentPanel(
-            self, self.pcb_data,
-            get_selected_nets_callback=lambda: self.net_panel.get_selected_nets()
+            self, self.pcb_data, get_selected_nets_callback=lambda: self.net_panel.get_selected_nets()
         )
         self.assign_sizer.Add(self.assignment_panel, 1, wx.EXPAND | wx.ALL, 5)
 
@@ -478,10 +485,10 @@ class PlanesTab(wx.Panel):
         # Repair options panel (initially hidden)
         def get_track_width():
             if self.get_shared_params:
-                return self.get_shared_params().get('track_width', defaults.TRACK_WIDTH)
+                return self.get_shared_params().get("track_width", defaults.TRACK_WIDTH)
             return defaults.TRACK_WIDTH
-        self.repair_options = RepairPlanesOptionsPanel(
-            self.options_scroll, get_track_width=get_track_width)
+
+        self.repair_options = RepairPlanesOptionsPanel(self.options_scroll, get_track_width=get_track_width)
         options_scroll_sizer.Add(self.repair_options, 0, wx.EXPAND | wx.BOTTOM, 5)
         self.repair_options.Hide()
 
@@ -557,7 +564,7 @@ class PlanesTab(wx.Panel):
                 f"Please add at least one net → layer assignment for {mode_name}.\n\n"
                 "Select nets on the left, check target layers, then click 'Add Assignment'.",
                 "No Assignments",
-                wx.OK | wx.ICON_WARNING
+                wx.OK | wx.ICON_WARNING,
             )
             return
 
@@ -573,10 +580,10 @@ class PlanesTab(wx.Panel):
             config = self.repair_options.get_config()
 
         # Both modes use assignments
-        config['assignments'] = assignments
+        config["assignments"] = assignments
 
         config.update(shared_params)
-        config['mode'] = 'create' if mode == 0 else 'repair'
+        config["mode"] = "create" if mode == 0 else "repair"
 
         # Disable UI
         self.action_btn.Disable()
@@ -590,11 +597,8 @@ class PlanesTab(wx.Panel):
 
         # Run in thread
         import threading
-        self._routing_thread = threading.Thread(
-            target=self._run_planes_operation,
-            args=(config,),
-            daemon=True
-        )
+
+        self._routing_thread = threading.Thread(target=self._run_planes_operation, args=(config,), daemon=True)
         self._routing_thread.start()
 
         # Poll for completion
@@ -609,28 +613,29 @@ class PlanesTab(wx.Panel):
             sys.stdout = StdoutRedirector(self.append_log, original_stdout)
 
         try:
-            if config['mode'] == 'create':
+            if config["mode"] == "create":
                 self._run_create_planes(config)
             else:
                 self._run_repair_planes(config)
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
-            self._operation_result = {'error': str(e)}
+            self._operation_result = {"error": str(e)}
 
         finally:
             sys.stdout = original_stdout
 
     def _run_create_planes(self, config):
         """Run plane creation."""
-        from route_planes import create_plane
         from add_gnd_vias import add_gnd_vias_to_existing_board
-        from routing_config import GridRouteConfig, GridCoord
         from obstacle_map import build_base_obstacle_map
+        from route_planes import create_plane
+        from routing_config import GridCoord, GridRouteConfig
 
         # Get assignments: each is (nets_list, layers_list)
-        assignments = config['assignments']
+        assignments = config["assignments"]
 
         # Get all copper layers for routing
         all_layers = self._get_all_copper_layers()
@@ -670,32 +675,31 @@ class PlanesTab(wx.Panel):
 
         failed_pads = 0
         try:
-            (vias, traces, pads_needing, new_vias, new_segments, new_zones,
-             failed_pads) = create_plane(
+            (vias, traces, pads_needing, new_vias, new_segments, new_zones, failed_pads) = create_plane(
                 input_file=self.board_filename,
                 output_file="",
                 net_names=expanded_nets,
                 plane_layers=expanded_layers,
-                via_size=config.get('via_size', defaults.VIA_SIZE),
-                via_drill=config.get('via_drill', defaults.VIA_DRILL),
-                track_width=config.get('track_width', defaults.TRACK_WIDTH),
-                clearance=config.get('clearance', defaults.CLEARANCE),
-                zone_clearance=config.get('zone_clearance', defaults.PLANE_ZONE_CLEARANCE),
+                via_size=config.get("via_size", defaults.VIA_SIZE),
+                via_drill=config.get("via_drill", defaults.VIA_DRILL),
+                track_width=config.get("track_width", defaults.TRACK_WIDTH),
+                clearance=config.get("clearance", defaults.CLEARANCE),
+                zone_clearance=config.get("zone_clearance", defaults.PLANE_ZONE_CLEARANCE),
                 min_thickness=defaults.PLANE_MIN_THICKNESS,
-                grid_step=config.get('grid_step', defaults.GRID_STEP),
-                max_search_radius=config.get('max_search_radius', defaults.PLANE_MAX_SEARCH_RADIUS),
+                grid_step=config.get("grid_step", defaults.GRID_STEP),
+                max_search_radius=config.get("max_search_radius", defaults.PLANE_MAX_SEARCH_RADIUS),
                 max_via_reuse_radius=defaults.PLANE_MAX_VIA_REUSE_RADIUS,
-                hole_to_hole_clearance=config.get('hole_to_hole_clearance', defaults.HOLE_TO_HOLE_CLEARANCE),
-                board_edge_clearance=config.get('board_edge_clearance', defaults.BOARD_EDGE_CLEARANCE),
+                hole_to_hole_clearance=config.get("hole_to_hole_clearance", defaults.HOLE_TO_HOLE_CLEARANCE),
+                board_edge_clearance=config.get("board_edge_clearance", defaults.BOARD_EDGE_CLEARANCE),
                 all_layers=all_layers,
                 dry_run=True,  # Don't write to file, apply via pcbnew
-                rip_blocker_nets=config.get('rip_blocker_nets', False),
-                max_rip_nets=config.get('max_ripup', defaults.MAX_RIPUP),
-                reroute_ripped_nets=config.get('reroute_ripped_nets', False),
+                rip_blocker_nets=config.get("rip_blocker_nets", False),
+                max_rip_nets=config.get("max_ripup", defaults.MAX_RIPUP),
+                reroute_ripped_nets=config.get("reroute_ripped_nets", False),
                 pcb_data=self.pcb_data,
                 return_results=True,
                 layer_nets=layer_nets,
-                same_net_pad_clearance=config.get('same_net_pad_clearance', defaults.SAME_NET_PAD_CLEARANCE),
+                same_net_pad_clearance=config.get("same_net_pad_clearance", defaults.SAME_NET_PAD_CLEARANCE),
                 skip_existing_zones=True,
             )
 
@@ -707,19 +711,19 @@ class PlanesTab(wx.Panel):
             self._new_zones = new_zones
 
             # Add GND return vias if enabled
-            if config.get('add_gnd_vias', False):
+            if config.get("add_gnd_vias", False):
                 try:
-                    gnd_via_distance = config.get('gnd_via_distance', defaults.GND_VIA_DISTANCE)
-                    gnd_via_net = config.get('gnd_via_net', defaults.GND_VIA_NET)
+                    gnd_via_distance = config.get("gnd_via_distance", defaults.GND_VIA_DISTANCE)
+                    gnd_via_net = config.get("gnd_via_net", defaults.GND_VIA_NET)
 
                     # Create config for GND via placement
                     gnd_config = GridRouteConfig(
-                        via_size=config.get('via_size', defaults.VIA_SIZE),
-                        via_drill=config.get('via_drill', defaults.VIA_DRILL),
-                        track_width=config.get('track_width', defaults.TRACK_WIDTH),
-                        clearance=config.get('clearance', defaults.CLEARANCE),
-                        grid_step=config.get('grid_step', defaults.GRID_STEP),
-                        layers=all_layers
+                        via_size=config.get("via_size", defaults.VIA_SIZE),
+                        via_drill=config.get("via_drill", defaults.VIA_DRILL),
+                        track_width=config.get("track_width", defaults.TRACK_WIDTH),
+                        clearance=config.get("clearance", defaults.CLEARANCE),
+                        grid_step=config.get("grid_step", defaults.GRID_STEP),
+                        layers=all_layers,
                     )
                     coord = GridCoord(gnd_config.grid_step)
 
@@ -728,45 +732,44 @@ class PlanesTab(wx.Panel):
 
                     # Add GND vias near existing signal vias
                     gnd_vias = add_gnd_vias_to_existing_board(
-                        self.pcb_data,
-                        gnd_via_net,
-                        gnd_via_distance,
-                        gnd_config,
-                        obstacles,
-                        coord
+                        self.pcb_data, gnd_via_net, gnd_via_distance, gnd_config, obstacles, coord
                     )
 
                     # Add to new vias list
                     for gv in gnd_vias:
-                        self._new_vias.append({
-                            'x': gv.x,
-                            'y': gv.y,
-                            'size': gv.size,
-                            'drill': gv.drill,
-                            'net_id': gv.net_id,
-                            'layers': gv.layers if hasattr(gv, 'layers') else ['F.Cu', 'B.Cu']
-                        })
+                        self._new_vias.append(
+                            {
+                                "x": gv.x,
+                                "y": gv.y,
+                                "size": gv.size,
+                                "drill": gv.drill,
+                                "net_id": gv.net_id,
+                                "layers": gv.layers if hasattr(gv, "layers") else ["F.Cu", "B.Cu"],
+                            }
+                        )
                     total_vias += len(gnd_vias)
 
                 except Exception as e:
                     import traceback
+
                     traceback.print_exc()
                     print(f"Error adding GND vias: {e}")
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             print(f"Error creating planes: {e}")
 
         self._operation_result = {
-            'mode': 'create',
-            'total_vias': total_vias,
-            'total_traces': total_traces,
-            'total_pads': total_pads,
-            'failed_pads': failed_pads,
-            'cancelled': self._cancel_requested,
-            'affected_nets': sorted(set(expanded_nets)),
-            'config': config,
+            "mode": "create",
+            "total_vias": total_vias,
+            "total_traces": total_traces,
+            "total_pads": total_pads,
+            "failed_pads": failed_pads,
+            "cancelled": self._cancel_requested,
+            "affected_nets": sorted(set(expanded_nets)),
+            "config": config,
         }
 
     def _run_repair_planes(self, config):
@@ -776,7 +779,7 @@ class PlanesTab(wx.Panel):
         # Flatten assignments into parallel net_names and plane_layers lists
         # For each (nets_list, layers_list) assignment, create an entry for
         # each net on each layer
-        assignments = config['assignments']
+        assignments = config["assignments"]
         net_names = []
         plane_layers = []
         for nets_list, layers_list in assignments:
@@ -795,16 +798,16 @@ class PlanesTab(wx.Panel):
                 output_file="",
                 net_names=net_names,
                 plane_layers=plane_layers,
-                track_width=config.get('track_width', defaults.TRACK_WIDTH),
-                max_track_width=config.get('max_track_width', defaults.REPAIR_MAX_TRACK_WIDTH),
-                min_track_width=config.get('track_width', defaults.TRACK_WIDTH),
-                clearance=config.get('clearance', defaults.CLEARANCE),
-                via_size=config.get('via_size', defaults.VIA_SIZE),
-                via_drill=config.get('via_drill', defaults.VIA_DRILL),
-                grid_step=config.get('grid_step', defaults.GRID_STEP),
-                analysis_grid_step=config.get('analysis_grid_step', defaults.REPAIR_ANALYSIS_GRID_STEP),
-                hole_to_hole_clearance=config.get('hole_to_hole_clearance', defaults.HOLE_TO_HOLE_CLEARANCE),
-                max_iterations=config.get('max_iterations', defaults.MAX_ITERATIONS),
+                track_width=config.get("track_width", defaults.TRACK_WIDTH),
+                max_track_width=config.get("max_track_width", defaults.REPAIR_MAX_TRACK_WIDTH),
+                min_track_width=config.get("track_width", defaults.TRACK_WIDTH),
+                clearance=config.get("clearance", defaults.CLEARANCE),
+                via_size=config.get("via_size", defaults.VIA_SIZE),
+                via_drill=config.get("via_drill", defaults.VIA_DRILL),
+                grid_step=config.get("grid_step", defaults.GRID_STEP),
+                analysis_grid_step=config.get("analysis_grid_step", defaults.REPAIR_ANALYSIS_GRID_STEP),
+                hole_to_hole_clearance=config.get("hole_to_hole_clearance", defaults.HOLE_TO_HOLE_CLEARANCE),
+                max_iterations=config.get("max_iterations", defaults.MAX_ITERATIONS),
                 routing_layers=all_layers,
                 dry_run=True,  # Don't write to file, apply via pcbnew
                 pcb_data=self.pcb_data,
@@ -814,24 +817,25 @@ class PlanesTab(wx.Panel):
             self._new_vias = new_vias
             self._new_segments = new_segments
             self._operation_result = {
-                'mode': 'repair',
-                'routes_added': routes_added,
-                'regions_connected': regions_connected,
-                'cancelled': self._cancel_requested,
-                'affected_nets': sorted(set(net_names)),
+                "mode": "repair",
+                "routes_added": routes_added,
+                "regions_connected": regions_connected,
+                "cancelled": self._cancel_requested,
+                "affected_nets": sorted(set(net_names)),
             }
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
-            self._operation_result = {'error': str(e)}
+            self._operation_result = {"error": str(e)}
 
     def _get_all_copper_layers(self):
         """Get all copper layers from PCB data."""
-        if hasattr(self.pcb_data, 'board_info') and self.pcb_data.board_info:
-            if hasattr(self.pcb_data.board_info, 'copper_layers'):
+        if hasattr(self.pcb_data, "board_info") and self.pcb_data.board_info:
+            if hasattr(self.pcb_data.board_info, "copper_layers"):
                 return self.pcb_data.board_info.copper_layers
-        return ['F.Cu', 'B.Cu']
+        return ["F.Cu", "B.Cu"]
 
     def _poll_operation(self):
         """Poll for operation completion."""
@@ -853,50 +857,48 @@ class PlanesTab(wx.Panel):
             self.status_text.SetLabel("Cancelled")
             return
 
-        result = getattr(self, '_operation_result', None)
+        result = getattr(self, "_operation_result", None)
         if not result:
             self.status_text.SetLabel("Operation finished (no result)")
             return
 
-        if 'error' in result:
+        if "error" in result:
             self.status_text.SetLabel(f"Error: {result['error']}")
-            wx.MessageBox(
-                f"Plane operation failed:\n\n{result['error']}",
-                "Operation Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"Plane operation failed:\n\n{result['error']}", "Operation Error", wx.OK | wx.ICON_ERROR)
             return
 
         # Apply results to board
         self._apply_results_to_board()
 
         # Show completion message
-        if result['mode'] == 'create':
-            msg = f"Plane creation complete!\n\n"
+        if result["mode"] == "create":
+            msg = "Plane creation complete!\n\n"
             msg += f"Vias placed: {result.get('total_vias', 0)}\n"
             msg += f"Traces added: {result.get('total_traces', 0)}\n"
-            failed_pads = result.get('failed_pads', 0)
+            failed_pads = result.get("failed_pads", 0)
             if failed_pads:
                 msg += f"Failed pads (no via placed): {failed_pads}\n"
             self.status_text.SetLabel(
                 f"Created: {result.get('total_vias', 0)} vias, "
                 f"{result.get('total_traces', 0)} traces, "
-                f"{failed_pads} failed")
+                f"{failed_pads} failed"
+            )
         else:
-            msg = f"Plane repair complete!\n\n"
+            msg = "Plane repair complete!\n\n"
             msg += f"Routes added: {result.get('routes_added', 0)}\n"
             msg += f"Regions connected: {result.get('regions_connected', 0)}\n"
             self.status_text.SetLabel(f"Repaired: {result.get('routes_added', 0)} routes")
 
         # If any pads failed to get a via, append heuristic suggestions.
-        if result['mode'] == 'create' and result.get('failed_pads', 0) > 0:
+        if result["mode"] == "create" and result.get("failed_pads", 0) > 0:
             try:
-                from routing_diagnostics import (
-                    suggest_plane_adjustments, format_suggestions_for_dialog)
+                from routing_diagnostics import format_suggestions_for_dialog, suggest_plane_adjustments
+
                 suggestions = suggest_plane_adjustments(
-                    failed_pads=result.get('failed_pads', 0),
-                    total_pads=result.get('total_pads', 0),
-                    config=result.get('config', {}))
+                    failed_pads=result.get("failed_pads", 0),
+                    total_pads=result.get("total_pads", 0),
+                    config=result.get("config", {}),
+                )
                 block = format_suggestions_for_dialog(suggestions)
                 if block:
                     msg += "\n" + block + "\n"
@@ -909,7 +911,7 @@ class PlanesTab(wx.Panel):
         # Callback - hand the parent the nets that were just touched so it
         # can invalidate their connectivity cache entries.
         if self.on_planes_complete:
-            affected = result.get('affected_nets') or []
+            affected = result.get("affected_nets") or []
             try:
                 self.on_planes_complete(affected_nets=affected)
             except TypeError:
@@ -929,7 +931,7 @@ class PlanesTab(wx.Panel):
 
         # Get layer name to ID mapping
         name_to_id = {}
-        layer_count = getattr(pcbnew, 'PCB_LAYER_ID_COUNT', 128)
+        layer_count = getattr(pcbnew, "PCB_LAYER_ID_COUNT", 128)
         for i in range(layer_count):
             name = board.GetLayerName(i)
             if name:
@@ -940,18 +942,15 @@ class PlanesTab(wx.Panel):
 
         # Add vias from create_plane results
         vias_added = 0
-        if hasattr(self, '_new_vias') and self._new_vias:
+        if hasattr(self, "_new_vias") and self._new_vias:
             for via_data in self._new_vias:
                 via = pcbnew.PCB_VIA(board)
-                via.SetPosition(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(via_data['x']),
-                    pcbnew.FromMM(via_data['y'])
-                ))
-                via.SetDrill(pcbnew.FromMM(via_data['drill']))
-                via.SetWidth(pcbnew.FromMM(via_data['size']))
-                via.SetNetCode(via_data['net_id'])
+                via.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(via_data["x"]), pcbnew.FromMM(via_data["y"])))
+                via.SetDrill(pcbnew.FromMM(via_data["drill"]))
+                via.SetWidth(pcbnew.FromMM(via_data["size"]))
+                via.SetNetCode(via_data["net_id"])
                 # Set via layers
-                layers = via_data.get('layers', ['F.Cu', 'B.Cu'])
+                layers = via_data.get("layers", ["F.Cu", "B.Cu"])
                 if len(layers) >= 2:
                     via.SetLayerPair(get_layer_id(layers[0]), get_layer_id(layers[-1]))
                 board.Add(via)
@@ -960,22 +959,16 @@ class PlanesTab(wx.Panel):
 
         # Add segments from create_plane results
         tracks_added = 0
-        if hasattr(self, '_new_segments') and self._new_segments:
+        if hasattr(self, "_new_segments") and self._new_segments:
             for seg_data in self._new_segments:
                 track = pcbnew.PCB_TRACK(board)
-                start = seg_data['start']
-                end = seg_data['end']
-                track.SetStart(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(start[0]),
-                    pcbnew.FromMM(start[1])
-                ))
-                track.SetEnd(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(end[0]),
-                    pcbnew.FromMM(end[1])
-                ))
-                track.SetWidth(pcbnew.FromMM(seg_data['width']))
-                track.SetLayer(get_layer_id(seg_data['layer']))
-                track.SetNetCode(seg_data['net_id'])
+                start = seg_data["start"]
+                end = seg_data["end"]
+                track.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(start[0]), pcbnew.FromMM(start[1])))
+                track.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(end[0]), pcbnew.FromMM(end[1])))
+                track.SetWidth(pcbnew.FromMM(seg_data["width"]))
+                track.SetLayer(get_layer_id(seg_data["layer"]))
+                track.SetNetCode(seg_data["net_id"])
                 board.Add(track)
                 tracks_added += 1
             self._new_segments = []
@@ -984,7 +977,7 @@ class PlanesTab(wx.Panel):
         zones_added = 0
         zones_skipped = 0
         new_zone_objs = []  # Track newly added zones so we can fill them below.
-        if hasattr(self, '_new_zones') and self._new_zones:
+        if hasattr(self, "_new_zones") and self._new_zones:
             # Snapshot which (net_name, layer) pairs already have a zone on
             # the live board so we never add a duplicate.
             existing_zone_keys = set()
@@ -993,20 +986,19 @@ class PlanesTab(wx.Panel):
                     try:
                         existing_net = existing_zone.GetNet().GetNetname()
                     except Exception:
-                        existing_net = ''
+                        existing_net = ""
                     try:
                         existing_layer = board.GetLayerName(existing_zone.GetLayer())
                     except Exception:
-                        existing_layer = ''
+                        existing_layer = ""
                     existing_zone_keys.add((existing_net, existing_layer))
             except Exception:
                 pass
 
             for zone_data in self._new_zones:
-                key = (zone_data.get('net_name', ''), zone_data.get('layer', ''))
+                key = (zone_data.get("net_name", ""), zone_data.get("layer", ""))
                 if key in existing_zone_keys:
-                    print(f"Skipping new zone for '{key[0]}' on {key[1]} "
-                          f"(zone already exists on board)")
+                    print(f"Skipping new zone for '{key[0]}' on {key[1]} (zone already exists on board)")
                     zones_skipped += 1
                     continue
                 zone = pcbnew.ZONE(board)
@@ -1015,7 +1007,7 @@ class PlanesTab(wx.Panel):
                 # ordering for KiCad 10, or stale disk state vs. live board).
                 # Fall back to SetNetCode if the name isn't found.
                 net_assigned = False
-                net_name = zone_data.get('net_name')
+                net_name = zone_data.get("net_name")
                 if net_name:
                     try:
                         net_item = board.FindNet(net_name)
@@ -1025,22 +1017,22 @@ class PlanesTab(wx.Panel):
                         zone.SetNet(net_item)
                         net_assigned = True
                 if not net_assigned:
-                    zone.SetNetCode(zone_data['net_id'])
-                zone.SetLayer(get_layer_id(zone_data['layer']))
+                    zone.SetNetCode(zone_data["net_id"])
+                zone.SetLayer(get_layer_id(zone_data["layer"]))
 
                 # Set zone outline from polygon points
                 outline = zone.Outline()
                 outline.NewOutline()
-                for x, y in zone_data['polygon_points']:
+                for x, y in zone_data["polygon_points"]:
                     outline.Append(pcbnew.FromMM(x), pcbnew.FromMM(y))
 
                 # Set zone properties
-                zone.SetLocalClearance(pcbnew.FromMM(zone_data.get('clearance', 0.2)))
-                zone.SetMinThickness(pcbnew.FromMM(zone_data.get('min_thickness', 0.1)))
-                zc_enum = getattr(pcbnew, 'ZONE_CONNECTION', None)
-                zc_full = getattr(zc_enum, 'FULL', None) if zc_enum else None
+                zone.SetLocalClearance(pcbnew.FromMM(zone_data.get("clearance", 0.2)))
+                zone.SetMinThickness(pcbnew.FromMM(zone_data.get("min_thickness", 0.1)))
+                zc_enum = getattr(pcbnew, "ZONE_CONNECTION", None)
+                zc_full = getattr(zc_enum, "FULL", None) if zc_enum else None
                 if zc_full is None:
-                    zc_full = getattr(pcbnew, 'ZONE_CONNECTION_FULL', 1)
+                    zc_full = getattr(pcbnew, "ZONE_CONNECTION_FULL", 1)
                 zone.SetPadConnection(zc_full)
                 # Hatch the outline so the zone is visible immediately;
                 # the actual copper fill is computed below via ZONE_FILLER.
@@ -1068,8 +1060,7 @@ class PlanesTab(wx.Panel):
                 filler.Fill(new_zone_objs)
                 print(f"Filled {len(new_zone_objs)} new zone(s)")
             except Exception as e:
-                print(f"Warning: could not auto-fill new zones ({e}). "
-                      "Press B in pcbnew to fill manually.")
+                print(f"Warning: could not auto-fill new zones ({e}). Press B in pcbnew to fill manually.")
 
         pcbnew.Refresh()
 

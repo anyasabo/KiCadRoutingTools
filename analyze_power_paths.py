@@ -17,48 +17,50 @@ Usage:
     )
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Tuple
+from dataclasses import dataclass
 from enum import Enum
 
-from kicad_parser import parse_kicad_pcb, PCBData, Footprint, Pad
+from kicad_parser import Footprint, PCBData, parse_kicad_pcb
 
 
 class ComponentRole(Enum):
     """Role of a component in power distribution."""
-    POWER_SOURCE = "power_source"      # Outputs current (regulators, power inputs)
-    CURRENT_SINK = "current_sink"      # Consumes current (ICs, LEDs, motors)
-    PASS_THROUGH = "pass_through"      # Current flows through (inductors, fuses, switches)
-    SHUNT = "shunt"                    # Branches off main path (decoupling caps, pull-ups)
-    UNKNOWN = "unknown"                # Needs AI classification
+
+    POWER_SOURCE = "power_source"  # Outputs current (regulators, power inputs)
+    CURRENT_SINK = "current_sink"  # Consumes current (ICs, LEDs, motors)
+    PASS_THROUGH = "pass_through"  # Current flows through (inductors, fuses, switches)
+    SHUNT = "shunt"  # Branches off main path (decoupling caps, pull-ups)
+    UNKNOWN = "unknown"  # Needs AI classification
 
 
 @dataclass
 class ComponentInfo:
     """Information about a component for analysis."""
-    ref: str                           # Reference designator (U102, R101, etc.)
-    value: str                         # Component value/part number
-    footprint_name: str                # Footprint type
-    pad_count: int                     # Number of pads
-    net_connections: Dict[str, str]    # pad_number -> net_name
-    pin_functions: Dict[str, str]      # pad_number -> pinfunction
-    pin_types: Dict[str, str]          # pad_number -> pintype
+
+    ref: str  # Reference designator (U102, R101, etc.)
+    value: str  # Component value/part number
+    footprint_name: str  # Footprint type
+    pad_count: int  # Number of pads
+    net_connections: dict[str, str]  # pad_number -> net_name
+    pin_functions: dict[str, str]  # pad_number -> pinfunction
+    pin_types: dict[str, str]  # pad_number -> pintype
     role: ComponentRole = ComponentRole.UNKNOWN
-    current_rating_ma: Optional[float] = None  # Estimated current in mA
-    notes: str = ""                    # Additional notes from AI analysis
+    current_rating_ma: float | None = None  # Estimated current in mA
+    notes: str = ""  # Additional notes from AI analysis
 
 
 @dataclass
 class PowerPath:
     """A path through which current flows."""
-    source_component: str              # Component ref that sources current
-    sink_component: str                # Component ref that sinks current
-    nets_in_path: List[str]            # Net names along the path
-    components_in_path: List[str]      # Component refs along the path
-    estimated_current_ma: float        # Estimated current in mA
+
+    source_component: str  # Component ref that sources current
+    sink_component: str  # Component ref that sinks current
+    nets_in_path: list[str]  # Net names along the path
+    components_in_path: list[str]  # Component refs along the path
+    estimated_current_ma: float  # Estimated current in mA
 
 
-def extract_components_for_analysis(pcb_data: PCBData) -> Dict[str, ComponentInfo]:
+def extract_components_for_analysis(pcb_data: PCBData) -> dict[str, ComponentInfo]:
     """
     Extract component information from PCB for AI analysis.
 
@@ -86,7 +88,7 @@ def extract_components_for_analysis(pcb_data: PCBData) -> Dict[str, ComponentInf
             pad_count=len(fp.pads),
             net_connections=net_connections,
             pin_functions=pin_functions,
-            pin_types=pin_types
+            pin_types=pin_types,
         )
 
         # Pre-classify obvious cases
@@ -105,67 +107,66 @@ def _auto_classify_component(ref: str, fp: Footprint, pcb_data: PCBData) -> Comp
     ref_upper = ref.upper()
 
     # Check for power_out pins (voltage regulators)
-    has_power_out = any(p.pintype == 'power_out' for p in fp.pads)
+    has_power_out = any(p.pintype == "power_out" for p in fp.pads)
     if has_power_out:
         return ComponentRole.POWER_SOURCE
 
     # Capacitors - check if decoupling (to GND) or series
-    if ref_upper.startswith('C') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("C") and len(ref) > 1 and ref[1].isdigit():
         if len(fp.pads) == 2:
-            net_names = [pcb_data.nets.get(p.net_id, type('', (), {'name': ''})()).name
-                        for p in fp.pads if p.net_id]
+            net_names = [pcb_data.nets.get(p.net_id, type("", (), {"name": ""})()).name for p in fp.pads if p.net_id]
             # If one side is GND, it's a decoupling cap (shunt)
-            if any('GND' in n.upper() for n in net_names):
+            if any("GND" in n.upper() for n in net_names):
                 return ComponentRole.SHUNT
         return ComponentRole.UNKNOWN  # Could be series cap, needs analysis
 
     # Resistors - usually shunts (pull-ups) unless in series power path
-    if ref_upper.startswith('R') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("R") and len(ref) > 1 and ref[1].isdigit():
         return ComponentRole.SHUNT  # Default to shunt, AI can override
 
     # Inductors - pass-through in power path
-    if ref_upper.startswith('L') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("L") and len(ref) > 1 and ref[1].isdigit():
         return ComponentRole.PASS_THROUGH
 
     # Ferrite beads - pass-through
-    if ref_upper.startswith('FB') and len(ref) > 2 and ref[2].isdigit():
+    if ref_upper.startswith("FB") and len(ref) > 2 and ref[2].isdigit():
         return ComponentRole.PASS_THROUGH
 
     # Fuses - pass-through
-    if ref_upper.startswith('F') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("F") and len(ref) > 1 and ref[1].isdigit():
         return ComponentRole.PASS_THROUGH
 
     # LEDs - current sinks
-    if ref_upper.startswith('LED'):
+    if ref_upper.startswith("LED"):
         return ComponentRole.CURRENT_SINK
-    if ref_upper.startswith('D') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("D") and len(ref) > 1 and ref[1].isdigit():
         # Could be LED or protection diode - needs analysis
         return ComponentRole.UNKNOWN
 
     # Switches - pass-through
-    if ref_upper.startswith('SW') or (ref_upper.startswith('S') and len(ref) > 1 and ref[1].isdigit()):
+    if ref_upper.startswith("SW") or (ref_upper.startswith("S") and len(ref) > 1 and ref[1].isdigit()):
         return ComponentRole.PASS_THROUGH
 
     # Connectors/Terminal blocks - potential power sources
-    if ref_upper.startswith(('J', 'P', 'TB', 'CN')):
+    if ref_upper.startswith(("J", "P", "TB", "CN")):
         return ComponentRole.UNKNOWN  # Could be power input or signal
 
     # ICs - usually current sinks
-    if ref_upper.startswith('U') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("U") and len(ref) > 1 and ref[1].isdigit():
         return ComponentRole.CURRENT_SINK
 
     # Voltage regulators by ref
-    if ref_upper.startswith('VR') and len(ref) > 2 and ref[2].isdigit():
+    if ref_upper.startswith("VR") and len(ref) > 2 and ref[2].isdigit():
         return ComponentRole.POWER_SOURCE
 
     # Transistors - could be switch or sink
-    if ref_upper.startswith('Q') and len(ref) > 1 and ref[1].isdigit():
+    if ref_upper.startswith("Q") and len(ref) > 1 and ref[1].isdigit():
         return ComponentRole.UNKNOWN
 
     return ComponentRole.UNKNOWN
 
 
-def get_components_needing_analysis(components: Dict[str, ComponentInfo]) -> List[ComponentInfo]:
+def get_components_needing_analysis(components: dict[str, ComponentInfo]) -> list[ComponentInfo]:
     """
     Get list of components that need AI analysis to determine their role.
     """
@@ -173,22 +174,24 @@ def get_components_needing_analysis(components: Dict[str, ComponentInfo]) -> Lis
 
     # Sort by likely importance (ICs first, then connectors, then others)
     def sort_key(c):
-        if c.ref.startswith('U'):
+        if c.ref.startswith("U"):
             return (0, c.ref)
-        if c.ref.startswith(('J', 'P', 'TB')):
+        if c.ref.startswith(("J", "P", "TB")):
             return (1, c.ref)
-        if c.ref.startswith('VR'):
+        if c.ref.startswith("VR"):
             return (2, c.ref)
         return (3, c.ref)
 
     return sorted(unknown, key=sort_key)
 
 
-def classify_component(components: Dict[str, ComponentInfo],
-                       ref: str,
-                       role: ComponentRole,
-                       current_rating_ma: Optional[float] = None,
-                       notes: str = "") -> None:
+def classify_component(
+    components: dict[str, ComponentInfo],
+    ref: str,
+    role: ComponentRole,
+    current_rating_ma: float | None = None,
+    notes: str = "",
+) -> None:
     """
     Set the classification for a component based on AI analysis.
 
@@ -205,8 +208,7 @@ def classify_component(components: Dict[str, ComponentInfo],
         components[ref].notes = notes
 
 
-def trace_power_paths(pcb_data: PCBData,
-                      components: Dict[str, ComponentInfo]) -> List[PowerPath]:
+def trace_power_paths(pcb_data: PCBData, components: dict[str, ComponentInfo]) -> list[PowerPath]:
     """
     Trace current paths from sinks back to sources through pass-through components.
 
@@ -215,7 +217,7 @@ def trace_power_paths(pcb_data: PCBData,
     paths = []
 
     # Build adjacency: net_id -> [(component_ref, other_net_id)]
-    net_adjacency: Dict[int, List[Tuple[str, int]]] = {}
+    net_adjacency: dict[int, list[tuple[str, int]]] = {}
 
     for ref, comp in components.items():
         if comp.role != ComponentRole.PASS_THROUGH:
@@ -224,7 +226,7 @@ def trace_power_paths(pcb_data: PCBData,
         # Get connected nets (excluding unconnected)
         connected_nets = []
         for pad_num, net_name in comp.net_connections.items():
-            if 'unconnected' in net_name.lower():
+            if "unconnected" in net_name.lower():
                 continue
             # Find net_id
             for net_id, net in pcb_data.nets.items():
@@ -252,7 +254,7 @@ def trace_power_paths(pcb_data: PCBData,
 
         for pad_num, pintype in comp.pin_types.items():
             net_name = comp.net_connections.get(pad_num, "")
-            if 'unconnected' in net_name.lower():
+            if "unconnected" in net_name.lower():
                 continue
 
             pinfunction = comp.pin_functions.get(pad_num, "").upper()
@@ -267,9 +269,9 @@ def trace_power_paths(pcb_data: PCBData,
             if net_id is None:
                 continue
 
-            if pintype == 'power_out' or pinfunction in ('OUT', 'VOUT', 'OUTPUT'):
+            if pintype == "power_out" or pinfunction in ("OUT", "VOUT", "OUTPUT"):
                 output_nets.append(net_id)
-            elif pinfunction in ('IN', 'VIN', 'INPUT'):
+            elif pinfunction in ("IN", "VIN", "INPUT"):
                 input_nets.append(net_id)
 
         # Connect outputs to inputs
@@ -284,12 +286,12 @@ def trace_power_paths(pcb_data: PCBData,
                     net_adjacency[in_net].append((ref, out_net))
 
     # Find sink nets (power_in pins on sink components)
-    sink_nets: Dict[int, str] = {}  # net_id -> sink_component_ref
+    sink_nets: dict[int, str] = {}  # net_id -> sink_component_ref
     for ref, comp in components.items():
         if comp.role != ComponentRole.CURRENT_SINK:
             continue
         for pad_num, pintype in comp.pin_types.items():
-            if pintype == 'power_in':
+            if pintype == "power_in":
                 net_name = comp.net_connections.get(pad_num, "")
                 for net_id, net in pcb_data.nets.items():
                     if net.name == net_name:
@@ -297,7 +299,7 @@ def trace_power_paths(pcb_data: PCBData,
                         break
 
     # Find source nets (power_out pins on source components, or power input connectors)
-    source_nets: Dict[int, str] = {}  # net_id -> source_component_ref
+    source_nets: dict[int, str] = {}  # net_id -> source_component_ref
     for ref, comp in components.items():
         if comp.role != ComponentRole.POWER_SOURCE:
             continue
@@ -308,9 +310,9 @@ def trace_power_paths(pcb_data: PCBData,
                     # For regulators, the output is the source
                     # For power inputs (connectors), all connected nets could be sources
                     pinfunction = comp.pin_functions.get(pad_num, "").upper()
-                    if pintype == 'power_out' or pinfunction in ('OUT', 'VOUT', 'OUTPUT'):
+                    if pintype == "power_out" or pinfunction in ("OUT", "VOUT", "OUTPUT"):
                         source_nets[net_id] = ref
-                    elif ref.startswith(('J', 'P', 'TB')):
+                    elif ref.startswith(("J", "P", "TB")):
                         # Power input connector - could be a source
                         source_nets[net_id] = ref
                     break
@@ -343,13 +345,15 @@ def trace_power_paths(pcb_data: PCBData,
                 sink_comp = components.get(sink_ref)
                 current_ma = sink_comp.current_rating_ma if sink_comp and sink_comp.current_rating_ma else 100.0
 
-                paths.append(PowerPath(
-                    source_component=source_nets[net_id],
-                    sink_component=sink_ref,
-                    nets_in_path=path_nets,
-                    components_in_path=path_components,
-                    estimated_current_ma=current_ma
-                ))
+                paths.append(
+                    PowerPath(
+                        source_component=source_nets[net_id],
+                        sink_component=sink_ref,
+                        nets_in_path=path_nets,
+                        components_in_path=path_components,
+                        estimated_current_ma=current_ma,
+                    )
+                )
 
             # Expand through pass-through components
             if net_id in net_adjacency:
@@ -361,10 +365,9 @@ def trace_power_paths(pcb_data: PCBData,
     return paths
 
 
-def get_power_net_recommendations(pcb_data: PCBData,
-                                  components: Dict[str, ComponentInfo],
-                                  paths: List[PowerPath],
-                                  min_current_ma: float = 50.0) -> Dict[str, float]:
+def get_power_net_recommendations(
+    pcb_data: PCBData, components: dict[str, ComponentInfo], paths: list[PowerPath], min_current_ma: float = 50.0
+) -> dict[str, float]:
     """
     Get recommended track widths for power nets based on traced paths.
 
@@ -378,7 +381,7 @@ def get_power_net_recommendations(pcb_data: PCBData,
         Dict of net_name -> recommended_width_mm
     """
     # Accumulate current on each net
-    net_currents: Dict[str, float] = {}
+    net_currents: dict[str, float] = {}
 
     for path in paths:
         for net_name in path.nets_in_path:
@@ -389,12 +392,26 @@ def get_power_net_recommendations(pcb_data: PCBData,
     # Also add direct power connections (power_in pins on sinks, power_out on sources)
     # These may not appear in traced paths if there's no pass-through component
     # Also detect mislabeled power pins by their function name
-    power_pin_keywords = ('VCC', 'VDD', 'VSS', 'GND', 'VCCA', 'VSSA', 'VDDA',
-                          'VDDPLL', 'VCCPLL', 'GNDPLL', 'VRH', 'VRL', 'AVDD', 'AVSS')
+    power_pin_keywords = (
+        "VCC",
+        "VDD",
+        "VSS",
+        "GND",
+        "VCCA",
+        "VSSA",
+        "VDDA",
+        "VDDPLL",
+        "VCCPLL",
+        "GNDPLL",
+        "VRH",
+        "VRL",
+        "AVDD",
+        "AVSS",
+    )
 
     def is_power_pin(pinfunction: str, pintype: str) -> bool:
         """Check if a pin is a power pin by function name or pintype."""
-        if pintype in ('power_in', 'power_out'):
+        if pintype in ("power_in", "power_out"):
             return True
         if pinfunction:
             fn_upper = pinfunction.upper()
@@ -409,7 +426,7 @@ def get_power_net_recommendations(pcb_data: PCBData,
                 pinfunction = comp.pin_functions.get(pad_num, "")
                 if is_power_pin(pinfunction, pintype):
                     net_name = comp.net_connections.get(pad_num, "")
-                    if net_name and 'unconnected' not in net_name.lower():
+                    if net_name and "unconnected" not in net_name.lower():
                         if net_name not in net_currents:
                             net_currents[net_name] = 0.0
                         net_currents[net_name] += current
@@ -418,9 +435,9 @@ def get_power_net_recommendations(pcb_data: PCBData,
             current = comp.current_rating_ma or 100.0
             for pad_num, pintype in comp.pin_types.items():
                 pinfunction = comp.pin_functions.get(pad_num, "")
-                if pintype == 'power_out' or is_power_pin(pinfunction, pintype):
+                if pintype == "power_out" or is_power_pin(pinfunction, pintype):
                     net_name = comp.net_connections.get(pad_num, "")
-                    if net_name and 'unconnected' not in net_name.lower():
+                    if net_name and "unconnected" not in net_name.lower():
                         if net_name not in net_currents:
                             net_currents[net_name] = 0.0
                         net_currents[net_name] += current
@@ -435,19 +452,19 @@ def get_power_net_recommendations(pcb_data: PCBData,
         - Trace resistance reduction
         """
         if current_ma < 50:
-            return 0.30   # IPC: 0.15 -> 2x = 0.30
+            return 0.30  # IPC: 0.15 -> 2x = 0.30
         elif current_ma < 100:
-            return 0.50   # IPC: 0.25 -> 2x = 0.50
+            return 0.50  # IPC: 0.25 -> 2x = 0.50
         elif current_ma < 500:
-            return 0.70   # IPC: 0.35 -> 2x = 0.70
+            return 0.70  # IPC: 0.35 -> 2x = 0.70
         elif current_ma < 1000:
-            return 1.00   # IPC: 0.50 -> 2x = 1.00
+            return 1.00  # IPC: 0.50 -> 2x = 1.00
         elif current_ma < 2000:
-            return 1.20   # IPC: 0.60 -> 2x = 1.20
+            return 1.20  # IPC: 0.60 -> 2x = 1.20
         elif current_ma < 5000:
-            return 2.00   # IPC: 1.00 -> 2x = 2.00
+            return 2.00  # IPC: 1.00 -> 2x = 2.00
         else:
-            return 3.00   # IPC: 1.50 -> 2x = 3.00; consider using planes
+            return 3.00  # IPC: 1.50 -> 2x = 3.00; consider using planes
 
     # Generate recommendations
     recommendations = {}
@@ -457,14 +474,12 @@ def get_power_net_recommendations(pcb_data: PCBData,
 
     # Calculate total return current for GND nets based on all current sinks
     total_sink_current = sum(
-        comp.current_rating_ma or 100.0
-        for comp in components.values()
-        if comp.role == ComponentRole.CURRENT_SINK
+        comp.current_rating_ma or 100.0 for comp in components.values() if comp.role == ComponentRole.CURRENT_SINK
     )
 
     # Add ground nets sized for return current
     for net_id, net in pcb_data.nets.items():
-        if 'GND' in net.name.upper():
+        if "GND" in net.name.upper():
             # Use total sink current for main GND, or existing calculated current if higher
             gnd_current = max(net_currents.get(net.name, 0), total_sink_current)
             if gnd_current >= min_current_ma:
@@ -473,10 +488,9 @@ def get_power_net_recommendations(pcb_data: PCBData,
     return recommendations
 
 
-def format_analysis_report(pcb_data: PCBData,
-                          components: Dict[str, ComponentInfo],
-                          paths: List[PowerPath],
-                          recommendations: Dict[str, float]) -> str:
+def format_analysis_report(
+    pcb_data: PCBData, components: dict[str, ComponentInfo], paths: list[PowerPath], recommendations: dict[str, float]
+) -> str:
     """
     Format a human-readable analysis report.
     """
@@ -532,18 +546,18 @@ def format_analysis_report(pcb_data: PCBData,
     lines.append("\n## Routing Configuration\n")
     nets = list(recommendations.keys())
     widths = [recommendations[n] for n in nets]
-    nets_str = ' '.join(f'"{n}"' for n in nets)
-    widths_str = ' '.join(f'{w}' for w in widths)
-    lines.append(f'  --power-nets {nets_str}')
-    lines.append(f'  --power-nets-widths {widths_str}')
+    nets_str = " ".join(f'"{n}"' for n in nets)
+    widths_str = " ".join(f"{w}" for w in widths)
+    lines.append(f"  --power-nets {nets_str}")
+    lines.append(f"  --power-nets-widths {widths_str}")
 
     lines.append("\n" + "=" * 70)
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 # Main entry point for interactive use
-def analyze_pcb(filepath: str) -> Tuple[Dict[str, ComponentInfo], PCBData]:
+def analyze_pcb(filepath: str) -> tuple[dict[str, ComponentInfo], PCBData]:
     """
     Load a PCB file and extract components for analysis.
 
@@ -552,7 +566,7 @@ def analyze_pcb(filepath: str) -> Tuple[Dict[str, ComponentInfo], PCBData]:
     """
     print(f"Loading {filepath}...")
     pcb_data = parse_kicad_pcb(filepath)
-    print(f"Extracting components...")
+    print("Extracting components...")
     components = extract_components_for_analysis(pcb_data)
 
     # Summary
@@ -568,6 +582,7 @@ def analyze_pcb(filepath: str) -> Tuple[Dict[str, ComponentInfo], PCBData]:
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 2:
         print("Usage: python analyze_power_paths.py <pcb_file>")
         sys.exit(1)
@@ -577,7 +592,7 @@ if __name__ == "__main__":
     # Show components needing analysis
     unknown = get_components_needing_analysis(components)
     if unknown:
-        print(f"\nComponents needing AI analysis:")
+        print("\nComponents needing AI analysis:")
         for comp in unknown[:10]:
             print(f"  {comp.ref}: {comp.value} ({comp.pad_count} pins)")
         if len(unknown) > 10:

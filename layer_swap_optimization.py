@@ -9,25 +9,26 @@ This module handles the upfront layer swap optimization that happens before rout
 The goal is to minimize the number of vias needed by swapping stubs to compatible layers.
 """
 
-from typing import List, Dict, Set, Tuple, Optional
-from dataclasses import dataclass
-
-from kicad_parser import PCBData
-from routing_config import GridRouteConfig, DiffPairNet
-from connectivity import is_edge_stub
-from stub_layer_switching import (
-    get_stub_info, apply_stub_layer_switch, collect_stubs_by_layer,
-    collect_stub_endpoints_by_layer, validate_swap, validate_single_swap,
-    collect_single_ended_stubs_by_layer, revert_stub_layer_switch,
-    STUB_OVERLAP_Y_TOLERANCE
-)
+from connectivity import get_multipoint_net_pads, get_net_endpoints, is_edge_stub
 from diff_pair_routing import get_diff_pair_endpoints
-from connectivity import get_net_endpoints, get_multipoint_net_pads
+from kicad_parser import PCBData
+from routing_config import DiffPairNet, GridRouteConfig
+from stub_layer_switching import (
+    STUB_OVERLAP_Y_TOLERANCE,
+    apply_stub_layer_switch,
+    collect_single_ended_stubs_by_layer,
+    collect_stub_endpoints_by_layer,
+    collect_stubs_by_layer,
+    get_stub_info,
+    revert_stub_layer_switch,
+    validate_single_swap,
+    validate_swap,
+)
 
 
 def _find_blocking_single_ended_nets(
-    stub_p, stub_n, dest_layer: str, pcb_data: PCBData, diff_pair_net_ids: Set[int]
-) -> List[int]:
+    stub_p, stub_n, dest_layer: str, pcb_data: PCBData, diff_pair_net_ids: set[int]
+) -> list[int]:
     """
     Find single-ended net IDs that block the given stubs from moving to dest_layer.
 
@@ -74,9 +75,7 @@ def _find_blocking_single_ended_nets(
     return list(blocking_nets)
 
 
-def _get_single_ended_stub_on_layer(
-    pcb_data: PCBData, net_id: int, layer: str, config: GridRouteConfig
-):
+def _get_single_ended_stub_on_layer(pcb_data: PCBData, net_id: int, layer: str, config: GridRouteConfig):
     """Get stub info for a single-ended net on the given layer."""
     sources, targets, error = get_net_endpoints(pcb_data, net_id, config)
     if error or not sources or not targets:
@@ -95,8 +94,7 @@ def _get_single_ended_stub_on_layer(
 
 
 def _validate_single_ended_swap(
-    stub, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig,
-    exclude_net_ids: Set[int] = None
+    stub, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] = None
 ) -> bool:
     """Validate that a single-ended stub can move to dest_layer without conflicts."""
     from stub_layer_switching import segments_intersect_2d
@@ -116,8 +114,10 @@ def _validate_single_ended_swap(
                 continue
             # Check if segments actually intersect
             if segments_intersect_2d(
-                (our_seg.start_x, our_seg.start_y), (our_seg.end_x, our_seg.end_y),
-                (other.start_x, other.start_y), (other.end_x, other.end_y)
+                (our_seg.start_x, our_seg.start_y),
+                (our_seg.end_x, our_seg.end_y),
+                (other.start_x, other.start_y),
+                (other.end_x, other.end_y),
             ):
                 return False
 
@@ -127,13 +127,13 @@ def _validate_single_ended_swap(
 def apply_diff_pair_layer_swaps(
     pcb_data: PCBData,
     config: GridRouteConfig,
-    diff_pair_ids_to_route_set: List[Tuple[str, DiffPairNet]],
-    diff_pairs: Dict[str, DiffPairNet],
+    diff_pair_ids_to_route_set: list[tuple[str, DiffPairNet]],
+    diff_pairs: dict[str, DiffPairNet],
     can_swap_to_top_layer: bool,
-    all_segment_modifications: List,
-    all_swap_vias: List,
-    verbose: bool = False
-) -> Tuple[int, Dict, Dict]:
+    all_segment_modifications: list,
+    all_swap_vias: list,
+    verbose: bool = False,
+) -> tuple[int, dict, dict]:
     """
     Apply upfront layer swap optimization for diff pairs.
 
@@ -178,8 +178,7 @@ def apply_diff_pair_layer_swaps(
     stub_endpoints_by_layer = collect_stub_endpoints_by_layer(pcb_data, all_pair_layer_info, config)
 
     # Find pairs that need layer switches (src != tgt layer)
-    pairs_needing_via = [(name, info) for name, info in pair_layer_info.items()
-                        if info[0] != info[1]]
+    pairs_needing_via = [(name, info) for name, info in pair_layer_info.items() if info[0] != info[1]]
 
     # Try to find swap partners for pairs needing via
     applied_swaps = set()
@@ -192,10 +191,8 @@ def apply_diff_pair_layer_swaps(
             continue
 
         # Get our source stub info
-        src_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                   sources[0][5], sources[0][6], src_layer)
-        src_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                   sources[0][7], sources[0][8], src_layer)
+        src_p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+        src_n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
 
         if not src_p_stub or not src_n_stub:
             continue
@@ -241,17 +238,19 @@ def apply_diff_pair_layer_swaps(
             # After swap, partner's source will be on our src_layer.
             # Partner is OK if: their new source (src_layer) == their target (other_tgt_layer)
             # OR if they already needed a via (can't make it worse)
-            partner_already_needs_via = (other_src_layer != other_tgt_layer)
-            partner_would_be_ok_after = (src_layer == other_tgt_layer)
+            partner_already_needs_via = other_src_layer != other_tgt_layer
+            partner_would_be_ok_after = src_layer == other_tgt_layer
             if not partner_already_needs_via and not partner_would_be_ok_after:
                 # Partner was OK but swap would break them - skip
                 continue
 
             # Get their source stub info
-            other_src_p_stub = get_stub_info(pcb_data, other_pair.p_net_id,
-                                             other_sources[0][5], other_sources[0][6], other_src_layer)
-            other_src_n_stub = get_stub_info(pcb_data, other_pair.n_net_id,
-                                             other_sources[0][7], other_sources[0][8], other_src_layer)
+            other_src_p_stub = get_stub_info(
+                pcb_data, other_pair.p_net_id, other_sources[0][5], other_sources[0][6], other_src_layer
+            )
+            other_src_n_stub = get_stub_info(
+                pcb_data, other_pair.n_net_id, other_sources[0][7], other_sources[0][8], other_src_layer
+            )
 
             if other_src_p_stub and other_src_n_stub:
                 swap_partner = other_name
@@ -265,16 +264,26 @@ def apply_diff_pair_layer_swaps(
 
             # Validate swap before applying
             our_valid, our_reason = validate_swap(
-                src_p_stub, src_n_stub, tgt_layer, all_stubs_by_layer,
-                pcb_data, config, swap_partner_name=swap_partner,
+                src_p_stub,
+                src_n_stub,
+                tgt_layer,
+                all_stubs_by_layer,
+                pcb_data,
+                config,
+                swap_partner_name=swap_partner,
                 swap_partner_net_ids={other_pair.p_net_id, other_pair.n_net_id},
-                stub_endpoints_by_layer=stub_endpoints_by_layer
+                stub_endpoints_by_layer=stub_endpoints_by_layer,
             )
             partner_valid, partner_reason = validate_swap(
-                other_src_p_stub, other_src_n_stub, src_layer, all_stubs_by_layer,
-                pcb_data, config, swap_partner_name=pair_name,
+                other_src_p_stub,
+                other_src_n_stub,
+                src_layer,
+                all_stubs_by_layer,
+                pcb_data,
+                config,
+                swap_partner_name=pair_name,
                 swap_partner_net_ids={pair.p_net_id, pair.n_net_id},
-                stub_endpoints_by_layer=stub_endpoints_by_layer
+                stub_endpoints_by_layer=stub_endpoints_by_layer,
             )
 
             if not our_valid or not partner_valid:
@@ -285,18 +294,22 @@ def apply_diff_pair_layer_swaps(
             # Check if swap would move stubs to F.Cu (top layer)
             # Skip if can_swap_to_top_layer is False and either destination is F.Cu
             # Exception: allow edge stubs (on BGA boundary) to swap to F.Cu
-            if not can_swap_to_top_layer and (tgt_layer == 'F.Cu' or src_layer == 'F.Cu'):
+            if not can_swap_to_top_layer and (tgt_layer == "F.Cu" or src_layer == "F.Cu"):
                 # Check if stubs moving to F.Cu are edge stubs
                 allow_swap = True
-                if tgt_layer == 'F.Cu':
+                if tgt_layer == "F.Cu":
                     # Our stubs would move to F.Cu - check if they're edge stubs
-                    if not (is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)):
+                    if not (
+                        is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         allow_swap = False
-                if src_layer == 'F.Cu' and allow_swap:
+                if src_layer == "F.Cu" and allow_swap:
                     # Their stubs would move to F.Cu - check if they're edge stubs
-                    if not (is_edge_stub(other_src_p_stub.pad_x, other_src_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(other_src_n_stub.pad_x, other_src_n_stub.pad_y, config.bga_exclusion_zones)):
+                    if not (
+                        is_edge_stub(other_src_p_stub.pad_x, other_src_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(other_src_n_stub.pad_x, other_src_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         allow_swap = False
                 if not allow_swap:
                     continue
@@ -314,14 +327,10 @@ def apply_diff_pair_layer_swaps(
             # Update all_stubs_by_layer to reflect the layer changes
             # pair_name: src_layer -> tgt_layer
             if src_layer in all_stubs_by_layer:
-                all_stubs_by_layer[src_layer] = [
-                    s for s in all_stubs_by_layer[src_layer] if s[0] != pair_name
-                ]
+                all_stubs_by_layer[src_layer] = [s for s in all_stubs_by_layer[src_layer] if s[0] != pair_name]
             if tgt_layer not in all_stubs_by_layer:
                 all_stubs_by_layer[tgt_layer] = []
-            all_stubs_by_layer[tgt_layer].append(
-                (pair_name, src_p_stub.segments + src_n_stub.segments)
-            )
+            all_stubs_by_layer[tgt_layer].append((pair_name, src_p_stub.segments + src_n_stub.segments))
             # swap_partner: other_src_layer -> src_layer
             if other_src_layer in all_stubs_by_layer:
                 all_stubs_by_layer[other_src_layer] = [
@@ -329,9 +338,7 @@ def apply_diff_pair_layer_swaps(
                 ]
             if src_layer not in all_stubs_by_layer:
                 all_stubs_by_layer[src_layer] = []
-            all_stubs_by_layer[src_layer].append(
-                (swap_partner, other_src_p_stub.segments + other_src_n_stub.segments)
-            )
+            all_stubs_by_layer[src_layer].append((swap_partner, other_src_p_stub.segments + other_src_n_stub.segments))
 
             # Update stub_endpoints_by_layer to reflect the layer changes
             if src_layer in stub_endpoints_by_layer:
@@ -358,7 +365,9 @@ def apply_diff_pair_layer_swaps(
             swap_count += 1
             total_layer_swaps += 1
             via_msg = f", added {len(all_vias)} pad via(s)" if all_vias else ""
-            print(f"  Source swap: {pair_name} ({src_layer}->{tgt_layer}) <-> {swap_partner} ({other_src_layer}->{src_layer}){via_msg}")
+            print(
+                f"  Source swap: {pair_name} ({src_layer}->{tgt_layer}) <-> {swap_partner} ({other_src_layer}->{src_layer}){via_msg}"
+            )
 
     if swap_count > 0:
         print(f"Applied {swap_count} source layer swap(s)")
@@ -370,27 +379,32 @@ def apply_diff_pair_layer_swaps(
             continue
 
         # Check if we can move source stubs to target layer without a partner
-        src_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                   sources[0][5], sources[0][6], src_layer)
-        src_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                   sources[0][7], sources[0][8], src_layer)
+        src_p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+        src_n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
 
         if not src_p_stub or not src_n_stub:
             continue
 
         # Check if swap would move stubs to F.Cu (top layer)
         # Exception: allow edge stubs to swap to F.Cu
-        if not can_swap_to_top_layer and tgt_layer == 'F.Cu':
-            if not (is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones) or
-                    is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)):
+        if not can_swap_to_top_layer and tgt_layer == "F.Cu":
+            if not (
+                is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones)
+                or is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)
+            ):
                 continue
 
         # Validate solo switch: source stubs move to target layer
         valid, reason = validate_swap(
-            src_p_stub, src_n_stub, tgt_layer, all_stubs_by_layer,
-            pcb_data, config, swap_partner_name=None,
+            src_p_stub,
+            src_n_stub,
+            tgt_layer,
+            all_stubs_by_layer,
+            pcb_data,
+            config,
+            swap_partner_name=None,
             swap_partner_net_ids=set(),
-            stub_endpoints_by_layer=stub_endpoints_by_layer
+            stub_endpoints_by_layer=stub_endpoints_by_layer,
         )
 
         if valid:
@@ -406,7 +420,8 @@ def apply_diff_pair_layer_swaps(
             # Remove from old layer and add to new layer
             if src_layer in all_stubs_by_layer:
                 all_stubs_by_layer[src_layer] = [
-                    s for s in all_stubs_by_layer[src_layer]
+                    s
+                    for s in all_stubs_by_layer[src_layer]
                     if s[0] != pair_name  # s[0] is pair_name
                 ]
             if tgt_layer not in all_stubs_by_layer:
@@ -444,10 +459,8 @@ def apply_diff_pair_layer_swaps(
             continue
 
         # Get our target stub info
-        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                   targets[0][5], targets[0][6], tgt_layer)
-        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                   targets[0][7], targets[0][8], tgt_layer)
+        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
 
         if not tgt_p_stub or not tgt_n_stub:
             continue
@@ -493,17 +506,19 @@ def apply_diff_pair_layer_swaps(
             # After swap, partner's target will be on our tgt_layer.
             # Partner is OK if: their source (other_src_layer) == their new target (tgt_layer)
             # OR if they already needed a via (can't make it worse)
-            partner_already_needs_via = (other_src_layer != other_tgt_layer)
-            partner_would_be_ok_after = (other_src_layer == tgt_layer)
+            partner_already_needs_via = other_src_layer != other_tgt_layer
+            partner_would_be_ok_after = other_src_layer == tgt_layer
             if not partner_already_needs_via and not partner_would_be_ok_after:
                 # Partner was OK but swap would break them - skip
                 continue
 
             # Get their target stub info
-            other_tgt_p_stub = get_stub_info(pcb_data, other_pair.p_net_id,
-                                             other_targets[0][5], other_targets[0][6], other_tgt_layer)
-            other_tgt_n_stub = get_stub_info(pcb_data, other_pair.n_net_id,
-                                             other_targets[0][7], other_targets[0][8], other_tgt_layer)
+            other_tgt_p_stub = get_stub_info(
+                pcb_data, other_pair.p_net_id, other_targets[0][5], other_targets[0][6], other_tgt_layer
+            )
+            other_tgt_n_stub = get_stub_info(
+                pcb_data, other_pair.n_net_id, other_targets[0][7], other_targets[0][8], other_tgt_layer
+            )
 
             if other_tgt_p_stub and other_tgt_n_stub:
                 swap_partner = other_name
@@ -517,16 +532,26 @@ def apply_diff_pair_layer_swaps(
 
             # Validate swap before applying
             our_valid, our_reason = validate_swap(
-                tgt_p_stub, tgt_n_stub, src_layer, all_stubs_by_layer,
-                pcb_data, config, swap_partner_name=swap_partner,
+                tgt_p_stub,
+                tgt_n_stub,
+                src_layer,
+                all_stubs_by_layer,
+                pcb_data,
+                config,
+                swap_partner_name=swap_partner,
                 swap_partner_net_ids={other_pair.p_net_id, other_pair.n_net_id},
-                stub_endpoints_by_layer=stub_endpoints_by_layer
+                stub_endpoints_by_layer=stub_endpoints_by_layer,
             )
             partner_valid, partner_reason = validate_swap(
-                other_tgt_p_stub, other_tgt_n_stub, tgt_layer, all_stubs_by_layer,
-                pcb_data, config, swap_partner_name=pair_name,
+                other_tgt_p_stub,
+                other_tgt_n_stub,
+                tgt_layer,
+                all_stubs_by_layer,
+                pcb_data,
+                config,
+                swap_partner_name=pair_name,
                 swap_partner_net_ids={pair.p_net_id, pair.n_net_id},
-                stub_endpoints_by_layer=stub_endpoints_by_layer
+                stub_endpoints_by_layer=stub_endpoints_by_layer,
             )
 
             if not our_valid or not partner_valid:
@@ -537,18 +562,22 @@ def apply_diff_pair_layer_swaps(
             # Check if swap would move stubs to F.Cu (top layer)
             # Skip if can_swap_to_top_layer is False and either destination is F.Cu
             # Exception: allow edge stubs to swap to F.Cu
-            if not can_swap_to_top_layer and (src_layer == 'F.Cu' or tgt_layer == 'F.Cu'):
+            if not can_swap_to_top_layer and (src_layer == "F.Cu" or tgt_layer == "F.Cu"):
                 # Check if stubs moving to F.Cu are edge stubs
                 allow_swap = True
-                if src_layer == 'F.Cu':
+                if src_layer == "F.Cu":
                     # Our stubs would move to F.Cu - check if they're edge stubs
-                    if not (is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)):
+                    if not (
+                        is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         allow_swap = False
-                if tgt_layer == 'F.Cu' and allow_swap:
+                if tgt_layer == "F.Cu" and allow_swap:
                     # Their stubs would move to F.Cu - check if they're edge stubs
-                    if not (is_edge_stub(other_tgt_p_stub.pad_x, other_tgt_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(other_tgt_n_stub.pad_x, other_tgt_n_stub.pad_y, config.bga_exclusion_zones)):
+                    if not (
+                        is_edge_stub(other_tgt_p_stub.pad_x, other_tgt_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(other_tgt_n_stub.pad_x, other_tgt_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         allow_swap = False
                 if not allow_swap:
                     continue
@@ -590,7 +619,9 @@ def apply_diff_pair_layer_swaps(
             target_swap_count += 1
             total_layer_swaps += 1
             via_msg = f", added {len(all_vias)} pad via(s)" if all_vias else ""
-            print(f"  Target swap: {pair_name} ({tgt_layer}->{src_layer}) <-> {swap_partner} ({other_tgt_layer}->{tgt_layer}){via_msg}")
+            print(
+                f"  Target swap: {pair_name} ({tgt_layer}->{src_layer}) <-> {swap_partner} ({other_tgt_layer}->{tgt_layer}){via_msg}"
+            )
 
     if target_swap_count > 0:
         print(f"Applied {target_swap_count} target layer swap(s)")
@@ -602,10 +633,8 @@ def apply_diff_pair_layer_swaps(
             continue
 
         # Check if we can move target stubs to source layer without a partner
-        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                   targets[0][5], targets[0][6], tgt_layer)
-        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                   targets[0][7], targets[0][8], tgt_layer)
+        tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+        tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
 
         if not tgt_p_stub or not tgt_n_stub:
             missing = []
@@ -613,23 +642,32 @@ def apply_diff_pair_layer_swaps(
                 missing.append("P")
             if not tgt_n_stub:
                 missing.append("N")
-            print(f"    Solo target switch skipped for {pair_name}: can't find {'+'.join(missing)} stub at target ({targets[0][5]:.2f}, {targets[0][6]:.2f}) on {tgt_layer}")
+            print(
+                f"    Solo target switch skipped for {pair_name}: can't find {'+'.join(missing)} stub at target ({targets[0][5]:.2f}, {targets[0][6]:.2f}) on {tgt_layer}"
+            )
             continue
 
         # Check if swap would move stubs to F.Cu (top layer)
         # Exception: allow edge stubs to swap to F.Cu
-        if not can_swap_to_top_layer and src_layer == 'F.Cu':
-            if not (is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones) or
-                    is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)):
+        if not can_swap_to_top_layer and src_layer == "F.Cu":
+            if not (
+                is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones)
+                or is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)
+            ):
                 print(f"    Solo target switch skipped for {pair_name}: would move to F.Cu (top layer)")
                 continue
 
         # Validate solo switch: target stubs move to source layer
         valid, reason = validate_swap(
-            tgt_p_stub, tgt_n_stub, src_layer, all_stubs_by_layer,
-            pcb_data, config, swap_partner_name=None,
+            tgt_p_stub,
+            tgt_n_stub,
+            src_layer,
+            all_stubs_by_layer,
+            pcb_data,
+            config,
+            swap_partner_name=None,
             swap_partner_net_ids=set(),
-            stub_endpoints_by_layer=stub_endpoints_by_layer
+            stub_endpoints_by_layer=stub_endpoints_by_layer,
         )
 
         if valid:
@@ -643,10 +681,7 @@ def apply_diff_pair_layer_swaps(
             # Update all_stubs_by_layer to reflect the layer change
             # Structure is (pair_name, segments) tuples
             if tgt_layer in all_stubs_by_layer:
-                all_stubs_by_layer[tgt_layer] = [
-                    s for s in all_stubs_by_layer[tgt_layer]
-                    if s[0] != pair_name
-                ]
+                all_stubs_by_layer[tgt_layer] = [s for s in all_stubs_by_layer[tgt_layer] if s[0] != pair_name]
             if src_layer not in all_stubs_by_layer:
                 all_stubs_by_layer[src_layer] = []
             combined_segments = tgt_p_stub.segments + tgt_n_stub.segments
@@ -686,21 +721,26 @@ def apply_diff_pair_layer_swaps(
             for pair_name, (src_layer, tgt_layer, sources, targets, pair) in pairs_needing_via:
                 if pair_name in applied_swaps:
                     continue
-                src_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                           sources[0][5], sources[0][6], src_layer)
-                src_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                           sources[0][7], sources[0][8], src_layer)
+                src_p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+                src_n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
                 if not src_p_stub or not src_n_stub:
                     continue
-                if not can_swap_to_top_layer and tgt_layer == 'F.Cu':
-                    if not (is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)):
+                if not can_swap_to_top_layer and tgt_layer == "F.Cu":
+                    if not (
+                        is_edge_stub(src_p_stub.pad_x, src_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(src_n_stub.pad_x, src_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         continue
                 valid, reason = validate_swap(
-                    src_p_stub, src_n_stub, tgt_layer, all_stubs_by_layer,
-                    pcb_data, config, swap_partner_name=None,
+                    src_p_stub,
+                    src_n_stub,
+                    tgt_layer,
+                    all_stubs_by_layer,
+                    pcb_data,
+                    config,
+                    swap_partner_name=None,
                     swap_partner_net_ids=set(),
-                    stub_endpoints_by_layer=stub_endpoints_by_layer
+                    stub_endpoints_by_layer=stub_endpoints_by_layer,
                 )
                 if valid:
                     vias1, mods1 = apply_stub_layer_switch(pcb_data, src_p_stub, tgt_layer, config, debug=False)
@@ -714,35 +754,46 @@ def apply_diff_pair_layer_swaps(
                         all_stubs_by_layer[tgt_layer] = []
                     all_stubs_by_layer[tgt_layer].append((pair_name, src_p_stub.segments + src_n_stub.segments))
                     if src_layer in stub_endpoints_by_layer:
-                        stub_endpoints_by_layer[src_layer] = [e for e in stub_endpoints_by_layer[src_layer] if e[0] != pair_name]
+                        stub_endpoints_by_layer[src_layer] = [
+                            e for e in stub_endpoints_by_layer[src_layer] if e[0] != pair_name
+                        ]
                     if tgt_layer not in stub_endpoints_by_layer:
                         stub_endpoints_by_layer[tgt_layer] = []
-                    stub_endpoints_by_layer[tgt_layer].append((pair_name, [(src_p_stub.x, src_p_stub.y), (src_n_stub.x, src_n_stub.y)]))
+                    stub_endpoints_by_layer[tgt_layer].append(
+                        (pair_name, [(src_p_stub.x, src_p_stub.y), (src_n_stub.x, src_n_stub.y)])
+                    )
                     applied_swaps.add(pair_name)
                     retry_src_count += 1
                     total_layer_swaps += 1
                     via_msg = f", added {len(all_vias)} pad via(s)" if all_vias else ""
-                    print(f"  Solo source switch (round {retry_round}): {pair_name} ({src_layer}->{tgt_layer}){via_msg}")
+                    print(
+                        f"  Solo source switch (round {retry_round}): {pair_name} ({src_layer}->{tgt_layer}){via_msg}"
+                    )
 
             # Retry solo target switches
             for pair_name, (src_layer, tgt_layer, sources, targets, pair) in pairs_needing_via:
                 if pair_name in applied_swaps:
                     continue
-                tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                           targets[0][5], targets[0][6], tgt_layer)
-                tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                           targets[0][7], targets[0][8], tgt_layer)
+                tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+                tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
                 if not tgt_p_stub or not tgt_n_stub:
                     continue
-                if not can_swap_to_top_layer and src_layer == 'F.Cu':
-                    if not (is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones) or
-                            is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)):
+                if not can_swap_to_top_layer and src_layer == "F.Cu":
+                    if not (
+                        is_edge_stub(tgt_p_stub.pad_x, tgt_p_stub.pad_y, config.bga_exclusion_zones)
+                        or is_edge_stub(tgt_n_stub.pad_x, tgt_n_stub.pad_y, config.bga_exclusion_zones)
+                    ):
                         continue
                 valid, reason = validate_swap(
-                    tgt_p_stub, tgt_n_stub, src_layer, all_stubs_by_layer,
-                    pcb_data, config, swap_partner_name=None,
+                    tgt_p_stub,
+                    tgt_n_stub,
+                    src_layer,
+                    all_stubs_by_layer,
+                    pcb_data,
+                    config,
+                    swap_partner_name=None,
                     swap_partner_net_ids=set(),
-                    stub_endpoints_by_layer=stub_endpoints_by_layer
+                    stub_endpoints_by_layer=stub_endpoints_by_layer,
                 )
                 if valid:
                     vias1, mods1 = apply_stub_layer_switch(pcb_data, tgt_p_stub, src_layer, config, debug=False)
@@ -756,15 +807,21 @@ def apply_diff_pair_layer_swaps(
                         all_stubs_by_layer[src_layer] = []
                     all_stubs_by_layer[src_layer].append((pair_name, tgt_p_stub.segments + tgt_n_stub.segments))
                     if tgt_layer in stub_endpoints_by_layer:
-                        stub_endpoints_by_layer[tgt_layer] = [e for e in stub_endpoints_by_layer[tgt_layer] if e[0] != pair_name]
+                        stub_endpoints_by_layer[tgt_layer] = [
+                            e for e in stub_endpoints_by_layer[tgt_layer] if e[0] != pair_name
+                        ]
                     if src_layer not in stub_endpoints_by_layer:
                         stub_endpoints_by_layer[src_layer] = []
-                    stub_endpoints_by_layer[src_layer].append((pair_name, [(tgt_p_stub.x, tgt_p_stub.y), (tgt_n_stub.x, tgt_n_stub.y)]))
+                    stub_endpoints_by_layer[src_layer].append(
+                        (pair_name, [(tgt_p_stub.x, tgt_p_stub.y), (tgt_n_stub.x, tgt_n_stub.y)])
+                    )
                     applied_swaps.add(pair_name)
                     retry_tgt_count += 1
                     total_layer_swaps += 1
                     via_msg = f", added {len(all_vias)} pad via(s)" if all_vias else ""
-                    print(f"  Solo target switch (round {retry_round}): {pair_name} ({tgt_layer}->{src_layer}){via_msg}")
+                    print(
+                        f"  Solo target switch (round {retry_round}): {pair_name} ({tgt_layer}->{src_layer}){via_msg}"
+                    )
 
             if retry_src_count == 0 and retry_tgt_count == 0:
                 break  # No more progress
@@ -796,15 +853,15 @@ def apply_diff_pair_layer_swaps(
                 our_new_layer = tgt_layer
                 their_new_layer = src_layer
                 # Our source stubs
-                p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                      sources[0][5], sources[0][6], src_layer)
-                n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                      sources[0][7], sources[0][8], src_layer)
+                p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+                n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
                 # Their source stubs
-                other_p_stub = get_stub_info(pcb_data, other_pair.p_net_id,
-                                            other_sources[0][5], other_sources[0][6], other_src)
-                other_n_stub = get_stub_info(pcb_data, other_pair.n_net_id,
-                                            other_sources[0][7], other_sources[0][8], other_src)
+                other_p_stub = get_stub_info(
+                    pcb_data, other_pair.p_net_id, other_sources[0][5], other_sources[0][6], other_src
+                )
+                other_n_stub = get_stub_info(
+                    pcb_data, other_pair.n_net_id, other_sources[0][7], other_sources[0][8], other_src
+                )
                 our_stubs = (p_stub, n_stub)
                 their_stubs = (other_p_stub, other_n_stub)
 
@@ -815,15 +872,15 @@ def apply_diff_pair_layer_swaps(
                 our_new_layer = src_layer
                 their_new_layer = tgt_layer
                 # Our target stubs
-                p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                      targets[0][5], targets[0][6], tgt_layer)
-                n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                      targets[0][7], targets[0][8], tgt_layer)
+                p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+                n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
                 # Their target stubs
-                other_p_stub = get_stub_info(pcb_data, other_pair.p_net_id,
-                                            other_targets[0][5], other_targets[0][6], other_tgt)
-                other_n_stub = get_stub_info(pcb_data, other_pair.n_net_id,
-                                            other_targets[0][7], other_targets[0][8], other_tgt)
+                other_p_stub = get_stub_info(
+                    pcb_data, other_pair.p_net_id, other_targets[0][5], other_targets[0][6], other_tgt
+                )
+                other_n_stub = get_stub_info(
+                    pcb_data, other_pair.n_net_id, other_targets[0][7], other_targets[0][8], other_tgt
+                )
                 our_stubs = (p_stub, n_stub)
                 their_stubs = (other_p_stub, other_n_stub)
 
@@ -832,30 +889,44 @@ def apply_diff_pair_layer_swaps(
                 # Check if swap would move stubs to F.Cu (top layer)
                 # Exception: allow edge stubs to swap to F.Cu
                 allow_swap = True
-                if not can_swap_to_top_layer and (our_new_layer == 'F.Cu' or their_new_layer == 'F.Cu'):
-                    if our_new_layer == 'F.Cu':
-                        if not (is_edge_stub(our_stubs[0].pad_x, our_stubs[0].pad_y, config.bga_exclusion_zones) or
-                                is_edge_stub(our_stubs[1].pad_x, our_stubs[1].pad_y, config.bga_exclusion_zones)):
+                if not can_swap_to_top_layer and (our_new_layer == "F.Cu" or their_new_layer == "F.Cu"):
+                    if our_new_layer == "F.Cu":
+                        if not (
+                            is_edge_stub(our_stubs[0].pad_x, our_stubs[0].pad_y, config.bga_exclusion_zones)
+                            or is_edge_stub(our_stubs[1].pad_x, our_stubs[1].pad_y, config.bga_exclusion_zones)
+                        ):
                             allow_swap = False
-                    if their_new_layer == 'F.Cu' and allow_swap:
-                        if not (is_edge_stub(their_stubs[0].pad_x, their_stubs[0].pad_y, config.bga_exclusion_zones) or
-                                is_edge_stub(their_stubs[1].pad_x, their_stubs[1].pad_y, config.bga_exclusion_zones)):
+                    if their_new_layer == "F.Cu" and allow_swap:
+                        if not (
+                            is_edge_stub(their_stubs[0].pad_x, their_stubs[0].pad_y, config.bga_exclusion_zones)
+                            or is_edge_stub(their_stubs[1].pad_x, their_stubs[1].pad_y, config.bga_exclusion_zones)
+                        ):
                             allow_swap = False
                 if not allow_swap:
                     pass  # Skip this swap - would move non-edge stubs to top layer
                 else:
                     # Validate swap before applying
                     our_valid, our_reason = validate_swap(
-                        our_stubs[0], our_stubs[1], our_new_layer, all_stubs_by_layer,
-                        pcb_data, config, swap_partner_name=other_name,
+                        our_stubs[0],
+                        our_stubs[1],
+                        our_new_layer,
+                        all_stubs_by_layer,
+                        pcb_data,
+                        config,
+                        swap_partner_name=other_name,
                         swap_partner_net_ids={other_pair.p_net_id, other_pair.n_net_id},
-                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                     )
                     their_valid, their_reason = validate_swap(
-                        their_stubs[0], their_stubs[1], their_new_layer, all_stubs_by_layer,
-                        pcb_data, config, swap_partner_name=pair_name,
+                        their_stubs[0],
+                        their_stubs[1],
+                        their_new_layer,
+                        all_stubs_by_layer,
+                        pcb_data,
+                        config,
+                        swap_partner_name=pair_name,
                         swap_partner_net_ids={pair.p_net_id, pair.n_net_id},
-                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                     )
 
                     if not our_valid or not their_valid:
@@ -866,8 +937,12 @@ def apply_diff_pair_layer_swaps(
                         # Apply swaps
                         _, mods1 = apply_stub_layer_switch(pcb_data, our_stubs[0], our_new_layer, config, debug=False)
                         _, mods2 = apply_stub_layer_switch(pcb_data, our_stubs[1], our_new_layer, config, debug=False)
-                        _, mods3 = apply_stub_layer_switch(pcb_data, their_stubs[0], their_new_layer, config, debug=False)
-                        _, mods4 = apply_stub_layer_switch(pcb_data, their_stubs[1], their_new_layer, config, debug=False)
+                        _, mods3 = apply_stub_layer_switch(
+                            pcb_data, their_stubs[0], their_new_layer, config, debug=False
+                        )
+                        _, mods4 = apply_stub_layer_switch(
+                            pcb_data, their_stubs[1], their_new_layer, config, debug=False
+                        )
                         all_segment_modifications.extend(mods1 + mods2 + mods3 + mods4)
 
                         # Update stub_endpoints_by_layer for both pairs
@@ -904,44 +979,58 @@ def apply_diff_pair_layer_swaps(
                 # Source swap failed, try target swap with same pair
                 if other_tgt == src_layer and tgt_layer == other_src:
                     # Our target stubs
-                    p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                          targets[0][5], targets[0][6], tgt_layer)
-                    n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                          targets[0][7], targets[0][8], tgt_layer)
+                    p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+                    n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
                     # Their target stubs
-                    other_p_stub = get_stub_info(pcb_data, other_pair.p_net_id,
-                                                other_targets[0][5], other_targets[0][6], other_tgt)
-                    other_n_stub = get_stub_info(pcb_data, other_pair.n_net_id,
-                                                other_targets[0][7], other_targets[0][8], other_tgt)
+                    other_p_stub = get_stub_info(
+                        pcb_data, other_pair.p_net_id, other_targets[0][5], other_targets[0][6], other_tgt
+                    )
+                    other_n_stub = get_stub_info(
+                        pcb_data, other_pair.n_net_id, other_targets[0][7], other_targets[0][8], other_tgt
+                    )
 
                     if p_stub and n_stub and other_p_stub and other_n_stub:
                         # Check if swap would move stubs to F.Cu (top layer)
                         # Exception: allow edge stubs to swap to F.Cu
                         allow_swap = True
-                        if not can_swap_to_top_layer and (src_layer == 'F.Cu' or tgt_layer == 'F.Cu'):
-                            if src_layer == 'F.Cu':
-                                if not (is_edge_stub(p_stub.pad_x, p_stub.pad_y, config.bga_exclusion_zones) or
-                                        is_edge_stub(n_stub.pad_x, n_stub.pad_y, config.bga_exclusion_zones)):
+                        if not can_swap_to_top_layer and (src_layer == "F.Cu" or tgt_layer == "F.Cu"):
+                            if src_layer == "F.Cu":
+                                if not (
+                                    is_edge_stub(p_stub.pad_x, p_stub.pad_y, config.bga_exclusion_zones)
+                                    or is_edge_stub(n_stub.pad_x, n_stub.pad_y, config.bga_exclusion_zones)
+                                ):
                                     allow_swap = False
-                            if tgt_layer == 'F.Cu' and allow_swap:
-                                if not (is_edge_stub(other_p_stub.pad_x, other_p_stub.pad_y, config.bga_exclusion_zones) or
-                                        is_edge_stub(other_n_stub.pad_x, other_n_stub.pad_y, config.bga_exclusion_zones)):
+                            if tgt_layer == "F.Cu" and allow_swap:
+                                if not (
+                                    is_edge_stub(other_p_stub.pad_x, other_p_stub.pad_y, config.bga_exclusion_zones)
+                                    or is_edge_stub(other_n_stub.pad_x, other_n_stub.pad_y, config.bga_exclusion_zones)
+                                ):
                                     allow_swap = False
                         if not allow_swap:
                             pass  # Skip this swap - would move non-edge stubs to top layer
                         else:
                             # Validate fallback target swap before applying
                             our_valid, our_reason = validate_swap(
-                                p_stub, n_stub, src_layer, all_stubs_by_layer,
-                                pcb_data, config, swap_partner_name=other_name,
+                                p_stub,
+                                n_stub,
+                                src_layer,
+                                all_stubs_by_layer,
+                                pcb_data,
+                                config,
+                                swap_partner_name=other_name,
                                 swap_partner_net_ids={other_pair.p_net_id, other_pair.n_net_id},
-                                stub_endpoints_by_layer=stub_endpoints_by_layer
+                                stub_endpoints_by_layer=stub_endpoints_by_layer,
                             )
                             their_valid, their_reason = validate_swap(
-                                other_p_stub, other_n_stub, tgt_layer, all_stubs_by_layer,
-                                pcb_data, config, swap_partner_name=pair_name,
+                                other_p_stub,
+                                other_n_stub,
+                                tgt_layer,
+                                all_stubs_by_layer,
+                                pcb_data,
+                                config,
+                                swap_partner_name=pair_name,
                                 swap_partner_net_ids={pair.p_net_id, pair.n_net_id},
-                                stub_endpoints_by_layer=stub_endpoints_by_layer
+                                stub_endpoints_by_layer=stub_endpoints_by_layer,
                             )
 
                             if not our_valid or not their_valid:
@@ -950,8 +1039,12 @@ def apply_diff_pair_layer_swaps(
                             else:
                                 _, mods1 = apply_stub_layer_switch(pcb_data, p_stub, src_layer, config, debug=False)
                                 _, mods2 = apply_stub_layer_switch(pcb_data, n_stub, src_layer, config, debug=False)
-                                _, mods3 = apply_stub_layer_switch(pcb_data, other_p_stub, tgt_layer, config, debug=False)
-                                _, mods4 = apply_stub_layer_switch(pcb_data, other_n_stub, tgt_layer, config, debug=False)
+                                _, mods3 = apply_stub_layer_switch(
+                                    pcb_data, other_p_stub, tgt_layer, config, debug=False
+                                )
+                                _, mods4 = apply_stub_layer_switch(
+                                    pcb_data, other_n_stub, tgt_layer, config, debug=False
+                                )
                                 all_segment_modifications.extend(mods1 + mods2 + mods3 + mods4)
 
                                 # Update stub_endpoints_by_layer for both pairs
@@ -999,10 +1092,8 @@ def apply_diff_pair_layer_swaps(
             continue
 
         # Try source-side swap: move source stubs to target layer
-        src_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                   sources[0][5], sources[0][6], src_layer)
-        src_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                   sources[0][7], sources[0][8], src_layer)
+        src_p_stub = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], src_layer)
+        src_n_stub = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], src_layer)
 
         if src_p_stub and src_n_stub:
             # Find blocking single-ended nets on target layer
@@ -1012,9 +1103,7 @@ def apply_diff_pair_layer_swaps(
 
             for blocking_net_id in blocking_nets:
                 # Try to find an alternative layer for this single-ended net
-                se_stub = _get_single_ended_stub_on_layer(
-                    pcb_data, blocking_net_id, tgt_layer, config
-                )
+                se_stub = _get_single_ended_stub_on_layer(pcb_data, blocking_net_id, tgt_layer, config)
                 if not se_stub:
                     continue
 
@@ -1023,7 +1112,7 @@ def apply_diff_pair_layer_swaps(
                     if alt_layer == tgt_layer or alt_layer == src_layer:
                         continue
                     # Don't swap to F.Cu unless it's an edge stub
-                    if not can_swap_to_top_layer and alt_layer == 'F.Cu':
+                    if not can_swap_to_top_layer and alt_layer == "F.Cu":
                         if not is_edge_stub(se_stub.pad_x, se_stub.pad_y, config.bga_exclusion_zones):
                             continue
 
@@ -1035,18 +1124,21 @@ def apply_diff_pair_layer_swaps(
                         continue
 
                     # Apply the single-ended swap
-                    se_vias, se_mods = apply_stub_layer_switch(
-                        pcb_data, se_stub, alt_layer, config, debug=False
-                    )
+                    se_vias, se_mods = apply_stub_layer_switch(pcb_data, se_stub, alt_layer, config, debug=False)
                     all_segment_modifications.extend(se_mods)
                     all_swap_vias.extend(se_vias)
 
                     # Now retry the diff pair source switch
                     valid, reason = validate_swap(
-                        src_p_stub, src_n_stub, tgt_layer, all_stubs_by_layer,
-                        pcb_data, config, swap_partner_name=None,
+                        src_p_stub,
+                        src_n_stub,
+                        tgt_layer,
+                        all_stubs_by_layer,
+                        pcb_data,
+                        config,
+                        swap_partner_name=None,
                         swap_partner_net_ids=set(),
-                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                     )
 
                     if valid:
@@ -1058,15 +1150,21 @@ def apply_diff_pair_layer_swaps(
 
                         # Update tracking structures
                         if src_layer in all_stubs_by_layer:
-                            all_stubs_by_layer[src_layer] = [s for s in all_stubs_by_layer[src_layer] if s[0] != pair_name]
+                            all_stubs_by_layer[src_layer] = [
+                                s for s in all_stubs_by_layer[src_layer] if s[0] != pair_name
+                            ]
                         if tgt_layer not in all_stubs_by_layer:
                             all_stubs_by_layer[tgt_layer] = []
                         all_stubs_by_layer[tgt_layer].append((pair_name, src_p_stub.segments + src_n_stub.segments))
                         if src_layer in stub_endpoints_by_layer:
-                            stub_endpoints_by_layer[src_layer] = [e for e in stub_endpoints_by_layer[src_layer] if e[0] != pair_name]
+                            stub_endpoints_by_layer[src_layer] = [
+                                e for e in stub_endpoints_by_layer[src_layer] if e[0] != pair_name
+                            ]
                         if tgt_layer not in stub_endpoints_by_layer:
                             stub_endpoints_by_layer[tgt_layer] = []
-                        stub_endpoints_by_layer[tgt_layer].append((pair_name, [(src_p_stub.x, src_p_stub.y), (src_n_stub.x, src_n_stub.y)]))
+                        stub_endpoints_by_layer[tgt_layer].append(
+                            (pair_name, [(src_p_stub.x, src_p_stub.y), (src_n_stub.x, src_n_stub.y)])
+                        )
 
                         applied_swaps.add(pair_name)
                         single_ended_swap_count += 1
@@ -1075,7 +1173,9 @@ def apply_diff_pair_layer_swaps(
                         net = pcb_data.nets.get(blocking_net_id)
                         blocking_name = net.name if net else f"net {blocking_net_id}"
                         via_msg = f", added {len(vias1) + len(vias2)} pad via(s)" if vias1 or vias2 else ""
-                        print(f"  Solo source switch: {pair_name} ({src_layer}->{tgt_layer}) after moving {blocking_name} to {alt_layer}{via_msg}")
+                        print(
+                            f"  Solo source switch: {pair_name} ({src_layer}->{tgt_layer}) after moving {blocking_name} to {alt_layer}{via_msg}"
+                        )
                         break
                     else:
                         # Undo the single-ended swap since diff pair still can't swap
@@ -1086,10 +1186,8 @@ def apply_diff_pair_layer_swaps(
 
         # If source side didn't work, try target side
         if pair_name not in applied_swaps:
-            tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id,
-                                       targets[0][5], targets[0][6], tgt_layer)
-            tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id,
-                                       targets[0][7], targets[0][8], tgt_layer)
+            tgt_p_stub = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], tgt_layer)
+            tgt_n_stub = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], tgt_layer)
 
             if tgt_p_stub and tgt_n_stub:
                 # Find blocking single-ended nets on source layer
@@ -1098,16 +1196,14 @@ def apply_diff_pair_layer_swaps(
                 )
 
                 for blocking_net_id in blocking_nets:
-                    se_stub = _get_single_ended_stub_on_layer(
-                        pcb_data, blocking_net_id, src_layer, config
-                    )
+                    se_stub = _get_single_ended_stub_on_layer(pcb_data, blocking_net_id, src_layer, config)
                     if not se_stub:
                         continue
 
                     for alt_layer in config.layers:
                         if alt_layer == src_layer or alt_layer == tgt_layer:
                             continue
-                        if not can_swap_to_top_layer and alt_layer == 'F.Cu':
+                        if not can_swap_to_top_layer and alt_layer == "F.Cu":
                             if not is_edge_stub(se_stub.pad_x, se_stub.pad_y, config.bga_exclusion_zones):
                                 continue
 
@@ -1117,17 +1213,20 @@ def apply_diff_pair_layer_swaps(
                         if not se_valid:
                             continue
 
-                        se_vias, se_mods = apply_stub_layer_switch(
-                            pcb_data, se_stub, alt_layer, config, debug=False
-                        )
+                        se_vias, se_mods = apply_stub_layer_switch(pcb_data, se_stub, alt_layer, config, debug=False)
                         all_segment_modifications.extend(se_mods)
                         all_swap_vias.extend(se_vias)
 
                         valid, reason = validate_swap(
-                            tgt_p_stub, tgt_n_stub, src_layer, all_stubs_by_layer,
-                            pcb_data, config, swap_partner_name=None,
+                            tgt_p_stub,
+                            tgt_n_stub,
+                            src_layer,
+                            all_stubs_by_layer,
+                            pcb_data,
+                            config,
+                            swap_partner_name=None,
                             swap_partner_net_ids=set(),
-                            stub_endpoints_by_layer=stub_endpoints_by_layer
+                            stub_endpoints_by_layer=stub_endpoints_by_layer,
                         )
 
                         if valid:
@@ -1137,15 +1236,21 @@ def apply_diff_pair_layer_swaps(
                             all_swap_vias.extend(vias1 + vias2)
 
                             if tgt_layer in all_stubs_by_layer:
-                                all_stubs_by_layer[tgt_layer] = [s for s in all_stubs_by_layer[tgt_layer] if s[0] != pair_name]
+                                all_stubs_by_layer[tgt_layer] = [
+                                    s for s in all_stubs_by_layer[tgt_layer] if s[0] != pair_name
+                                ]
                             if src_layer not in all_stubs_by_layer:
                                 all_stubs_by_layer[src_layer] = []
                             all_stubs_by_layer[src_layer].append((pair_name, tgt_p_stub.segments + tgt_n_stub.segments))
                             if tgt_layer in stub_endpoints_by_layer:
-                                stub_endpoints_by_layer[tgt_layer] = [e for e in stub_endpoints_by_layer[tgt_layer] if e[0] != pair_name]
+                                stub_endpoints_by_layer[tgt_layer] = [
+                                    e for e in stub_endpoints_by_layer[tgt_layer] if e[0] != pair_name
+                                ]
                             if src_layer not in stub_endpoints_by_layer:
                                 stub_endpoints_by_layer[src_layer] = []
-                            stub_endpoints_by_layer[src_layer].append((pair_name, [(tgt_p_stub.x, tgt_p_stub.y), (tgt_n_stub.x, tgt_n_stub.y)]))
+                            stub_endpoints_by_layer[src_layer].append(
+                                (pair_name, [(tgt_p_stub.x, tgt_p_stub.y), (tgt_n_stub.x, tgt_n_stub.y)])
+                            )
 
                             applied_swaps.add(pair_name)
                             single_ended_swap_count += 1
@@ -1154,7 +1259,9 @@ def apply_diff_pair_layer_swaps(
                             net = pcb_data.nets.get(blocking_net_id)
                             blocking_name = net.name if net else f"net {blocking_net_id}"
                             via_msg = f", added {len(vias1) + len(vias2)} pad via(s)" if vias1 or vias2 else ""
-                            print(f"  Solo target switch: {pair_name} ({tgt_layer}->{src_layer}) after moving {blocking_name} to {alt_layer}{via_msg}")
+                            print(
+                                f"  Solo target switch: {pair_name} ({tgt_layer}->{src_layer}) after moving {blocking_name} to {alt_layer}{via_msg}"
+                            )
                             break
                         else:
                             revert_stub_layer_switch(pcb_data, se_mods, se_vias)
@@ -1176,12 +1283,12 @@ def apply_diff_pair_layer_swaps(
 def apply_single_ended_layer_swaps(
     pcb_data: PCBData,
     config: GridRouteConfig,
-    single_ended_net_ids: List[Tuple[str, int]],
+    single_ended_net_ids: list[tuple[str, int]],
     can_swap_to_top_layer: bool,
-    all_segment_modifications: List,
-    all_swap_vias: List,
-    all_stubs_by_layer: Optional[Dict] = None,
-    verbose: bool = False
+    all_segment_modifications: list,
+    all_swap_vias: list,
+    all_stubs_by_layer: dict | None = None,
+    verbose: bool = False,
 ) -> int:
     """
     Apply upfront layer swap optimization for single-ended nets.
@@ -1219,7 +1326,9 @@ def apply_single_ended_layer_swaps(
             single_net_layer_info[net_name] = (src_layer, tgt_layer, sources, targets, net_id)
 
     if skipped_multipoint:
-        print(f"\nWARNING: Skipping stub layer swapping for {len(skipped_multipoint)} multi-point net(s) (not yet supported)")
+        print(
+            f"\nWARNING: Skipping stub layer swapping for {len(skipped_multipoint)} multi-point net(s) (not yet supported)"
+        )
         if len(skipped_multipoint) <= 5:
             for name in skipped_multipoint:
                 print(f"    - {name}")
@@ -1272,25 +1381,35 @@ def apply_single_ended_layer_swaps(
                 swap_options = []
                 if src1_stub and src2_stub:
                     # Option A: Net1 src→tgt1, Net2 src→tgt2 (both go to their tgt layers)
-                    swap_options.append(('src', 'src', src1_stub, tgt1, src2_stub, tgt2))
+                    swap_options.append(("src", "src", src1_stub, tgt1, src2_stub, tgt2))
                 if tgt1_stub and tgt2_stub:
                     # Option B: Net1 tgt→src1, Net2 tgt→src2 (both go to their src layers)
-                    swap_options.append(('tgt', 'tgt', tgt1_stub, src1, tgt2_stub, src2))
+                    swap_options.append(("tgt", "tgt", tgt1_stub, src1, tgt2_stub, src2))
                 if src1_stub and tgt2_stub:
                     # Option C: Net1 src→tgt1, Net2 tgt→src2
-                    swap_options.append(('src', 'tgt', src1_stub, tgt1, tgt2_stub, src2))
+                    swap_options.append(("src", "tgt", src1_stub, tgt1, tgt2_stub, src2))
                 if tgt1_stub and src2_stub:
                     # Option D: Net1 tgt→src1, Net2 src→tgt2
-                    swap_options.append(('tgt', 'src', tgt1_stub, src1, src2_stub, tgt2))
+                    swap_options.append(("tgt", "src", tgt1_stub, src1, src2_stub, tgt2))
 
                 for opt_name1, opt_name2, stub1, dest1, stub2, dest2 in swap_options:
                     valid1, reason1 = validate_single_swap(
-                        stub1, dest1, combined_stubs_by_layer, pcb_data, config,
-                        swap_partner_name=net2_name, swap_partner_net_ids={net2_id}
+                        stub1,
+                        dest1,
+                        combined_stubs_by_layer,
+                        pcb_data,
+                        config,
+                        swap_partner_name=net2_name,
+                        swap_partner_net_ids={net2_id},
                     )
                     valid2, reason2 = validate_single_swap(
-                        stub2, dest2, combined_stubs_by_layer, pcb_data, config,
-                        swap_partner_name=net1_name, swap_partner_net_ids={net1_id}
+                        stub2,
+                        dest2,
+                        combined_stubs_by_layer,
+                        pcb_data,
+                        config,
+                        swap_partner_name=net1_name,
+                        swap_partner_net_ids={net1_id},
                     )
                     if valid1 and valid2:
                         # Apply both swaps
@@ -1317,10 +1436,8 @@ def apply_single_ended_layer_swaps(
         src_stub = get_stub_info(pcb_data, net_id, sources[0][3], sources[0][4], src_layer)
 
         # Check can_swap_to_top_layer restriction
-        if src_stub and (can_swap_to_top_layer or tgt_layer != 'F.Cu'):
-            valid, reason = validate_single_swap(
-                src_stub, tgt_layer, combined_stubs_by_layer, pcb_data, config
-            )
+        if src_stub and (can_swap_to_top_layer or tgt_layer != "F.Cu"):
+            valid, reason = validate_single_swap(src_stub, tgt_layer, combined_stubs_by_layer, pcb_data, config)
             if valid:
                 vias, mods = apply_stub_layer_switch(pcb_data, src_stub, tgt_layer, config, debug=False)
                 all_swap_vias.extend(vias)
@@ -1333,10 +1450,8 @@ def apply_single_ended_layer_swaps(
 
         # Try target -> source layer switch as fallback
         tgt_stub = get_stub_info(pcb_data, net_id, targets[0][3], targets[0][4], tgt_layer)
-        if tgt_stub and (can_swap_to_top_layer or src_layer != 'F.Cu'):
-            valid, reason = validate_single_swap(
-                tgt_stub, src_layer, combined_stubs_by_layer, pcb_data, config
-            )
+        if tgt_stub and (can_swap_to_top_layer or src_layer != "F.Cu"):
+            valid, reason = validate_single_swap(tgt_stub, src_layer, combined_stubs_by_layer, pcb_data, config)
             if valid:
                 vias, mods = apply_stub_layer_switch(pcb_data, tgt_stub, src_layer, config, debug=False)
                 all_swap_vias.extend(vias)

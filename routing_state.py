@@ -6,8 +6,8 @@ used during the routing process, enabling cleaner extraction of routing loops
 into separate functions.
 """
 
-from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass, field
+from typing import Any
 
 from kicad_parser import PCBData
 from routing_config import GridRouteConfig
@@ -29,38 +29,40 @@ class RoutingState:
     config: GridRouteConfig
 
     # Lists and dicts tracking routed nets
-    routed_net_ids: List[int] = field(default_factory=list)
-    routed_net_paths: Dict[int, List[Tuple[int, int, int]]] = field(default_factory=dict)
-    routed_results: Dict[int, Dict] = field(default_factory=dict)
-    diff_pair_by_net_id: Dict[int, Tuple[str, Any]] = field(default_factory=dict)
+    routed_net_ids: list[int] = field(default_factory=list)
+    routed_net_paths: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
+    routed_results: dict[int, dict] = field(default_factory=dict)
+    diff_pair_by_net_id: dict[int, tuple[str, Any]] = field(default_factory=dict)
 
     # Remaining nets to route
-    remaining_net_ids: List[int] = field(default_factory=list)
+    remaining_net_ids: list[int] = field(default_factory=list)
 
     # Caches
-    track_proximity_cache: Dict[int, Dict] = field(default_factory=dict)
-    layer_map: Dict[str, int] = field(default_factory=dict)
-    net_obstacles_cache: Dict[int, Any] = field(default_factory=dict)  # Pre-computed net obstacles
+    track_proximity_cache: dict[int, dict] = field(default_factory=dict)
+    layer_map: dict[str, int] = field(default_factory=dict)
+    net_obstacles_cache: dict[int, Any] = field(default_factory=dict)  # Pre-computed net obstacles
 
     # Ripped route avoidance costs - layer-specific (for segments)
-    ripped_route_layer_costs: Dict[int, Any] = field(default_factory=dict)  # net_id -> numpy array [layer, gx, gy, cost]
+    ripped_route_layer_costs: dict[int, Any] = field(
+        default_factory=dict
+    )  # net_id -> numpy array [layer, gx, gy, cost]
     # Ripped route via positions (grid coords) - all-layer costs computed at merge time
-    ripped_route_via_positions: Dict[int, List[Tuple[int, int]]] = field(default_factory=dict)
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = field(default_factory=dict)
 
     # Reroute queue for ripped-up nets
-    reroute_queue: List[Tuple] = field(default_factory=list)
+    reroute_queue: list[tuple] = field(default_factory=list)
     # Track which nets are already queued (to prevent duplicate entries)
-    queued_net_ids: Set[int] = field(default_factory=set)
+    queued_net_ids: set[int] = field(default_factory=set)
 
     # Tracking sets
-    polarity_swapped_pairs: Set[str] = field(default_factory=set)
-    rip_and_retry_history: Set[Tuple] = field(default_factory=set)
-    ripup_success_pairs: Set[str] = field(default_factory=set)
-    rerouted_pairs: Set[str] = field(default_factory=set)
+    polarity_swapped_pairs: set[str] = field(default_factory=set)
+    rip_and_retry_history: set[tuple] = field(default_factory=set)
+    ripup_success_pairs: set[str] = field(default_factory=set)
+    rerouted_pairs: set[str] = field(default_factory=set)
 
     # Environment
-    all_unrouted_net_ids: Set[int] = field(default_factory=set)
-    gnd_net_id: Optional[int] = None
+    all_unrouted_net_ids: set[int] = field(default_factory=set)
+    gnd_net_id: int | None = None
 
     # Counters
     successful: int = 0
@@ -70,16 +72,16 @@ class RoutingState:
     route_index: int = 0
 
     # Results collection
-    results: List[Dict] = field(default_factory=list)
+    results: list[dict] = field(default_factory=list)
 
     # Multi-point routing: track nets needing Phase 3 completion
     # Maps net_id -> main_result dict with 'multipoint_pad_info' and 'routed_pad_indices'
-    pending_multipoint_nets: Dict[int, Dict] = field(default_factory=dict)
+    pending_multipoint_nets: dict[int, dict] = field(default_factory=dict)
 
     # Layer swap tracking
-    all_segment_modifications: List = field(default_factory=list)
-    all_swap_vias: List = field(default_factory=list)
-    pad_swaps: List[Dict] = field(default_factory=list)
+    all_segment_modifications: list = field(default_factory=list)
+    all_swap_vias: list = field(default_factory=list)
+    pad_swaps: list[dict] = field(default_factory=list)
 
     # Obstacle maps (set by caller)
     base_obstacles: Any = None
@@ -98,10 +100,10 @@ class RoutingState:
     progress_callback: Any = None  # Optional callable(current, total, net_name) for progress updates
 
     # Target swap info (for output writing)
-    target_swaps: Dict[str, str] = field(default_factory=dict)
-    target_swap_info: List[Dict] = field(default_factory=list)
-    single_ended_target_swaps: Dict[str, str] = field(default_factory=dict)
-    single_ended_target_swap_info: List[Dict] = field(default_factory=list)
+    target_swaps: dict[str, str] = field(default_factory=dict)
+    target_swap_info: list[dict] = field(default_factory=list)
+    single_ended_target_swaps: dict[str, str] = field(default_factory=dict)
+    single_ended_target_swap_info: list[dict] = field(default_factory=list)
 
     # Total counts
     total_routes: int = 0
@@ -109,7 +111,7 @@ class RoutingState:
 
     # Net history tracking for debugging failed routes
     # Maps net_id -> list of event dicts with keys: event, details, sequence
-    net_history: Dict[int, List[Dict]] = field(default_factory=dict)
+    net_history: dict[int, list[dict]] = field(default_factory=dict)
 
     def __post_init__(self):
         """Initialize layer_map if not provided."""
@@ -120,23 +122,23 @@ class RoutingState:
 def create_routing_state(
     pcb_data: PCBData,
     config: GridRouteConfig,
-    all_net_ids_to_route: List[int],
+    all_net_ids_to_route: list[int],
     base_obstacles,
     diff_pair_base_obstacles,
     diff_pair_extra_clearance: float,
-    gnd_net_id: Optional[int],
-    all_unrouted_net_ids: Set[int],
+    gnd_net_id: int | None,
+    all_unrouted_net_ids: set[int],
     total_routes: int,
     enable_layer_switch: bool = False,
     debug_lines: bool = False,
-    target_swaps: Optional[Dict[str, str]] = None,
-    target_swap_info: Optional[List[Dict]] = None,
-    single_ended_target_swaps: Optional[Dict[str, str]] = None,
-    single_ended_target_swap_info: Optional[List[Dict]] = None,
-    all_segment_modifications: Optional[List] = None,
-    all_swap_vias: Optional[List] = None,
+    target_swaps: dict[str, str] | None = None,
+    target_swap_info: list[dict] | None = None,
+    single_ended_target_swaps: dict[str, str] | None = None,
+    single_ended_target_swap_info: list[dict] | None = None,
+    all_segment_modifications: list | None = None,
+    all_swap_vias: list | None = None,
     total_layer_swaps: int = 0,
-    net_obstacles_cache: Optional[Dict] = None,
+    net_obstacles_cache: dict | None = None,
     working_obstacles: Any = None,
     cancel_check: Any = None,
     progress_callback: Any = None,
@@ -173,7 +175,7 @@ def create_routing_state(
     )
 
 
-def record_net_event(state: RoutingState, net_id: int, event: str, details: Dict = None):
+def record_net_event(state: RoutingState, net_id: int, event: str, details: dict = None):
     """
     Record an event in a net's history for debugging.
 
@@ -187,14 +189,10 @@ def record_net_event(state: RoutingState, net_id: int, event: str, details: Dict
     if net_id not in state.net_history:
         state.net_history[net_id] = []
 
-    state.net_history[net_id].append({
-        "event": event,
-        "sequence": state.route_index,
-        "details": details or {}
-    })
+    state.net_history[net_id].append({"event": event, "sequence": state.route_index, "details": details or {}})
 
 
-def get_net_history_summary(state: RoutingState, net_id: int, pcb_data: 'PCBData') -> str:
+def get_net_history_summary(state: RoutingState, net_id: int, pcb_data: "PCBData") -> str:
     """
     Get a human-readable summary of a net's routing history.
 
@@ -242,7 +240,7 @@ def get_net_history_summary(state: RoutingState, net_id: int, pcb_data: 'PCBData
     return "\n".join(lines) if lines else "No events"
 
 
-def print_failed_net_histories(state: RoutingState, failed_net_ids: List[int], pcb_data: 'PCBData'):
+def print_failed_net_histories(state: RoutingState, failed_net_ids: list[int], pcb_data: "PCBData"):
     """
     Print history summaries for all failed nets.
     """

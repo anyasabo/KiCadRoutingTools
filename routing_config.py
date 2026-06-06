@@ -3,18 +3,18 @@ Configuration classes and coordinate utilities for PCB routing.
 """
 
 import math
-from typing import List, Optional, Tuple, Dict
 from dataclasses import dataclass, field
 
 
 @dataclass
 class DiffPairNet:
     """Represents a differential pair with P and N nets (tracks net IDs)."""
+
     base_name: str  # Common name without _P/_N suffix
-    p_net_id: Optional[int] = None
-    n_net_id: Optional[int] = None
-    p_net_name: Optional[str] = None
-    n_net_name: Optional[str] = None
+    p_net_id: int | None = None
+    n_net_id: int | None = None
+    p_net_name: str | None = None
+    n_net_name: str | None = None
 
     @property
     def is_complete(self) -> bool:
@@ -24,19 +24,20 @@ class DiffPairNet:
 @dataclass
 class GridRouteConfig:
     """Configuration for grid-based routing."""
+
     track_width: float = 0.1  # mm
     clearance: float = 0.1  # mm between tracks
     via_size: float = 0.3  # mm via outer diameter
     via_drill: float = 0.2  # mm via drill
     grid_step: float = 0.1  # mm grid resolution
     via_cost: int = 50  # grid steps equivalent penalty for via
-    layers: List[str] = field(default_factory=lambda: ['F.Cu', 'B.Cu'])
+    layers: list[str] = field(default_factory=lambda: ["F.Cu", "B.Cu"])
     max_iterations: int = 200000
     max_probe_iterations: int = 5000  # Quick probe per direction to detect stuck routes
     heuristic_weight: float = 1.9
     turn_cost: int = 1000  # Penalty for direction changes (encourages straighter paths)
     # BGA exclusion zones (auto-detected from PCB) - vias blocked inside these areas
-    bga_exclusion_zones: List[Tuple[float, float, float, float]] = field(default_factory=list)
+    bga_exclusion_zones: list[tuple[float, float, float, float]] = field(default_factory=list)
     stub_proximity_radius: float = 2.0  # mm - radius around stubs to penalize
     stub_proximity_cost: float = 0.2  # mm equivalent cost at stub center
     via_proximity_cost: float = 10.0  # via cost multiplier in stub/BGA proximity zones (0 = block vias)
@@ -46,7 +47,9 @@ class GridRouteConfig:
     direction_order: str = "forward"
     # Differential pair routing parameters
     diff_pair_gap: float = 0.101  # mm - gap between P and N traces (center-to-center = track_width + gap)
-    diff_pair_centerline_setback: float = None  # mm - distance in front of stubs to start centerline route (None = 2 * spacing)
+    diff_pair_centerline_setback: float = (
+        None  # mm - distance in front of stubs to start centerline route (None = 2 * spacing)
+    )
     min_turning_radius: float = 0.2  # mm - minimum turning radius for pose-based routing
     fix_polarity: bool = True  # Swap target pad nets if polarity swap needed
     debug_lines: bool = False  # Output debug geometry on User.2/3/8/9 layers
@@ -70,7 +73,7 @@ class GridRouteConfig:
     ripped_route_avoidance_radius: float = 1.0  # mm - radius around ripped route segments/vias
     ripped_route_avoidance_cost: float = 0.1  # mm equivalent cost (0 = disabled)
     # Length matching for DDR4 signals
-    length_match_groups: List[List[str]] = field(default_factory=list)  # Groups of net patterns to match
+    length_match_groups: list[list[str]] = field(default_factory=list)  # Groups of net patterns to match
     length_match_tolerance: float = 0.1  # mm - acceptable length variance within group
     meander_amplitude: float = 1.0  # mm - height of meander perpendicular to trace
     diff_chamfer_extra: float = 1.5  # Chamfer multiplier for diff pair meanders (>1 avoids P/N crossings)
@@ -82,16 +85,18 @@ class GridRouteConfig:
     # Output options
     add_teardrops: bool = False  # Add teardrop settings to all pads in output file
     # Impedance-controlled routing
-    impedance_target: Optional[float] = None  # Target impedance in ohms (None = use fixed track_width)
-    layer_widths: Dict[str, float] = field(default_factory=dict)  # Per-layer widths for impedance control
+    impedance_target: float | None = None  # Target impedance in ohms (None = use fixed track_width)
+    layer_widths: dict[str, float] = field(default_factory=dict)  # Per-layer widths for impedance control
     # Power net routing - per-net width overrides
-    power_net_widths: Dict[int, float] = field(default_factory=dict)  # net_id -> width in mm
+    power_net_widths: dict[int, float] = field(default_factory=dict)  # net_id -> width in mm
     # Layer cost weights - prefer certain layers over others (1.0 = normal, 1.5 = 50% more expensive)
-    layer_costs: List[float] = field(default_factory=list)  # Per-layer cost multipliers
+    layer_costs: list[float] = field(default_factory=list)  # Per-layer cost multipliers
     # Debug options
     collect_stats: bool = False  # Collect A* search statistics for debugging
     # Heuristic tuning
-    proximity_heuristic_factor: float = 0.02  # Factor for proximity heuristic (higher = tighter heuristic, faster but may overestimate)
+    proximity_heuristic_factor: float = (
+        0.02  # Factor for proximity heuristic (higher = tighter heuristic, faster but may overestimate)
+    )
     # Layer direction preference - alternates H/V starting with horizontal on top
     direction_preference_cost: int = 50  # Cost penalty for non-preferred direction (0 = disabled)
     # Bus routing - auto-detection and parallel routing of grouped nets
@@ -104,7 +109,7 @@ class GridRouteConfig:
     guide_corridor_enabled: bool = False  # Steer routed nets along a drawn guide path
     guide_corridor_layer: str = "User.1"  # User layer the guide polyline is drawn on
     guide_corridor_spacing: float = 0.0  # mm; 0 = endpoints only, else subdivide long segments
-    corridor_waypoints: List[Tuple[int, int]] = field(default_factory=list)  # prebuilt grid waypoints
+    corridor_waypoints: list[tuple[int, int]] = field(default_factory=list)  # prebuilt grid waypoints
     # Keepout zone - keep routed tracks out of a user-drawn polygon (issue #27)
     keepout_enabled: bool = False  # Block routed tracks from a drawn keepout polygon
     keepout_layer: str = "User.2"  # User layer the keepout polygon is drawn on
@@ -153,7 +158,7 @@ class GridRouteConfig:
             return max(self.power_net_widths[net_id], self.track_width)
         return self.get_track_width(layer)
 
-    def get_layer_costs(self) -> List[int]:
+    def get_layer_costs(self) -> list[int]:
         """Get layer cost multipliers for the Rust router.
 
         Returns costs scaled by 1000 (1000 = 1.0x, 1500 = 1.5x penalty).
@@ -167,7 +172,7 @@ class GridRouteConfig:
                 costs.append(1000)  # Default 1.0x
         return costs
 
-    def get_layer_direction_preferences(self) -> List[int]:
+    def get_layer_direction_preferences(self) -> list[int]:
         """Get layer direction preferences for the Rust router.
 
         Returns list of preferences: 0=horizontal, 1=vertical, 255=none.
@@ -208,8 +213,9 @@ class GridRouteConfig:
             return int(estimated_cost * 1000 / self.grid_step)
         return 0
 
-    def get_proximity_heuristic_for_zones(self, src_in_stub: bool, src_in_bga: bool,
-                                          tgt_in_stub: bool, tgt_in_bga: bool) -> int:
+    def get_proximity_heuristic_for_zones(
+        self, src_in_stub: bool, src_in_bga: bool, tgt_in_stub: bool, tgt_in_bga: bool
+    ) -> int:
         """Get proximity heuristic cost based on which zones the endpoints are in.
 
         More precise than get_proximity_heuristic_cost() - only adds costs for
@@ -245,15 +251,16 @@ class GridRouteConfig:
 
 class GridCoord:
     """Utilities for converting between float (mm) and integer grid coordinates."""
+
     def __init__(self, grid_step: float = 0.1):
         self.grid_step = grid_step
         self.inv_step = 1.0 / grid_step
 
-    def to_grid(self, x: float, y: float) -> Tuple[int, int]:
+    def to_grid(self, x: float, y: float) -> tuple[int, int]:
         """Convert float mm coordinates to integer grid coordinates."""
         return (round(x * self.inv_step), round(y * self.inv_step))
 
-    def to_float(self, gx: int, gy: int) -> Tuple[float, float]:
+    def to_float(self, gx: int, gy: int) -> tuple[float, float]:
         """Convert integer grid coordinates to float mm coordinates."""
         return (gx * self.grid_step, gy * self.grid_step)
 

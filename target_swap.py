@@ -11,28 +11,31 @@ Cost factors:
 """
 
 import math
-from typing import Dict, List, Optional, Tuple, Set, Callable, TYPE_CHECKING
+from collections.abc import Callable
 
 try:
     from scipy.optimize import linear_sum_assignment
+
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
 
-from kicad_parser import PCBData, Pad
+from chip_boundary import (
+    build_chip_list,
+    compute_boundary_position,
+    compute_far_side,
+    crossings_from_boundary_order,
+    identify_chip_for_point,
+)
+from connectivity import find_connected_segment_positions, find_connected_segments
+from geometry_utils import segments_intersect_tuple as segments_cross
+from kicad_parser import Pad, PCBData
+from net_queries import compute_routing_aware_distance, find_containing_or_nearest_bga_zone
 from routing_config import DiffPairNet, GridRouteConfig
 from routing_utils import pos_key
-from connectivity import find_connected_segment_positions, find_connected_segments
-from net_queries import compute_routing_aware_distance, find_containing_or_nearest_bga_zone
-from chip_boundary import (
-    ChipBoundary, build_chip_list, identify_chip_for_point,
-    compute_far_side, compute_boundary_position, crossings_from_boundary_order,
-    generate_boundary_debug_labels
-)
-from geometry_utils import segments_intersect_tuple as segments_cross
 
 
-def get_source_centroid(endpoint: Tuple) -> Tuple[float, float]:
+def get_source_centroid(endpoint: tuple) -> tuple[float, float]:
     """
     Get centroid (midpoint of P and N) for a source endpoint.
 
@@ -44,7 +47,7 @@ def get_source_centroid(endpoint: Tuple) -> Tuple[float, float]:
     return ((p_x + n_x) / 2, (p_y + n_y) / 2)
 
 
-def get_target_centroid(endpoint: Tuple) -> Tuple[float, float]:
+def get_target_centroid(endpoint: tuple) -> tuple[float, float]:
     """
     Get centroid (midpoint of P and N) for a target endpoint.
 
@@ -55,7 +58,7 @@ def get_target_centroid(endpoint: Tuple) -> Tuple[float, float]:
     return ((p_x + n_x) / 2, (p_y + n_y) / 2)
 
 
-def get_single_source_centroid(endpoint: Tuple) -> Tuple[float, float]:
+def get_single_source_centroid(endpoint: tuple) -> tuple[float, float]:
     """
     Get position for a single-ended source endpoint.
 
@@ -65,7 +68,7 @@ def get_single_source_centroid(endpoint: Tuple) -> Tuple[float, float]:
     return (endpoint[3], endpoint[4])
 
 
-def get_single_target_centroid(endpoint: Tuple) -> Tuple[float, float]:
+def get_single_target_centroid(endpoint: tuple) -> tuple[float, float]:
     """
     Get position for a single-ended target endpoint.
 
@@ -74,11 +77,7 @@ def get_single_target_centroid(endpoint: Tuple) -> Tuple[float, float]:
     return (endpoint[3], endpoint[4])
 
 
-def get_stub_exit_edge(
-    pcb_data: PCBData,
-    net_id: int,
-    chip_bounds: Tuple[float, float, float, float]
-) -> Optional[str]:
+def get_stub_exit_edge(pcb_data: PCBData, net_id: int, chip_bounds: tuple[float, float, float, float]) -> str | None:
     """
     Determine which edge a stub is exiting from based on its segment direction.
 
@@ -102,10 +101,10 @@ def get_stub_exit_edge(
     margin = 5.0
     chip_segs = []
     for seg in segs:
-        in_range_start = (min_x - margin <= seg.start_x <= max_x + margin and
-                         min_y - margin <= seg.start_y <= max_y + margin)
-        in_range_end = (min_x - margin <= seg.end_x <= max_x + margin and
-                       min_y - margin <= seg.end_y <= max_y + margin)
+        in_range_start = (
+            min_x - margin <= seg.start_x <= max_x + margin and min_y - margin <= seg.start_y <= max_y + margin
+        )
+        in_range_end = min_x - margin <= seg.end_x <= max_x + margin and min_y - margin <= seg.end_y <= max_y + margin
         if in_range_start or in_range_end:
             chip_segs.append(seg)
 
@@ -125,8 +124,8 @@ def get_stub_exit_edge(
         return None
 
     # Find stub tip (furthest from chip center) and pad end (closest to center)
-    stub_tip = max(endpoints, key=lambda p: math.sqrt((p[0]-center_x)**2 + (p[1]-center_y)**2))
-    pad_end = min(endpoints, key=lambda p: math.sqrt((p[0]-center_x)**2 + (p[1]-center_y)**2))
+    stub_tip = max(endpoints, key=lambda p: math.sqrt((p[0] - center_x) ** 2 + (p[1] - center_y) ** 2))
+    pad_end = min(endpoints, key=lambda p: math.sqrt((p[0] - center_x) ** 2 + (p[1] - center_y) ** 2))
 
     # Compute direction from pad to stub tip
     dx = stub_tip[0] - pad_end[0]
@@ -134,18 +133,16 @@ def get_stub_exit_edge(
 
     # Determine exit edge based on primary direction
     if abs(dx) > abs(dy):
-        edge = 'right' if dx > 0 else 'left'
+        edge = "right" if dx > 0 else "left"
     else:
-        edge = 'bottom' if dy > 0 else 'top'
+        edge = "bottom" if dy > 0 else "top"
 
     return edge
 
 
 def project_to_edge(
-    point: Tuple[float, float],
-    bounds: Tuple[float, float, float, float],
-    edge: str
-) -> Tuple[float, float]:
+    point: tuple[float, float], bounds: tuple[float, float, float, float], edge: str
+) -> tuple[float, float]:
     """
     Project a point onto a specific edge of a rectangular boundary.
 
@@ -164,25 +161,25 @@ def project_to_edge(
     cx = max(min_x, min(max_x, x))
     cy = max(min_y, min(max_y, y))
 
-    if edge == 'left':
+    if edge == "left":
         return (min_x, cy)
-    elif edge == 'right':
+    elif edge == "right":
         return (max_x, cy)
-    elif edge == 'top':
+    elif edge == "top":
         return (cx, min_y)
     else:  # bottom
         return (cx, max_y)
 
 
 def build_cost_matrix(
-    pair_data: List[Tuple],  # (name, data, sources, targets) - data can be DiffPair or net_id
+    pair_data: list[tuple],  # (name, data, sources, targets) - data can be DiffPair or net_id
     config: GridRouteConfig,
     pcb_data: PCBData,
     use_boundary_ordering: bool = True,
-    get_source_centroid_func: Callable[[Tuple], Tuple[float, float]] = None,
-    get_target_centroid_func: Callable[[Tuple], Tuple[float, float]] = None,
-    get_layer_idx_func: Callable[[Tuple], int] = None
-) -> Tuple[List[List[float]], List[str]]:
+    get_source_centroid_func: Callable[[tuple], tuple[float, float]] = None,
+    get_target_centroid_func: Callable[[tuple], tuple[float, float]] = None,
+    get_layer_idx_func: Callable[[tuple], int] = None,
+) -> tuple[list[list[float]], list[str]]:
     """
     Build N x N cost matrix for optimal target assignment.
 
@@ -224,7 +221,7 @@ def build_cost_matrix(
     pair_names = [pd[0] for pd in pair_data]
 
     # Get crossing penalty from config (default 1000.0)
-    crossing_penalty = getattr(config, 'target_swap_crossing_penalty', 1000.0)
+    crossing_penalty = getattr(config, "target_swap_crossing_penalty", 1000.0)
 
     # Extract source/target centroids and layers
     source_centroids = []
@@ -246,7 +243,7 @@ def build_cost_matrix(
         # For diff pairs: data is DiffPair, use p_net_id
         if isinstance(data, int):
             net_ids.append(data)
-        elif hasattr(data, 'p_net_id'):
+        elif hasattr(data, "p_net_id"):
             net_ids.append(data.p_net_id)
         else:
             net_ids.append(None)
@@ -255,7 +252,7 @@ def build_cost_matrix(
     chips = []
     source_chips = []
     target_chips = []
-    boundary_positions: Dict[Tuple[int, int], Optional[Tuple[float, float]]] = {}
+    boundary_positions: dict[tuple[int, int], tuple[float, float] | None] = {}
 
     if use_boundary_ordering:
         chips = build_chip_list(pcb_data)
@@ -290,12 +287,10 @@ def build_cost_matrix(
                     # With opposite directions, the crossing check works correctly:
                     # same geometric order → opposite boundary order → crossing detected
                     src_pos = compute_boundary_position(
-                        src_chip, source_centroids[i], src_far, clockwise=True,
-                        exit_edge=src_exit_edges[i]
+                        src_chip, source_centroids[i], src_far, clockwise=True, exit_edge=src_exit_edges[i]
                     )
                     tgt_pos = compute_boundary_position(
-                        tgt_chip, target_centroids[j], tgt_far, clockwise=False,
-                        exit_edge=tgt_exit_edges[j]
+                        tgt_chip, target_centroids[j], tgt_far, clockwise=False, exit_edge=tgt_exit_edges[j]
                     )
                     boundary_positions[(i, j)] = (src_pos, tgt_pos)
 
@@ -303,10 +298,10 @@ def build_cost_matrix(
     cost_matrix = [[0.0] * n for _ in range(n)]
 
     # Get BGA exclusion zones for routing-aware distance
-    bga_zones = getattr(pcb_data, 'bga_exclusion_zones', [])
+    bga_zones = getattr(pcb_data, "bga_exclusion_zones", [])
 
     # Infinity cost to prevent invalid swaps
-    INVALID_SWAP_COST = float('inf')
+    INVALID_SWAP_COST = float("inf")
 
     for i in range(n):
         src_c = source_centroids[i]
@@ -352,10 +347,10 @@ def build_cost_matrix(
                     dist = compute_routing_aware_distance(src_c, tgt_c, bga_zone)
                 else:
                     # Fallback to Euclidean if no zone found
-                    dist = math.sqrt((src_c[0] - tgt_c[0])**2 + (src_c[1] - tgt_c[1])**2)
+                    dist = math.sqrt((src_c[0] - tgt_c[0]) ** 2 + (src_c[1] - tgt_c[1]) ** 2)
             else:
                 # No BGA zones - use Euclidean distance
-                dist = math.sqrt((src_c[0] - tgt_c[0])**2 + (src_c[1] - tgt_c[1])**2)
+                dist = math.sqrt((src_c[0] - tgt_c[0]) ** 2 + (src_c[1] - tgt_c[1]) ** 2)
 
             # Layer penalty (via cost if layers differ)
             layer_cost = config.via_cost if src_layer != tgt_layer else 0
@@ -385,11 +380,8 @@ def build_cost_matrix(
                                 continue
 
                             # Check if same chip pair
-                            if (source_chips[i] == source_chips[k] and
-                                target_chips[j] == target_chips[l]):
-                                if crossings_from_boundary_order(
-                                    pos_ij[0], pos_ij[1], pos_kl[0], pos_kl[1]
-                                ):
+                            if source_chips[i] == source_chips[k] and target_chips[j] == target_chips[l]:
+                                if crossings_from_boundary_order(pos_ij[0], pos_ij[1], pos_kl[0], pos_kl[1]):
                                     # Check layer overlap if enabled
                                     if config.crossing_layer_check:
                                         layers_ij = {source_layers[i], target_layers[j]}
@@ -432,24 +424,24 @@ def build_cost_matrix(
 
     # Return debug info as well
     debug_info = {
-        'boundary_positions': boundary_positions,
-        'source_chips': source_chips,
-        'target_chips': target_chips,
-        'source_layers': source_layers,
-        'target_layers': target_layers
+        "boundary_positions": boundary_positions,
+        "source_chips": source_chips,
+        "target_chips": target_chips,
+        "source_layers": source_layers,
+        "target_layers": target_layers,
     }
     return cost_matrix, pair_names, debug_info
 
 
 def compute_optimal_assignment(
-    pair_data: List[Tuple],  # (name, data, sources, targets)
+    pair_data: list[tuple],  # (name, data, sources, targets)
     config: GridRouteConfig,
     pcb_data: PCBData,
     use_boundary_ordering: bool = True,
-    get_source_centroid_func: Callable[[Tuple], Tuple[float, float]] = None,
-    get_target_centroid_func: Callable[[Tuple], Tuple[float, float]] = None,
-    get_layer_idx_func: Callable[[Tuple], int] = None
-) -> Tuple[Optional[Dict[str, str]], Optional[List[Tuple[str, str]]]]:
+    get_source_centroid_func: Callable[[tuple], tuple[float, float]] = None,
+    get_target_centroid_func: Callable[[tuple], tuple[float, float]] = None,
+    get_layer_idx_func: Callable[[tuple], int] = None,
+) -> tuple[dict[str, str] | None, list[tuple[str, str]] | None]:
     """
     Compute optimal target swaps using pairwise swap optimization.
 
@@ -479,15 +471,20 @@ def compute_optimal_assignment(
         return None, None
 
     cost_matrix, pair_names, debug_info = build_cost_matrix(
-        pair_data, config, pcb_data, use_boundary_ordering,
-        get_source_centroid_func, get_target_centroid_func, get_layer_idx_func
+        pair_data,
+        config,
+        pcb_data,
+        use_boundary_ordering,
+        get_source_centroid_func,
+        get_target_centroid_func,
+        get_layer_idx_func,
     )
     n = len(pair_names)
-    boundary_positions = debug_info['boundary_positions']
-    source_chips = debug_info['source_chips']
-    target_chips = debug_info['target_chips']
-    source_layers = debug_info['source_layers']
-    target_layers = debug_info['target_layers']
+    boundary_positions = debug_info["boundary_positions"]
+    source_chips = debug_info["source_chips"]
+    target_chips = debug_info["target_chips"]
+    source_layers = debug_info["source_layers"]
+    target_layers = debug_info["target_layers"]
 
     # Compute original (diagonal) cost - each source connects to its own target
     original_cost = sum(cost_matrix[i][i] for i in range(n))
@@ -551,11 +548,8 @@ def compute_optimal_assignment(
                 pos_ij = boundary_positions.get((i, j))
                 pos_kl = boundary_positions.get((k, l))
                 if pos_ij and pos_kl:
-                    if (source_chips[i] == source_chips[k] and
-                        target_chips[j] == target_chips[l]):
-                        if crossings_from_boundary_order(
-                            pos_ij[0], pos_ij[1], pos_kl[0], pos_kl[1]
-                        ):
+                    if source_chips[i] == source_chips[k] and target_chips[j] == target_chips[l]:
+                        if crossings_from_boundary_order(pos_ij[0], pos_ij[1], pos_kl[0], pos_kl[1]):
                             if config.crossing_layer_check:
                                 layers_ij = {source_layers[i], target_layers[j]}
                                 layers_kl = {source_layers[k], target_layers[l]}
@@ -631,11 +625,13 @@ def compute_optimal_assignment(
             i, j = best_swap
             current_assignment[i], current_assignment[j] = current_assignment[j], current_assignment[i]
             swap_sequence.append((i, j))
-            print(f"    Round {round_num + 1}: {current_crossings} -> {best_new_crossings} crossings (swap {pair_names[i]} <-> {pair_names[j]})")
+            print(
+                f"    Round {round_num + 1}: {current_crossings} -> {best_new_crossings} crossings (swap {pair_names[i]} <-> {pair_names[j]})"
+            )
             current_crossings = best_new_crossings
 
             if current_crossings == 0:
-                print(f"    Achieved 0 crossings!")
+                print("    Achieved 0 crossings!")
                 break
 
         if swap_sequence and current_crossings < final_crossings:
@@ -653,7 +649,7 @@ def compute_optimal_assignment(
         print(f"  Crossings: {original_crossings} -> {final_crossings}")
 
         # Show all source and target boundary positions
-        print(f"  Source boundary positions (sorted):")
+        print("  Source boundary positions (sorted):")
         src_positions = []
         for i in range(n):
             pos = boundary_positions.get((i, i))
@@ -662,7 +658,7 @@ def compute_optimal_assignment(
         for pos, name in sorted(src_positions):
             print(f"    {name}: {pos:.4f}")
 
-        print(f"  Target boundary positions (sorted):")
+        print("  Target boundary positions (sorted):")
         tgt_positions = []
         for j in range(n):
             pos = boundary_positions.get((j, j))
@@ -683,13 +679,12 @@ def compute_optimal_assignment(
                 if pos_ij and pos_kl:
                     print(f"    {name_i}: src={pos_ij[0]:.4f} tgt={pos_ij[1]:.4f}")
                     print(f"    {name_k}: src={pos_kl[0]:.4f} tgt={pos_kl[1]:.4f}")
-            print(f"  NOTE: No permutation achieves 0 crossings (geometric constraint)")
+            print("  NOTE: No permutation achieves 0 crossings (geometric constraint)")
 
     return swaps, None
 
 
-def find_pad_in_positions(pads: List[Pad], positions: Set[Tuple[float, float]],
-                          threshold: float = 0.5) -> Optional[Pad]:
+def find_pad_in_positions(pads: list[Pad], positions: set[tuple[float, float]], threshold: float = 0.5) -> Pad | None:
     """Find a pad that's near any position in the stub chain."""
     for pad in pads:
         for pos in positions:
@@ -699,10 +694,8 @@ def find_pad_in_positions(pads: List[Pad], positions: Set[Tuple[float, float]],
 
 
 def ensure_consistent_target_component(
-    pair_data: List[Tuple[str, 'DiffPairNet', List, List]],
-    pcb_data: PCBData,
-    quiet: bool = False
-) -> List[Tuple[str, 'DiffPairNet', List, List]]:
+    pair_data: list[tuple[str, "DiffPairNet", list, list]], pcb_data: PCBData, quiet: bool = False
+) -> list[tuple[str, "DiffPairNet", list, list]]:
     """
     Ensure all source/target endpoints are consistently ordered by component.
 
@@ -715,10 +708,11 @@ def ensure_consistent_target_component(
         pcb_data: PCB data for pad lookup
         quiet: If True, suppress status messages
     """
-    def find_component_for_endpoint(x: float, y: float, net_id: int) -> Optional[str]:
+
+    def find_component_for_endpoint(x: float, y: float, net_id: int) -> str | None:
         """Find component of the closest pad to this position on this net."""
         pads = pcb_data.pads_by_net.get(net_id, [])
-        best_dist = float('inf')
+        best_dist = float("inf")
         best_ref = None
         for pad in pads:
             dist = abs(pad.global_x - x) + abs(pad.global_y - y)
@@ -760,7 +754,9 @@ def ensure_consistent_target_component(
             src = result[0][2][0]  # First pair's source
             src_p_x, src_p_y = src[5], src[6]
             src_comp = find_component_for_endpoint(src_p_x, src_p_y, result[0][1].p_net_id)
-            print(f"  Swapped source/target for {swapped_count} pairs to ensure consistent source component ({src_comp})")
+            print(
+                f"  Swapped source/target for {swapped_count} pairs to ensure consistent source component ({src_comp})"
+            )
 
     return result
 
@@ -769,13 +765,13 @@ def apply_single_swap(
     pcb_data: PCBData,
     p1_name: str,
     p1_pair: DiffPairNet,
-    p1_targets: List,
+    p1_targets: list,
     p2_name: str,
     p2_pair: DiffPairNet,
-    p2_targets: List,
-    target_swaps: Dict[str, str],
-    target_swap_info: List[Dict],
-    config: 'GridRouteConfig' = None
+    p2_targets: list,
+    target_swaps: dict[str, str],
+    target_swap_info: list[dict],
+    config: "GridRouteConfig" = None,
 ) -> bool:
     """
     Apply a single pairwise target swap to pcb_data.
@@ -818,10 +814,18 @@ def apply_single_swap(
 
     # Find all segment positions connected to each target stub
     # Pass layer to prevent mixing stubs that share XY coords on different layers
-    p1_p_positions = find_connected_segment_positions(pcb_data, p1_p_pos[0], p1_p_pos[1], p1_pair.p_net_id, layer=p1_layer)
-    p1_n_positions = find_connected_segment_positions(pcb_data, p1_n_pos[0], p1_n_pos[1], p1_pair.n_net_id, layer=p1_layer)
-    p2_p_positions = find_connected_segment_positions(pcb_data, p2_p_pos[0], p2_p_pos[1], p2_pair.p_net_id, layer=p2_layer)
-    p2_n_positions = find_connected_segment_positions(pcb_data, p2_n_pos[0], p2_n_pos[1], p2_pair.n_net_id, layer=p2_layer)
+    p1_p_positions = find_connected_segment_positions(
+        pcb_data, p1_p_pos[0], p1_p_pos[1], p1_pair.p_net_id, layer=p1_layer
+    )
+    p1_n_positions = find_connected_segment_positions(
+        pcb_data, p1_n_pos[0], p1_n_pos[1], p1_pair.n_net_id, layer=p1_layer
+    )
+    p2_p_positions = find_connected_segment_positions(
+        pcb_data, p2_p_pos[0], p2_p_pos[1], p2_pair.p_net_id, layer=p2_layer
+    )
+    p2_n_positions = find_connected_segment_positions(
+        pcb_data, p2_n_pos[0], p2_n_pos[1], p2_pair.n_net_id, layer=p2_layer
+    )
 
     # Swap net IDs in pcb_data segments at target positions
     # Also filter by layer when layers are known (prevents mixing stubs sharing XY on different layers)
@@ -831,8 +835,7 @@ def apply_single_swap(
     p2_n_seg_count = 0
 
     for seg in pcb_data.segments:
-        seg_positions = {pos_key(seg.start_x, seg.start_y),
-                        pos_key(seg.end_x, seg.end_y)}
+        seg_positions = {pos_key(seg.start_x, seg.start_y), pos_key(seg.end_x, seg.end_y)}
         # p1 target: p1_pair.p_net_id -> p2_pair.p_net_id (must be on p1_layer)
         if seg.net_id == p1_pair.p_net_id and seg_positions & p1_p_positions:
             if p1_layer is None or seg.layer == p1_layer:
@@ -852,7 +855,9 @@ def apply_single_swap(
                 seg.net_id = p1_pair.n_net_id
                 p2_n_seg_count += 1
 
-    print(f"  Swapped segments: {p1_name} target: {p1_p_seg_count}P+{p1_n_seg_count}N, {p2_name} target: {p2_p_seg_count}P+{p2_n_seg_count}N")
+    print(
+        f"  Swapped segments: {p1_name} target: {p1_p_seg_count}P+{p1_n_seg_count}N, {p2_name} target: {p2_p_seg_count}P+{p2_n_seg_count}N"
+    )
 
     # Swap net IDs in pcb_data vias at target positions
     p1_p_via_count = 0
@@ -876,7 +881,9 @@ def apply_single_swap(
             p2_n_via_count += 1
 
     if p1_p_via_count + p1_n_via_count + p2_p_via_count + p2_n_via_count > 0:
-        print(f"  Swapped vias: {p1_name} target: {p1_p_via_count}P+{p1_n_via_count}N, {p2_name} target: {p2_p_via_count}P+{p2_n_via_count}N")
+        print(
+            f"  Swapped vias: {p1_name} target: {p1_p_via_count}P+{p1_n_via_count}N, {p2_name} target: {p2_p_via_count}P+{p2_n_via_count}N"
+        )
 
     # Find pads connected to the target stubs
     p1_p_pads = pcb_data.pads_by_net.get(p1_pair.p_net_id, [])
@@ -893,28 +900,40 @@ def apply_single_swap(
     if p1_p_pad and p2_p_pad:
         p1_p_pad.net_id, p2_p_pad.net_id = p2_p_pad.net_id, p1_p_pad.net_id
         p1_p_pad.net_name, p2_p_pad.net_name = p2_p_pad.net_name, p1_p_pad.net_name
-        print(f"  Swapped P pads: {p1_p_pad.component_ref}:{p1_p_pad.pad_number} <-> {p2_p_pad.component_ref}:{p2_p_pad.pad_number}")
+        print(
+            f"  Swapped P pads: {p1_p_pad.component_ref}:{p1_p_pad.pad_number} <-> {p2_p_pad.component_ref}:{p2_p_pad.pad_number}"
+        )
     if p1_n_pad and p2_n_pad:
         p1_n_pad.net_id, p2_n_pad.net_id = p2_n_pad.net_id, p1_n_pad.net_id
         p1_n_pad.net_name, p2_n_pad.net_name = p2_n_pad.net_name, p1_n_pad.net_name
-        print(f"  Swapped N pads: {p1_n_pad.component_ref}:{p1_n_pad.pad_number} <-> {p2_n_pad.component_ref}:{p2_n_pad.pad_number}")
+        print(
+            f"  Swapped N pads: {p1_n_pad.component_ref}:{p1_n_pad.pad_number} <-> {p2_n_pad.component_ref}:{p2_n_pad.pad_number}"
+        )
 
     # Update pads_by_net dictionary
     if p1_p_pad:
         if p1_pair.p_net_id in pcb_data.pads_by_net:
-            pcb_data.pads_by_net[p1_pair.p_net_id] = [p for p in pcb_data.pads_by_net[p1_pair.p_net_id] if p != p1_p_pad]
+            pcb_data.pads_by_net[p1_pair.p_net_id] = [
+                p for p in pcb_data.pads_by_net[p1_pair.p_net_id] if p != p1_p_pad
+            ]
         pcb_data.pads_by_net.setdefault(p2_pair.p_net_id, []).append(p1_p_pad)
     if p2_p_pad:
         if p2_pair.p_net_id in pcb_data.pads_by_net:
-            pcb_data.pads_by_net[p2_pair.p_net_id] = [p for p in pcb_data.pads_by_net[p2_pair.p_net_id] if p != p2_p_pad]
+            pcb_data.pads_by_net[p2_pair.p_net_id] = [
+                p for p in pcb_data.pads_by_net[p2_pair.p_net_id] if p != p2_p_pad
+            ]
         pcb_data.pads_by_net.setdefault(p1_pair.p_net_id, []).append(p2_p_pad)
     if p1_n_pad:
         if p1_pair.n_net_id in pcb_data.pads_by_net:
-            pcb_data.pads_by_net[p1_pair.n_net_id] = [p for p in pcb_data.pads_by_net[p1_pair.n_net_id] if p != p1_n_pad]
+            pcb_data.pads_by_net[p1_pair.n_net_id] = [
+                p for p in pcb_data.pads_by_net[p1_pair.n_net_id] if p != p1_n_pad
+            ]
         pcb_data.pads_by_net.setdefault(p2_pair.n_net_id, []).append(p1_n_pad)
     if p2_n_pad:
         if p2_pair.n_net_id in pcb_data.pads_by_net:
-            pcb_data.pads_by_net[p2_pair.n_net_id] = [p for p in pcb_data.pads_by_net[p2_pair.n_net_id] if p != p2_n_pad]
+            pcb_data.pads_by_net[p2_pair.n_net_id] = [
+                p for p in pcb_data.pads_by_net[p2_pair.n_net_id] if p != p2_n_pad
+            ]
         pcb_data.pads_by_net.setdefault(p1_pair.n_net_id, []).append(p2_n_pad)
 
     # Store swap info for output file writing
@@ -930,34 +949,33 @@ def apply_single_swap(
         p2_p_positions_no_overlap = p2_p_positions
         p2_n_positions_no_overlap = p2_n_positions
 
-    target_swap_info.append({
-        'p1_name': p1_name,
-        'p2_name': p2_name,
-        'p1_p_net_id': p1_pair.p_net_id,
-        'p1_n_net_id': p1_pair.n_net_id,
-        'p2_p_net_id': p2_pair.p_net_id,
-        'p2_n_net_id': p2_pair.n_net_id,
-        'p1_p_positions': p1_p_positions,
-        'p1_n_positions': p1_n_positions,
-        'p2_p_positions': p2_p_positions_no_overlap,
-        'p2_n_positions': p2_n_positions_no_overlap,
-        'p1_p_pad': p1_p_pad,
-        'p1_n_pad': p1_n_pad,
-        'p2_p_pad': p2_p_pad,
-        'p2_n_pad': p2_n_pad,
-        'p1_layer': p1_layer,  # Layer for filtering output file swaps
-        'p2_layer': p2_layer,  # Layer for filtering output file swaps
-    })
+    target_swap_info.append(
+        {
+            "p1_name": p1_name,
+            "p2_name": p2_name,
+            "p1_p_net_id": p1_pair.p_net_id,
+            "p1_n_net_id": p1_pair.n_net_id,
+            "p2_p_net_id": p2_pair.p_net_id,
+            "p2_n_net_id": p2_pair.n_net_id,
+            "p1_p_positions": p1_p_positions,
+            "p1_n_positions": p1_n_positions,
+            "p2_p_positions": p2_p_positions_no_overlap,
+            "p2_n_positions": p2_n_positions_no_overlap,
+            "p1_p_pad": p1_p_pad,
+            "p1_n_pad": p1_n_pad,
+            "p2_p_pad": p2_p_pad,
+            "p2_n_pad": p2_n_pad,
+            "p1_layer": p1_layer,  # Layer for filtering output file swaps
+            "p2_layer": p2_layer,  # Layer for filtering output file swaps
+        }
+    )
 
     return True
 
 
 def _swap_net_at_positions(
-    pcb_data: PCBData,
-    positions: Set[Tuple[float, float]],
-    old_net_id: int,
-    new_net_id: int
-) -> Tuple[int, int]:
+    pcb_data: PCBData, positions: set[tuple[float, float]], old_net_id: int, new_net_id: int
+) -> tuple[int, int]:
     """
     Swap net IDs for segments and vias at given positions.
 
@@ -976,8 +994,7 @@ def _swap_net_at_positions(
     for seg in pcb_data.segments:
         if seg.net_id != old_net_id:
             continue
-        seg_positions = {pos_key(seg.start_x, seg.start_y),
-                        pos_key(seg.end_x, seg.end_y)}
+        seg_positions = {pos_key(seg.start_x, seg.start_y), pos_key(seg.end_x, seg.end_y)}
         if seg_positions & positions:
             seg.net_id = new_net_id
             seg_count += 1
@@ -993,11 +1010,7 @@ def _swap_net_at_positions(
     return seg_count, via_count
 
 
-def _swap_segments_and_vias(
-    pcb_data: PCBData,
-    segments: List,
-    new_net_id: int
-) -> Tuple[int, int]:
+def _swap_segments_and_vias(pcb_data: PCBData, segments: list, new_net_id: int) -> tuple[int, int]:
     """
     Swap net IDs for specific segments and any vias at their positions.
 
@@ -1042,13 +1055,7 @@ def _swap_segments_and_vias(
     return seg_count, via_count
 
 
-def _swap_pads(
-    pcb_data: PCBData,
-    pad1: Optional[Pad],
-    pad2: Optional[Pad],
-    net1_id: int,
-    net2_id: int
-) -> None:
+def _swap_pads(pcb_data: PCBData, pad1: Pad | None, pad2: Pad | None, net1_id: int, net2_id: int) -> None:
     """
     Swap net IDs and names between two pads and update pads_by_net dictionary.
 
@@ -1078,12 +1085,12 @@ def apply_single_ended_swap(
     pcb_data: PCBData,
     n1_name: str,
     n1_net_id: int,
-    n1_targets: List,
+    n1_targets: list,
     n2_name: str,
     n2_net_id: int,
-    n2_targets: List,
-    target_swaps: Dict[str, str],
-    target_swap_info: List[Dict]
+    n2_targets: list,
+    target_swaps: dict[str, str],
+    target_swap_info: list[dict],
 ) -> bool:
     """
     Apply a single pairwise target swap for single-ended nets.
@@ -1143,32 +1150,34 @@ def apply_single_ended_swap(
 
     if n1_pad and n2_pad:
         _swap_pads(pcb_data, n1_pad, n2_pad, n1_net_id, n2_net_id)
-        print(f"  Swapped pads: {n1_pad.component_ref}:{n1_pad.pad_number} <-> {n2_pad.component_ref}:{n2_pad.pad_number}")
+        print(
+            f"  Swapped pads: {n1_pad.component_ref}:{n1_pad.pad_number} <-> {n2_pad.component_ref}:{n2_pad.pad_number}"
+        )
 
     # Store swap info for output file writing
     # Exclude overlapping positions from n2 to prevent double-swapping
     n2_positions_no_overlap = n2_positions - n1_positions
 
-    target_swap_info.append({
-        'type': 'single_ended',
-        'n1_name': n1_name,
-        'n2_name': n2_name,
-        'n1_net_id': n1_net_id,
-        'n2_net_id': n2_net_id,
-        'n1_positions': n1_positions,
-        'n2_positions': n2_positions_no_overlap,
-        'n1_pad': n1_pad,
-        'n2_pad': n2_pad,
-    })
+    target_swap_info.append(
+        {
+            "type": "single_ended",
+            "n1_name": n1_name,
+            "n2_name": n2_name,
+            "n1_net_id": n1_net_id,
+            "n2_net_id": n2_net_id,
+            "n1_positions": n1_positions,
+            "n2_positions": n2_positions_no_overlap,
+            "n1_pad": n1_pad,
+            "n2_pad": n2_pad,
+        }
+    )
 
     return True
 
 
 def ensure_consistent_single_ended_target_component(
-    net_data: List[Tuple[str, int, List, List]],
-    pcb_data: PCBData,
-    quiet: bool = False
-) -> List[Tuple[str, int, List, List]]:
+    net_data: list[tuple[str, int, list, list]], pcb_data: PCBData, quiet: bool = False
+) -> list[tuple[str, int, list, list]]:
     """
     Ensure all source/target endpoints are consistently ordered by component.
 
@@ -1184,10 +1193,11 @@ def ensure_consistent_single_ended_target_component(
     Returns:
         Updated net_data with source/target potentially swapped
     """
-    def find_component_for_endpoint(x: float, y: float, net_id: int) -> Optional[str]:
+
+    def find_component_for_endpoint(x: float, y: float, net_id: int) -> str | None:
         """Find component of the closest pad to this position on this net."""
         pads = pcb_data.pads_by_net.get(net_id, [])
-        best_dist = float('inf')
+        best_dist = float("inf")
         best_ref = None
         for pad in pads:
             dist = abs(pad.global_x - x) + abs(pad.global_y - y)
@@ -1228,18 +1238,20 @@ def ensure_consistent_single_ended_target_component(
             src = result[0][2][0]  # First net's source
             src_x, src_y = src[3], src[4]
             src_comp = find_component_for_endpoint(src_x, src_y, result[0][1])
-            print(f"  Swapped source/target for {swapped_count} nets to ensure consistent source component ({src_comp})")
+            print(
+                f"  Swapped source/target for {swapped_count} nets to ensure consistent source component ({src_comp})"
+            )
 
     return result
 
 
 def apply_single_ended_target_swaps(
     pcb_data: PCBData,
-    swappable_nets: List[Tuple[str, int]],
+    swappable_nets: list[tuple[str, int]],
     config: GridRouteConfig,
-    get_endpoints_func: Callable[[int], Tuple[List, List, Optional[str]]],
-    use_boundary_ordering: bool = True
-) -> Tuple[Dict[str, str], List[Dict]]:
+    get_endpoints_func: Callable[[int], tuple[list, list, str | None]],
+    use_boundary_ordering: bool = True,
+) -> tuple[dict[str, str], list[dict]]:
     """
     Main entry point for single-ended target swap optimization.
 
@@ -1259,14 +1271,14 @@ def apply_single_ended_target_swaps(
         - target_swaps: Dict mapping net_name -> swapped_target_net_name
         - target_swap_info: List of dicts with swap details for output file writing
     """
-    target_swaps: Dict[str, str] = {}
-    target_swap_info: List[Dict] = []
+    target_swaps: dict[str, str] = {}
+    target_swap_info: list[dict] = []
 
     if len(swappable_nets) < 2:
         return target_swaps, target_swap_info
 
     # Gather endpoint data for all swappable nets
-    net_data: List[Tuple[str, int, List, List]] = []
+    net_data: list[tuple[str, int, list, list]] = []
     for net_name, net_id in swappable_nets:
         sources, targets, error = get_endpoints_func(net_id)
         if error or not sources or not targets:
@@ -1285,18 +1297,20 @@ def apply_single_ended_target_swaps(
 
     # Compute optimal swaps (may return dict or sequence)
     optimal_swaps_dict, swap_sequence = compute_optimal_assignment(
-        net_data, config, pcb_data, use_boundary_ordering,
+        net_data,
+        config,
+        pcb_data,
+        use_boundary_ordering,
         get_source_centroid_func=get_single_source_centroid,
         get_target_centroid_func=get_single_target_centroid,
-        get_layer_idx_func=lambda e: e[2]  # Single-ended: layer_idx at position 2
+        get_layer_idx_func=lambda e: e[2],  # Single-ended: layer_idx at position 2
     )
 
     if not optimal_swaps_dict and not swap_sequence:
         return target_swaps, target_swap_info
 
     # Build lookup for net_data by name
-    net_lookup = {name: (net_id, sources, targets)
-                  for name, net_id, sources, targets in net_data}
+    net_lookup = {name: (net_id, sources, targets) for name, net_id, sources, targets in net_data}
 
     if swap_sequence:
         # Multi-round swaps: apply in sequence
@@ -1306,9 +1320,14 @@ def apply_single_ended_target_swaps(
 
             apply_single_ended_swap(
                 pcb_data,
-                src_name, n1_net_id, n1_targets,
-                tgt_name, n2_net_id, n2_targets,
-                target_swaps, target_swap_info
+                src_name,
+                n1_net_id,
+                n1_targets,
+                tgt_name,
+                n2_net_id,
+                n2_targets,
+                target_swaps,
+                target_swap_info,
             )
 
             # Update lookup with swapped targets for subsequent rounds
@@ -1329,9 +1348,14 @@ def apply_single_ended_target_swaps(
 
             apply_single_ended_swap(
                 pcb_data,
-                src_name, n1_net_id, n1_targets,
-                tgt_name, n2_net_id, n2_targets,
-                target_swaps, target_swap_info
+                src_name,
+                n1_net_id,
+                n1_targets,
+                tgt_name,
+                n2_net_id,
+                n2_targets,
+                target_swaps,
+                target_swap_info,
             )
 
     return target_swaps, target_swap_info
@@ -1339,11 +1363,11 @@ def apply_single_ended_target_swaps(
 
 def apply_target_swaps(
     pcb_data: PCBData,
-    swappable_pairs: List[Tuple[str, DiffPairNet]],
+    swappable_pairs: list[tuple[str, DiffPairNet]],
     config: GridRouteConfig,
-    get_endpoints_func: Callable[[DiffPairNet], Tuple[List, List, Optional[str]]],
-    use_boundary_ordering: bool = True
-) -> Tuple[Dict[str, str], List[Dict]]:
+    get_endpoints_func: Callable[[DiffPairNet], tuple[list, list, str | None]],
+    use_boundary_ordering: bool = True,
+) -> tuple[dict[str, str], list[dict]]:
     """
     Main entry point for target swap optimization.
 
@@ -1363,14 +1387,14 @@ def apply_target_swaps(
         - target_swaps: Dict mapping pair_name -> swapped_target_pair_name
         - target_swap_info: List of dicts with swap details for output file writing
     """
-    target_swaps: Dict[str, str] = {}
-    target_swap_info: List[Dict] = []
+    target_swaps: dict[str, str] = {}
+    target_swap_info: list[dict] = []
 
     if len(swappable_pairs) < 2:
         return target_swaps, target_swap_info
 
     # Gather endpoint data for all swappable pairs
-    pair_data: List[Tuple[str, DiffPairNet, List, List]] = []
+    pair_data: list[tuple[str, DiffPairNet, list, list]] = []
     for pair_name, pair in swappable_pairs:
         sources, targets, error = get_endpoints_func(pair)
         if error or not sources or not targets:
@@ -1390,16 +1414,13 @@ def apply_target_swaps(
     print(f"\nComputing optimal target assignment for {len(pair_data)} pairs...")
 
     # Compute optimal swaps (may return dict or sequence)
-    optimal_swaps_dict, swap_sequence = compute_optimal_assignment(
-        pair_data, config, pcb_data, use_boundary_ordering
-    )
+    optimal_swaps_dict, swap_sequence = compute_optimal_assignment(pair_data, config, pcb_data, use_boundary_ordering)
 
     if not optimal_swaps_dict and not swap_sequence:
         return target_swaps, target_swap_info
 
     # Build lookup for pair_data by name
-    pair_lookup = {name: (pair, sources, targets)
-                   for name, pair, sources, targets in pair_data}
+    pair_lookup = {name: (pair, sources, targets) for name, pair, sources, targets in pair_data}
 
     if swap_sequence:
         # Multi-round swaps: apply in sequence
@@ -1411,10 +1432,15 @@ def apply_target_swaps(
 
             apply_single_swap(
                 pcb_data,
-                src_name, p1_pair, p1_targets,
-                tgt_name, p2_pair, p2_targets,
-                target_swaps, target_swap_info,
-                config
+                src_name,
+                p1_pair,
+                p1_targets,
+                tgt_name,
+                p2_pair,
+                p2_targets,
+                target_swaps,
+                target_swap_info,
+                config,
             )
 
             # Update lookup with swapped targets for subsequent rounds
@@ -1435,10 +1461,15 @@ def apply_target_swaps(
 
             apply_single_swap(
                 pcb_data,
-                src_name, p1_pair, p1_targets,
-                tgt_name, p2_pair, p2_targets,
-                target_swaps, target_swap_info,
-                config
+                src_name,
+                p1_pair,
+                p1_targets,
+                tgt_name,
+                p2_pair,
+                p2_targets,
+                target_swaps,
+                target_swap_info,
+                config,
             )
 
     return target_swaps, target_swap_info
@@ -1446,9 +1477,9 @@ def apply_target_swaps(
 
 def generate_debug_boundary_labels(
     pcb_data: PCBData,
-    swappable_pairs: List[Tuple[str, DiffPairNet]],
-    get_endpoints_func: Callable[[DiffPairNet], Tuple[List, List, Optional[str]]]
-) -> List[dict]:
+    swappable_pairs: list[tuple[str, DiffPairNet]],
+    get_endpoints_func: Callable[[DiffPairNet], tuple[list, list, str | None]],
+) -> list[dict]:
     """
     Generate debug labels showing boundary position ordering for visualization.
 
@@ -1463,7 +1494,7 @@ def generate_debug_boundary_labels(
     labels = []
 
     # Gather endpoints (same as apply_target_swaps)
-    pair_data: List[Tuple[str, DiffPairNet, List, List]] = []
+    pair_data: list[tuple[str, DiffPairNet, list, list]] = []
     for pair_name, pair in swappable_pairs:
         sources, targets, error = get_endpoints_func(pair)
         if error or not sources or not targets:
@@ -1515,16 +1546,13 @@ def generate_debug_boundary_labels(
     src_sorted = sorted(src_positions, key=lambda x: x[0])
     for order_num, (pos, centroid, name) in enumerate(src_sorted, start=1):
         from chip_boundary import _project_to_boundary
+
         projected, edge = _project_to_boundary(centroid, src_chip.bounds)
         # Rotate labels on top/bottom edges by 90 degrees
-        angle = 90 if edge in ('top', 'bottom') else 0
-        labels.append({
-            'text': f"S{order_num}",
-            'x': projected[0],
-            'y': projected[1],
-            'layer': "User.6",
-            'angle': angle
-        })
+        angle = 90 if edge in ("top", "bottom") else 0
+        labels.append(
+            {"text": f"S{order_num}", "x": projected[0], "y": projected[1], "layer": "User.6", "angle": angle}
+        )
 
     # Generate labels for target positions (counter-clockwise, opposite of source)
     tgt_positions = []
@@ -1535,26 +1563,23 @@ def generate_debug_boundary_labels(
     tgt_sorted = sorted(tgt_positions, key=lambda x: x[0])
     for order_num, (pos, centroid, name) in enumerate(tgt_sorted, start=1):
         from chip_boundary import _project_to_boundary
+
         projected, edge = _project_to_boundary(centroid, tgt_chip.bounds)
         # Rotate labels on top/bottom edges by 90 degrees
-        angle = 90 if edge in ('top', 'bottom') else 0
-        labels.append({
-            'text': f"T{order_num}",
-            'x': projected[0],
-            'y': projected[1],
-            'layer': "User.6",
-            'angle': angle
-        })
+        angle = 90 if edge in ("top", "bottom") else 0
+        labels.append(
+            {"text": f"T{order_num}", "x": projected[0], "y": projected[1], "layer": "User.6", "angle": angle}
+        )
 
     return labels
 
 
 def generate_single_ended_debug_labels(
     pcb_data: PCBData,
-    net_list: List[Tuple[str, int]],
-    get_endpoints_func: Callable[[int], Tuple[List, List, Optional[str]]],
-    use_mps_ordering: bool = False
-) -> List[dict]:
+    net_list: list[tuple[str, int]],
+    get_endpoints_func: Callable[[int], tuple[list, list, str | None]],
+    use_mps_ordering: bool = False,
+) -> list[dict]:
     """
     Generate debug labels showing stub positions for single-ended nets.
 
@@ -1575,7 +1600,7 @@ def generate_single_ended_debug_labels(
     labels = []
 
     # Gather endpoints
-    net_data: List[Tuple[str, int, List, List]] = []
+    net_data: list[tuple[str, int, list, list]] = []
     for net_name, net_id in net_list:
         sources, targets, error = get_endpoints_func(net_id)
         if error or not sources or not targets:
@@ -1594,10 +1619,10 @@ def generate_single_ended_debug_labels(
         return name
 
     # Helper to find pad position closest to a stub tip
-    def find_pad_position(stub_x: float, stub_y: float, net_id: int) -> Tuple[float, float]:
+    def find_pad_position(stub_x: float, stub_y: float, net_id: int) -> tuple[float, float]:
         """Find the pad position closest to the stub tip."""
         pads = pcb_data.pads_by_net.get(net_id, [])
-        best_dist = float('inf')
+        best_dist = float("inf")
         best_pos = (stub_x, stub_y)  # fallback to stub position
         for pad in pads:
             dist = abs(pad.global_x - stub_x) + abs(pad.global_y - stub_y)
@@ -1615,8 +1640,8 @@ def generate_single_ended_debug_labels(
 
         # Classify nets by their chip pairs
         # Group nets that connect the same two chips for MPS ordering
-        chip_pair_nets: Dict[Tuple[str, str], List[Tuple[str, int, List, List, Tuple, Tuple]]] = {}
-        simple_nets: List[Tuple[str, int, List, List]] = []
+        chip_pair_nets: dict[tuple[str, str], list[tuple[str, int, list, list, tuple, tuple]]] = {}
+        simple_nets: list[tuple[str, int, list, list]] = []
 
         for net_name, net_id, sources, targets in net_data:
             src = sources[0]
@@ -1667,8 +1692,7 @@ def generate_single_ended_debug_labels(
             src_positions = []
             for i, centroid in enumerate(source_centroids):
                 pos = compute_boundary_position(
-                    src_chip, centroid, src_far, clockwise=True,
-                    exit_edge=src_exit_edges[i]
+                    src_chip, centroid, src_far, clockwise=True, exit_edge=src_exit_edges[i]
                 )
                 src_positions.append((pos, centroid, src_exit_edges[i]))
 
@@ -1680,22 +1704,18 @@ def generate_single_ended_debug_labels(
                     edge = exit_edge
                 else:
                     from chip_boundary import _project_to_boundary
+
                     projected, edge = _project_to_boundary(centroid, src_chip.bounds)
-                angle = 90 if edge in ('top', 'bottom') else 0
-                labels.append({
-                    'text': f"S{order_num}",
-                    'x': projected[0],
-                    'y': projected[1],
-                    'layer': "User.6",
-                    'angle': angle
-                })
+                angle = 90 if edge in ("top", "bottom") else 0
+                labels.append(
+                    {"text": f"S{order_num}", "x": projected[0], "y": projected[1], "layer": "User.6", "angle": angle}
+                )
 
             # Generate target labels with MPS ordering
             tgt_positions = []
             for i, centroid in enumerate(target_centroids):
                 pos = compute_boundary_position(
-                    tgt_chip, centroid, tgt_far, clockwise=False,
-                    exit_edge=tgt_exit_edges[i]
+                    tgt_chip, centroid, tgt_far, clockwise=False, exit_edge=tgt_exit_edges[i]
                 )
                 tgt_positions.append((pos, centroid, tgt_exit_edges[i]))
 
@@ -1707,34 +1727,23 @@ def generate_single_ended_debug_labels(
                     edge = exit_edge
                 else:
                     from chip_boundary import _project_to_boundary
+
                     projected, edge = _project_to_boundary(centroid, tgt_chip.bounds)
-                angle = 90 if edge in ('top', 'bottom') else 0
-                labels.append({
-                    'text': f"T{order_num}",
-                    'x': projected[0],
-                    'y': projected[1],
-                    'layer': "User.6",
-                    'angle': angle
-                })
+                angle = 90 if edge in ("top", "bottom") else 0
+                labels.append(
+                    {"text": f"T{order_num}", "x": projected[0], "y": projected[1], "layer": "User.6", "angle": angle}
+                )
 
         # Add simple labels for nets that don't connect two chips
         for net_name, net_id, sources, targets in simple_nets:
             src = sources[0]
             tgt = targets[0]
-            labels.append({
-                'text': f"S:{short_name(net_name)}",
-                'x': src[3],
-                'y': src[4],
-                'layer': "User.6",
-                'angle': 0
-            })
-            labels.append({
-                'text': f"T:{short_name(net_name)}",
-                'x': tgt[3],
-                'y': tgt[4],
-                'layer': "User.6",
-                'angle': 0
-            })
+            labels.append(
+                {"text": f"S:{short_name(net_name)}", "x": src[3], "y": src[4], "layer": "User.6", "angle": 0}
+            )
+            labels.append(
+                {"text": f"T:{short_name(net_name)}", "x": tgt[3], "y": tgt[4], "layer": "User.6", "angle": 0}
+            )
 
         return labels
 
@@ -1743,21 +1752,7 @@ def generate_single_ended_debug_labels(
         src = sources[0]
         tgt = targets[0]
         # Format: (gx, gy, layer_idx, orig_x, orig_y)
-        labels.append({
-            'text': f"S:{short_name(net_name)}",
-            'x': src[3],
-            'y': src[4],
-            'layer': "User.6",
-            'angle': 0
-        })
-        labels.append({
-            'text': f"T:{short_name(net_name)}",
-            'x': tgt[3],
-            'y': tgt[4],
-            'layer': "User.6",
-            'angle': 0
-        })
+        labels.append({"text": f"S:{short_name(net_name)}", "x": src[3], "y": src[4], "layer": "User.6", "angle": 0})
+        labels.append({"text": f"T:{short_name(net_name)}", "x": tgt[3], "y": tgt[4], "layer": "User.6", "angle": 0})
 
     return labels
-
-

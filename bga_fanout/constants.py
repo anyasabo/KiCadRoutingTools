@@ -4,7 +4,7 @@ Constants for BGA fanout routing.
 
 # Position comparison tolerances (mm)
 POSITION_TOLERANCE = 0.001  # For comparing if two points are the same
-EDGE_PAD_TOLERANCE = 0.01   # For determining if a pad is on the edge
+EDGE_PAD_TOLERANCE = 0.01  # For determining if a pad is on the edge
 FANOUT_DETECTION_TOLERANCE = 0.05  # For detecting existing fanouts
 
 # Via parameters

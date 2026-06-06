@@ -5,22 +5,23 @@ Builds GridObstacleMap objects from PCB data, adding obstacles for segments,
 vias, pads, BGA exclusion zones, and routed paths.
 """
 
-from typing import List, Optional, Tuple, Dict, Set, Union
-from dataclasses import dataclass, field
-import numpy as np
 import math
-
-from kicad_parser import PCBData, Segment, Via, Pad
-from routing_config import GridRouteConfig, GridCoord
-from routing_utils import build_layer_map, iter_pad_blocked_cells
-from bresenham_utils import walk_line, is_diagonal_segment, get_diagonal_via_blocking_params
-from net_queries import expand_pad_layers
-from obstacle_costs import add_bga_proximity_costs
+import os
 
 # Import Rust router
 import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'rust_router'))
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from bresenham_utils import get_diagonal_via_blocking_params, is_diagonal_segment, walk_line
+from kicad_parser import PCBData, Segment
+from net_queries import expand_pad_layers
+from obstacle_costs import add_bga_proximity_costs
+from routing_config import GridCoord, GridRouteConfig
+from routing_utils import build_layer_map, iter_pad_blocked_cells
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
 try:
     from grid_router import GridObstacleMap
@@ -29,10 +30,13 @@ except ImportError:
     GridObstacleMap = None
 
 
-def build_base_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
-                            nets_to_route: List[int],
-                            extra_clearance: float = 0.0,
-                            net_clearances: dict = None) -> GridObstacleMap:
+def build_base_obstacle_map(
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    nets_to_route: list[int],
+    extra_clearance: float = 0.0,
+    net_clearances: dict = None,
+) -> GridObstacleMap:
     """Build base obstacle map with static obstacles (BGA zones, pads, pre-existing tracks/vias).
 
     Excludes all nets that will be routed (nets_to_route) - their stubs will be added
@@ -86,7 +90,7 @@ def build_base_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
             continue
         # Compute expansion: routing track half-width (for this layer) + obstacle half-width + clearance
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + effective_clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         # For via blocking by segments: via half-size + segment half-width + clearance
@@ -101,7 +105,7 @@ def build_base_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
         if via.net_id in nets_to_route_set:
             continue
         # Compute expansion based on actual via size:
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
         # For track blocking by vias: via half-size + max routing track half-width + clearance
         via_track_mm = via_size / 2 + max_track_width / 2 + effective_clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
@@ -116,8 +120,9 @@ def build_base_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
         if net_id in nets_to_route_set:
             continue
         for pad in pads:
-            _add_pad_obstacle(obstacles, pad, coord, layer_map, config, extra_clearance,
-                              clearance_override=effective_clearance)
+            _add_pad_obstacle(
+                obstacles, pad, coord, layer_map, config, extra_clearance, clearance_override=effective_clearance
+            )
 
     # Add board edge clearance
     add_board_edge_obstacles(obstacles, pcb_data, config, extra_clearance)
@@ -207,8 +212,9 @@ def _polygon_grid_cells(points_mm, coord: GridCoord):
     return set(zip(gx_flat[inside].tolist(), gy_flat[inside].tolist()))
 
 
-def add_user_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                               config: GridRouteConfig, coord: GridCoord, num_layers: int):
+def add_user_keepout_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig, coord: GridCoord, num_layers: int
+):
     """Block all grid cells inside user-drawn keepout polygons on every copper layer.
 
     Keepout zones (issue #27) are hard blocks: routed tracks cannot enter them. The
@@ -234,7 +240,7 @@ def add_user_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
     obstacles.add_blocked_vias_batch(xy_arr)
 
 
-def point_in_polygon(x: float, y: float, polygon: List[Tuple[float, float]]) -> bool:
+def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> bool:
     """Test if a point is inside a polygon using ray casting algorithm.
 
     Args:
@@ -291,7 +297,7 @@ def point_to_segment_distance(px: float, py: float, x1: float, y1: float, x2: fl
     return math.sqrt((px - closest_x) ** 2 + (py - closest_y) ** 2)
 
 
-def point_to_polygon_edge_distance(x: float, y: float, polygon: List[Tuple[float, float]]) -> float:
+def point_to_polygon_edge_distance(x: float, y: float, polygon: list[tuple[float, float]]) -> float:
     """Calculate minimum distance from point to any polygon edge.
 
     Args:
@@ -301,7 +307,7 @@ def point_to_polygon_edge_distance(x: float, y: float, polygon: List[Tuple[float
     Returns:
         Minimum distance to any edge
     """
-    min_dist = float('inf')
+    min_dist = float("inf")
     n = len(polygon)
 
     for i in range(n):
@@ -313,9 +319,9 @@ def point_to_polygon_edge_distance(x: float, y: float, polygon: List[Tuple[float
     return min_dist
 
 
-def add_rule_area_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                    config: GridRouteConfig,
-                                    layers: Optional[List[str]] = None):
+def add_rule_area_keepout_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig, layers: list[str] | None = None
+):
     """Block tracks/vias inside KiCad keep-out rule areas.
 
     Each keepout (parsed from `(zone ... (keepout ...))`) blocks track cells on its
@@ -327,7 +333,7 @@ def add_rule_area_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBDat
     whose track/via copper (half-width plus clearance) would intrude past the keep-out
     boundary, so the copper itself stays out of the region rather than just the centre.
     """
-    keepouts = getattr(pcb_data.board_info, 'keepouts', None)
+    keepouts = getattr(pcb_data.board_info, "keepouts", None)
     if not keepouts:
         return
 
@@ -338,15 +344,15 @@ def add_rule_area_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBDat
     via_clear = config.clearance + config.via_size / 2
 
     for ko in keepouts:
-        poly = ko.get('polygon') or []
+        poly = ko.get("polygon") or []
         if len(poly) < 3:
             continue
-        block_tracks = not ko.get('tracks_allowed', True)
-        block_vias = not ko.get('vias_allowed', True)
+        block_tracks = not ko.get("tracks_allowed", True)
+        block_vias = not ko.get("vias_allowed", True)
         if not (block_tracks or block_vias):
             continue
 
-        ko_layers = ko.get('layers') or set()
+        ko_layers = ko.get("layers") or set()
         if ko_layers:
             layer_idxs = [layer_map[ln] for ln in ko_layers if ln in layer_map]
         else:
@@ -364,18 +370,20 @@ def add_rule_area_keepout_obstacles(obstacles: GridObstacleMap, pcb_data: PCBDat
             continue
 
         if block_tracks:
-            _block_cells_on_layers(obstacles, gx_flat, gy_flat,
-                                   inside | (edge_dist < track_clear), layer_idxs)
+            _block_cells_on_layers(obstacles, gx_flat, gy_flat, inside | (edge_dist < track_clear), layer_idxs)
         if block_vias:
             via_mask = inside | (edge_dist < via_clear)
             if via_mask.any():
-                obstacles.add_blocked_vias_batch(
-                    np.column_stack([gx_flat[via_mask], gy_flat[via_mask]]))
+                obstacles.add_blocked_vias_batch(np.column_stack([gx_flat[via_mask], gy_flat[via_mask]]))
 
 
-def add_board_edge_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                              config: GridRouteConfig, extra_clearance: float = 0.0,
-                              layers: Optional[List[str]] = None):
+def add_board_edge_obstacles(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    layers: list[str] | None = None,
+):
     """Block tracks and vias near the board edge.
 
     Supports both rectangular and non-rectangular board outlines. For non-rectangular
@@ -416,27 +424,42 @@ def add_board_edge_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
     board_outline = pcb_data.board_info.board_outline
     if board_outline and len(board_outline) >= 3:
         # Use polygon-based blocking for non-rectangular boards
-        _add_polygon_edge_obstacles(obstacles, board_outline, coord, num_layers,
-                                     track_edge_clearance, via_edge_clearance,
-                                     gmin_x, gmin_y, gmax_x, gmax_y, track_expand, via_expand)
+        _add_polygon_edge_obstacles(
+            obstacles,
+            board_outline,
+            coord,
+            num_layers,
+            track_edge_clearance,
+            via_edge_clearance,
+            gmin_x,
+            gmin_y,
+            gmax_x,
+            gmax_y,
+            track_expand,
+            via_expand,
+        )
     else:
         # Use simple rectangular blocking
-        _add_rectangular_edge_obstacles(obstacles, coord, num_layers,
-                                         gmin_x, gmin_y, gmax_x, gmax_y,
-                                         track_expand, via_expand)
+        _add_rectangular_edge_obstacles(
+            obstacles, coord, num_layers, gmin_x, gmin_y, gmax_x, gmax_y, track_expand, via_expand
+        )
 
     # Block areas inside board cutouts (e.g., connector/switch openings)
     board_cutouts = pcb_data.board_info.board_cutouts
     if board_cutouts:
         for cutout in board_cutouts:
             if len(cutout) >= 3:
-                _add_cutout_obstacles(obstacles, cutout, coord, num_layers,
-                                      track_edge_clearance, via_edge_clearance)
+                _add_cutout_obstacles(obstacles, cutout, coord, num_layers, track_edge_clearance, via_edge_clearance)
 
 
-def _add_cutout_obstacles(obstacles: GridObstacleMap, cutout: List[Tuple[float, float]],
-                          coord: GridCoord, num_layers: int,
-                          track_edge_clearance: float, via_edge_clearance: float):
+def _add_cutout_obstacles(
+    obstacles: GridObstacleMap,
+    cutout: list[tuple[float, float]],
+    coord: GridCoord,
+    num_layers: int,
+    track_edge_clearance: float,
+    via_edge_clearance: float,
+):
     """Block tracks and vias inside a board cutout and within clearance of its edges.
 
     Cells whose centre is inside the cutout polygon are blocked on all layers; cells
@@ -447,16 +470,23 @@ def _add_cutout_obstacles(obstacles: GridObstacleMap, cutout: List[Tuple[float, 
     if gx_flat is None:
         return
 
-    _block_cells_on_layers(obstacles, gx_flat, gy_flat,
-                           inside | (edge_dist < track_edge_clearance), range(num_layers))
+    _block_cells_on_layers(obstacles, gx_flat, gy_flat, inside | (edge_dist < track_edge_clearance), range(num_layers))
     via_mask = inside | (edge_dist < via_edge_clearance)
     if via_mask.any():
         obstacles.add_blocked_vias_batch(np.column_stack([gx_flat[via_mask], gy_flat[via_mask]]))
 
 
-def _add_rectangular_edge_obstacles(obstacles: GridObstacleMap, coord: GridCoord, num_layers: int,
-                                     gmin_x: int, gmin_y: int, gmax_x: int, gmax_y: int,
-                                     track_expand: int, via_expand: int):
+def _add_rectangular_edge_obstacles(
+    obstacles: GridObstacleMap,
+    coord: GridCoord,
+    num_layers: int,
+    gmin_x: int,
+    gmin_y: int,
+    gmax_x: int,
+    gmax_y: int,
+    track_expand: int,
+    via_expand: int,
+):
     """Add obstacles for simple rectangular board outline."""
     grid_margin = max(track_expand, via_expand) + 5
 
@@ -493,11 +523,20 @@ def _add_rectangular_edge_obstacles(obstacles: GridObstacleMap, coord: GridCoord
                 obstacles.add_blocked_via(gx, gy)
 
 
-def _add_polygon_edge_obstacles(obstacles: GridObstacleMap, polygon: List[Tuple[float, float]],
-                                 coord: GridCoord, num_layers: int,
-                                 track_edge_clearance: float, via_edge_clearance: float,
-                                 gmin_x: int, gmin_y: int, gmax_x: int, gmax_y: int,
-                                 track_expand: int, via_expand: int):
+def _add_polygon_edge_obstacles(
+    obstacles: GridObstacleMap,
+    polygon: list[tuple[float, float]],
+    coord: GridCoord,
+    num_layers: int,
+    track_edge_clearance: float,
+    via_edge_clearance: float,
+    gmin_x: int,
+    gmin_y: int,
+    gmax_x: int,
+    gmax_y: int,
+    track_expand: int,
+    via_expand: int,
+):
     """Add obstacles for non-rectangular board outline using polygon testing.
 
     For each grid cell in the bounding box area, checks if it's outside the board
@@ -620,8 +659,9 @@ def _add_polygon_edge_obstacles(obstacles: GridObstacleMap, polygon: List[Tuple[
             obstacles.add_blocked_vias_batch(np.column_stack([via_gx, via_gy]))
 
 
-def add_drill_hole_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                              config: GridRouteConfig, nets_to_route_set: set):
+def add_drill_hole_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, config: GridRouteConfig, nets_to_route_set: set
+):
     """Block via placement near existing drill holes (hole-to-hole clearance).
 
     Args:
@@ -661,13 +701,13 @@ def add_drill_hole_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
 
         for ex in range(-expand, expand + 1):
             for ey in range(-expand, expand + 1):
-                if ex*ex + ey*ey <= expand*expand:
+                if ex * ex + ey * ey <= expand * expand:
                     obstacles.add_blocked_via(gx + ex, gy + ey)
 
 
-def add_net_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                net_id: int, config: GridRouteConfig,
-                                extra_clearance: float = 0.0):
+def add_net_stubs_as_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, net_id: int, config: GridRouteConfig, extra_clearance: float = 0.0
+):
     """Add a net's stub segments as obstacles to the map."""
     coord = GridCoord(config.grid_step)
     layer_map = build_layer_map(config.layers)
@@ -681,7 +721,7 @@ def add_net_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
             continue
         # Use layer-specific track width for routing track portion
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + config.clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         via_block_mm = config.via_size / 2 + seg_width / 2 + config.clearance + extra_clearance
@@ -689,11 +729,15 @@ def add_net_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
         _add_segment_obstacle(obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid)
 
 
-def add_diff_pair_own_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                          p_net_id: int, n_net_id: int,
-                                          config: GridRouteConfig,
-                                          exclude_endpoints: List[Tuple[float, float]] = None,
-                                          extra_clearance: float = 0.0):
+def add_diff_pair_own_stubs_as_obstacles(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    p_net_id: int,
+    n_net_id: int,
+    config: GridRouteConfig,
+    exclude_endpoints: list[tuple[float, float]] = None,
+    extra_clearance: float = 0.0,
+):
     """Add a diff pair's own stub segments as obstacles to prevent centerline from crossing them.
 
     This is different from add_net_stubs_as_obstacles which adds OTHER nets' stubs.
@@ -722,7 +766,7 @@ def add_diff_pair_own_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: P
             gex, gey = coord.to_grid(ex, ey)
             for dx in range(-exclude_radius, exclude_radius + 1):
                 for dy in range(-exclude_radius, exclude_radius + 1):
-                    if dx*dx + dy*dy <= exclude_radius * exclude_radius:
+                    if dx * dx + dy * dy <= exclude_radius * exclude_radius:
                         exclude_grid_cells.add((gex + dx, gey + dy))
 
     # Add segments - use actual segment width and layer-specific routing track width
@@ -735,20 +779,25 @@ def add_diff_pair_own_stubs_as_obstacles(obstacles: GridObstacleMap, pcb_data: P
 
         # Compute expansion based on actual segment width and layer-specific track width
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + config.clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         via_block_mm = config.via_size / 2 + seg_width / 2 + config.clearance + extra_clearance
         via_block_grid = max(1, coord.to_grid_dist_safe(via_block_mm))
         _add_segment_obstacle_with_exclusion(
-            obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid,
-            exclude_grid_cells
+            obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid, exclude_grid_cells
         )
 
 
-def _add_segment_obstacle_with_exclusion(obstacles: GridObstacleMap, seg, coord: GridCoord,
-                                          layer_idx: int, expansion_grid: int, via_block_grid: int,
-                                          exclude_cells: Set[Tuple[int, int]]):
+def _add_segment_obstacle_with_exclusion(
+    obstacles: GridObstacleMap,
+    seg,
+    coord: GridCoord,
+    layer_idx: int,
+    expansion_grid: int,
+    via_block_grid: int,
+    exclude_cells: set[tuple[int, int]],
+):
     """Add a segment as obstacle, excluding certain grid cells."""
     gx1, gy1 = coord.to_grid(seg.start_x, seg.start_y)
     gx2, gy2 = coord.to_grid(seg.end_x, seg.end_y)
@@ -777,7 +826,7 @@ def _add_segment_obstacle_with_exclusion(obstacles: GridObstacleMap, seg, coord:
                         obstacles.add_blocked_cell(gx + ex, gy + ey, layer_idx)
             for ex in range(-via_block_range, via_block_range + 1):
                 for ey in range(-via_block_range, via_block_range + 1):
-                    if ex*ex + ey*ey <= effective_via_block_sq:
+                    if ex * ex + ey * ey <= effective_via_block_sq:
                         if (gx + ex, gy + ey) not in exclude_cells:
                             obstacles.add_blocked_via(gx + ex, gy + ey)
 
@@ -792,9 +841,9 @@ def _add_segment_obstacle_with_exclusion(obstacles: GridObstacleMap, seg, coord:
             gy += sy
 
 
-def add_net_pads_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                               net_id: int, config: GridRouteConfig,
-                               extra_clearance: float = 0.0):
+def add_net_pads_as_obstacles(
+    obstacles: GridObstacleMap, pcb_data: PCBData, net_id: int, config: GridRouteConfig, extra_clearance: float = 0.0
+):
     """Add a net's pads as obstacles to the map."""
     coord = GridCoord(config.grid_step)
     layer_map = build_layer_map(config.layers)
@@ -804,10 +853,14 @@ def add_net_pads_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
         _add_pad_obstacle(obstacles, pad, coord, layer_map, config, extra_clearance)
 
 
-def add_net_vias_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
-                               net_id: int, config: GridRouteConfig,
-                               extra_clearance: float = 0.0,
-                               diagonal_margin: float = 0.0):
+def add_net_vias_as_obstacles(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    net_id: int,
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    diagonal_margin: float = 0.0,
+):
     """Add a net's vias as obstacles to the map.
 
     Args:
@@ -822,18 +875,23 @@ def add_net_vias_as_obstacles(obstacles: GridObstacleMap, pcb_data: PCBData,
     for via in pcb_data.vias:
         if via.net_id != net_id:
             continue
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
         via_track_mm = via_size / 2 + max_track_width / 2 + config.clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
         via_via_mm = via_size / 2 + config.via_size / 2 + config.clearance
         via_via_expansion_grid = max(1, coord.to_grid_dist(via_via_mm))
-        _add_via_obstacle(obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid, diagonal_margin)
+        _add_via_obstacle(
+            obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid, diagonal_margin
+        )
 
 
-def add_vias_list_as_obstacles(obstacles: GridObstacleMap, vias: list,
-                                config: GridRouteConfig,
-                                extra_clearance: float = 0.0,
-                                diagonal_margin: float = 0.0):
+def add_vias_list_as_obstacles(
+    obstacles: GridObstacleMap,
+    vias: list,
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    diagonal_margin: float = 0.0,
+):
     """Add a list of Via objects as obstacles to the map.
 
     This is useful for adding vias from a route result before it's committed to pcb_data.
@@ -851,17 +909,19 @@ def add_vias_list_as_obstacles(obstacles: GridObstacleMap, vias: list,
     # Add vias - use actual via size and max track width (vias span all layers)
     max_track_width = config.get_max_track_width()
     for via in vias:
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
         via_track_mm = via_size / 2 + max_track_width / 2 + config.clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
         via_via_mm = via_size / 2 + config.via_size / 2 + config.clearance
         via_via_expansion_grid = max(1, coord.to_grid_dist(via_via_mm))
-        _add_via_obstacle(obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid, diagonal_margin)
+        _add_via_obstacle(
+            obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid, diagonal_margin
+        )
 
 
-def add_segments_list_as_obstacles(obstacles: GridObstacleMap, segments: list,
-                                    config: GridRouteConfig,
-                                    extra_clearance: float = 0.0):
+def add_segments_list_as_obstacles(
+    obstacles: GridObstacleMap, segments: list, config: GridRouteConfig, extra_clearance: float = 0.0
+):
     """Add a list of Segment objects as obstacles to the map.
 
     This is useful for adding segments from a route result before it's committed to pcb_data.
@@ -881,7 +941,7 @@ def add_segments_list_as_obstacles(obstacles: GridObstacleMap, segments: list,
         if layer_idx is not None:
             # Use layer-specific track width for routing track portion
             layer_track_width = config.get_track_width(seg.layer)
-            seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+            seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
             expansion_mm = layer_track_width / 2 + seg_width / 2 + config.clearance + extra_clearance
             expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
             via_block_mm = config.via_size / 2 + seg_width / 2 + config.clearance
@@ -889,9 +949,9 @@ def add_segments_list_as_obstacles(obstacles: GridObstacleMap, segments: list,
             _add_segment_obstacle(obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid)
 
 
-def remove_segments_list_from_obstacles(obstacles: GridObstacleMap, segments: list,
-                                         config: GridRouteConfig,
-                                         extra_clearance: float = 0.0):
+def remove_segments_list_from_obstacles(
+    obstacles: GridObstacleMap, segments: list, config: GridRouteConfig, extra_clearance: float = 0.0
+):
     """Remove a list of Segment objects from the obstacle map.
 
     This reverses the effect of add_segments_list_as_obstacles. It collects all cells
@@ -908,7 +968,7 @@ def remove_segments_list_from_obstacles(obstacles: GridObstacleMap, segments: li
 
     # Collect all cells and vias to remove
     cells_to_remove = []  # (gx, gy, layer_idx) tuples
-    vias_to_remove = []   # (gx, gy) tuples
+    vias_to_remove = []  # (gx, gy) tuples
 
     # Remove segments - use actual segment width and layer-specific track width (same as add function)
     for seg in segments:
@@ -918,7 +978,7 @@ def remove_segments_list_from_obstacles(obstacles: GridObstacleMap, segments: li
 
         # Use layer-specific track width for routing track portion (must match add function)
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + config.clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         via_block_mm = config.via_size / 2 + seg_width / 2 + config.clearance
@@ -938,7 +998,7 @@ def remove_segments_list_from_obstacles(obstacles: GridObstacleMap, segments: li
             # Via blocking cells
             for ex in range(-via_block_range, via_block_range + 1):
                 for ey in range(-via_block_range, via_block_range + 1):
-                    if ex*ex + ey*ey <= effective_via_block_sq:
+                    if ex * ex + ey * ey <= effective_via_block_sq:
                         vias_to_remove.append((gx + ex, gy + ey))
 
     # Batch remove cells and vias
@@ -950,10 +1010,13 @@ def remove_segments_list_from_obstacles(obstacles: GridObstacleMap, segments: li
         obstacles.remove_blocked_vias_batch(vias_array)
 
 
-def remove_vias_list_from_obstacles(obstacles: GridObstacleMap, vias: list,
-                                     config: GridRouteConfig,
-                                     extra_clearance: float = 0.0,
-                                     diagonal_margin: float = 0.0):
+def remove_vias_list_from_obstacles(
+    obstacles: GridObstacleMap,
+    vias: list,
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    diagonal_margin: float = 0.0,
+):
     """Remove a list of Via objects from the obstacle map.
 
     This reverses the effect of add_vias_list_as_obstacles. It collects all cells
@@ -971,13 +1034,13 @@ def remove_vias_list_from_obstacles(obstacles: GridObstacleMap, vias: list,
 
     # Collect all cells and vias to remove
     cells_to_remove = []  # (gx, gy, layer_idx) tuples
-    vias_to_remove = []   # (gx, gy) tuples
+    vias_to_remove = []  # (gx, gy) tuples
 
     # Remove vias - use actual via size and max track width (same as add function)
     max_track_width = config.get_max_track_width()
     for via in vias:
         gx, gy = coord.to_grid(via.x, via.y)
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
 
         via_track_mm = via_size / 2 + max_track_width / 2 + config.clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
@@ -990,13 +1053,13 @@ def remove_vias_list_from_obstacles(obstacles: GridObstacleMap, vias: list,
         for layer_idx in range(num_layers):
             for ex in range(-track_block_range, track_block_range + 1):
                 for ey in range(-track_block_range, track_block_range + 1):
-                    if ex*ex + ey*ey <= effective_track_block_sq:
+                    if ex * ex + ey * ey <= effective_track_block_sq:
                         cells_to_remove.append((gx + ex, gy + ey, layer_idx))
 
         # Via blocking cells
         for ex in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
             for ey in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
-                if ex*ex + ey*ey <= via_via_expansion_grid * via_via_expansion_grid:
+                if ex * ex + ey * ey <= via_via_expansion_grid * via_via_expansion_grid:
                     vias_to_remove.append((gx + ex, gy + ey))
 
     # Batch remove cells and vias
@@ -1008,8 +1071,7 @@ def remove_vias_list_from_obstacles(obstacles: GridObstacleMap, vias: list,
         obstacles.remove_blocked_vias_batch(vias_array)
 
 
-def add_same_net_via_clearance(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                net_id: int, config: GridRouteConfig):
+def add_same_net_via_clearance(obstacles: GridObstacleMap, pcb_data: PCBData, net_id: int, config: GridRouteConfig):
     """Add via-via clearance blocking for same-net vias.
 
     This blocks only via placement (not track routing) near existing vias on the same net,
@@ -1028,12 +1090,13 @@ def add_same_net_via_clearance(obstacles: GridObstacleMap, pcb_data: PCBData,
         # Only block via placement, not track routing (tracks can pass through same-net vias)
         for ex in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
             for ey in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
-                if ex*ex + ey*ey <= via_via_expansion_grid * via_via_expansion_grid:
+                if ex * ex + ey * ey <= via_via_expansion_grid * via_via_expansion_grid:
                     obstacles.add_blocked_via(gx + ex, gy + ey)
 
 
-def add_same_net_pad_drill_via_clearance(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                          net_id: int, config: GridRouteConfig):
+def add_same_net_pad_drill_via_clearance(
+    obstacles: GridObstacleMap, pcb_data: PCBData, net_id: int, config: GridRouteConfig
+):
     """Add via blocking near same-net pad drill holes (hole-to-hole clearance).
 
     This blocks via placement near through-hole pads on the same net,
@@ -1061,7 +1124,7 @@ def add_same_net_pad_drill_via_clearance(obstacles: GridObstacleMap, pcb_data: P
 
         for ex in range(-expand, expand + 1):
             for ey in range(-expand, expand + 1):
-                if ex*ex + ey*ey <= expand*expand:
+                if ex * ex + ey * ey <= expand * expand:
                     # Skip the pad center - the router can use the existing
                     # through-hole for layer transitions without a new via
                     if ex == 0 and ey == 0:
@@ -1069,8 +1132,9 @@ def add_same_net_pad_drill_via_clearance(obstacles: GridObstacleMap, pcb_data: P
                     obstacles.add_blocked_via(gx + ex, gy + ey)
 
 
-def get_same_net_through_hole_positions(pcb_data: PCBData, net_id: int,
-                                        config: GridRouteConfig) -> Set[Tuple[int, int]]:
+def get_same_net_through_hole_positions(
+    pcb_data: PCBData, net_id: int, config: GridRouteConfig
+) -> set[tuple[int, int]]:
     """Get grid positions of through-hole pads on this net.
 
     These positions can be used for layer transitions without placing a new via,
@@ -1096,10 +1160,16 @@ def get_same_net_through_hole_positions(pcb_data: PCBData, net_id: int,
     return positions
 
 
-def _add_segment_obstacle(obstacles: GridObstacleMap, seg, coord: GridCoord,
-                          layer_idx: int, expansion_grid: int, via_block_grid: int,
-                          blocked_cells: List[Set[Tuple[int, int]]] = None,
-                          blocked_vias: Set[Tuple[int, int]] = None):
+def _add_segment_obstacle(
+    obstacles: GridObstacleMap,
+    seg,
+    coord: GridCoord,
+    layer_idx: int,
+    expansion_grid: int,
+    via_block_grid: int,
+    blocked_cells: list[set[tuple[int, int]]] = None,
+    blocked_vias: set[tuple[int, int]] = None,
+):
     """Add a segment as obstacle to the map.
 
     Args:
@@ -1126,17 +1196,23 @@ def _add_segment_obstacle(obstacles: GridObstacleMap, seg, coord: GridCoord,
                     blocked_cells[layer_idx].add((gx + ex, gy + ey))
         for ex in range(-via_block_range, via_block_range + 1):
             for ey in range(-via_block_range, via_block_range + 1):
-                if ex*ex + ey*ey <= effective_via_block_sq:
+                if ex * ex + ey * ey <= effective_via_block_sq:
                     obstacles.add_blocked_via(gx + ex, gy + ey)
                     if blocked_vias is not None:
                         blocked_vias.add((gx + ex, gy + ey))
 
 
-def _add_via_obstacle(obstacles: GridObstacleMap, via, coord: GridCoord,
-                      num_layers: int, via_track_expansion_grid, via_via_expansion_grid: int,
-                      diagonal_margin: float = 0.0,
-                      blocked_cells: List[Set[Tuple[int, int]]] = None,
-                      blocked_vias: Set[Tuple[int, int]] = None):
+def _add_via_obstacle(
+    obstacles: GridObstacleMap,
+    via,
+    coord: GridCoord,
+    num_layers: int,
+    via_track_expansion_grid,
+    via_via_expansion_grid: int,
+    diagonal_margin: float = 0.0,
+    blocked_cells: list[set[tuple[int, int]]] = None,
+    blocked_vias: set[tuple[int, int]] = None,
+):
     """Add a via as obstacle to the map.
 
     Args:
@@ -1158,7 +1234,7 @@ def _add_via_obstacle(obstacles: GridObstacleMap, via, coord: GridCoord,
             track_block_range = layer_expansion + 1
             for ex in range(-track_block_range, track_block_range + 1):
                 for ey in range(-track_block_range, track_block_range + 1):
-                    if ex*ex + ey*ey <= effective_track_block_sq:
+                    if ex * ex + ey * ey <= effective_track_block_sq:
                         obstacles.add_blocked_cell(gx + ex, gy + ey, layer_idx)
                         if blocked_cells is not None:
                             blocked_cells[layer_idx].add((gx + ex, gy + ey))
@@ -1168,7 +1244,7 @@ def _add_via_obstacle(obstacles: GridObstacleMap, via, coord: GridCoord,
         track_block_range = via_track_expansion_grid + 1
         for ex in range(-track_block_range, track_block_range + 1):
             for ey in range(-track_block_range, track_block_range + 1):
-                if ex*ex + ey*ey <= effective_track_block_sq:
+                if ex * ex + ey * ey <= effective_track_block_sq:
                     for layer_idx in range(num_layers):
                         obstacles.add_blocked_cell(gx + ex, gy + ey, layer_idx)
                         if blocked_cells is not None:
@@ -1177,18 +1253,23 @@ def _add_via_obstacle(obstacles: GridObstacleMap, via, coord: GridCoord,
     # Block cells for via placement
     for ex in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
         for ey in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
-            if ex*ex + ey*ey <= via_via_expansion_grid * via_via_expansion_grid:
+            if ex * ex + ey * ey <= via_via_expansion_grid * via_via_expansion_grid:
                 obstacles.add_blocked_via(gx + ex, gy + ey)
                 if blocked_vias is not None:
                     blocked_vias.add((gx + ex, gy + ey))
 
 
-def _add_pad_obstacle(obstacles: GridObstacleMap, pad, coord: GridCoord,
-                      layer_map: Dict[str, int], config: GridRouteConfig,
-                      extra_clearance: float = 0.0,
-                      blocked_cells: List[Set[Tuple[int, int]]] = None,
-                      blocked_vias: Set[Tuple[int, int]] = None,
-                      clearance_override: float = None):
+def _add_pad_obstacle(
+    obstacles: GridObstacleMap,
+    pad,
+    coord: GridCoord,
+    layer_map: dict[str, int],
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    blocked_cells: list[set[tuple[int, int]]] = None,
+    blocked_vias: set[tuple[int, int]] = None,
+    clearance_override: float = None,
+):
     """Add a pad as obstacle to the map.
 
     Uses rectangular-with-rounded-corners pattern matching other pad blocking functions.
@@ -1213,9 +1294,9 @@ def _add_pad_obstacle(obstacles: GridObstacleMap, pad, coord: GridCoord,
     # - circle/oval: use min dimension to model as stadium/capsule shape
     # - roundrect: use the roundrect_rratio from pad
     # - rect: no rounding
-    if pad.shape in ('circle', 'oval'):
+    if pad.shape in ("circle", "oval"):
         corner_radius = min(half_width, half_height)
-    elif pad.shape == 'roundrect':
+    elif pad.shape == "roundrect":
         corner_radius = pad.roundrect_rratio * min(pad.size_x, pad.size_y)
     else:
         corner_radius = 0
@@ -1224,7 +1305,9 @@ def _add_pad_obstacle(obstacles: GridObstacleMap, pad, coord: GridCoord,
     expanded_layers = expand_pad_layers(pad.layers, config.layers)
 
     # Use shared utility for consistent pad blocking
-    for cell_gx, cell_gy in iter_pad_blocked_cells(gx, gy, half_width, half_height, margin, config.grid_step, corner_radius):
+    for cell_gx, cell_gy in iter_pad_blocked_cells(
+        gx, gy, half_width, half_height, margin, config.grid_step, corner_radius
+    ):
         for layer in expanded_layers:
             layer_idx = layer_map.get(layer)
             if layer_idx is not None:
@@ -1233,16 +1316,19 @@ def _add_pad_obstacle(obstacles: GridObstacleMap, pad, coord: GridCoord,
                     blocked_cells[layer_idx].add((cell_gx, cell_gy))
 
     # Via blocking near pads - block vias if pad is on any copper layer
-    if any(layer.endswith('.Cu') for layer in expanded_layers):
+    if any(layer.endswith(".Cu") for layer in expanded_layers):
         via_margin = config.via_size / 2 + clearance + extra_clearance
-        for cell_gx, cell_gy in iter_pad_blocked_cells(gx, gy, half_width, half_height, via_margin, config.grid_step, corner_radius):
+        for cell_gx, cell_gy in iter_pad_blocked_cells(
+            gx, gy, half_width, half_height, via_margin, config.grid_step, corner_radius
+        ):
             obstacles.add_blocked_via(cell_gx, cell_gy)
             if blocked_vias is not None:
                 blocked_vias.add((cell_gx, cell_gy))
 
 
-def add_routed_path_obstacles(obstacles: GridObstacleMap, path: List[Tuple[int, int, int]],
-                               config: GridRouteConfig, diagonal_margin: float = 0.0):
+def add_routed_path_obstacles(
+    obstacles: GridObstacleMap, path: list[tuple[int, int, int]], config: GridRouteConfig, diagonal_margin: float = 0.0
+):
     """Add a newly routed path as obstacles to the map.
 
     Args:
@@ -1281,11 +1367,11 @@ def add_routed_path_obstacles(obstacles: GridObstacleMap, path: List[Tuple[int, 
                 track_block_range = via_track_expansion_grid + 1
                 for ex in range(-track_block_range, track_block_range + 1):
                     for ey in range(-track_block_range, track_block_range + 1):
-                        if ex*ex + ey*ey <= effective_track_block_sq:
+                        if ex * ex + ey * ey <= effective_track_block_sq:
                             obstacles.add_blocked_cell(gx1 + ex, gy1 + ey, layer_idx)
             for ex in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
                 for ey in range(-via_via_expansion_grid, via_via_expansion_grid + 1):
-                    if ex*ex + ey*ey <= via_via_expansion_grid * via_via_expansion_grid:
+                    if ex * ex + ey * ey <= via_via_expansion_grid * via_via_expansion_grid:
                         obstacles.add_blocked_via(gx1 + ex, gy1 + ey)
         else:
             # Segment on same layer - add track obstacle using Bresenham
@@ -1311,7 +1397,7 @@ def add_routed_path_obstacles(obstacles: GridObstacleMap, path: List[Tuple[int, 
                         obstacles.add_blocked_cell(gx + ex, gy + ey, layer1)
                 for ex in range(-via_block_range, via_block_range + 1):
                     for ey in range(-via_block_range, via_block_range + 1):
-                        if ex*ex + ey*ey <= effective_via_block_sq:
+                        if ex * ex + ey * ey <= effective_via_block_sq:
                             obstacles.add_blocked_via(gx + ex, gy + ey)
 
                 if gx == gx2 and gy == gy2:
@@ -1325,8 +1411,12 @@ def add_routed_path_obstacles(obstacles: GridObstacleMap, path: List[Tuple[int, 
                     gy += sy
 
 
-def build_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
-                       exclude_net_id: int, unrouted_stubs: Optional[List[Tuple[float, float]]] = None) -> GridObstacleMap:
+def build_obstacle_map(
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    exclude_net_id: int,
+    unrouted_stubs: list[tuple[float, float]] | None = None,
+) -> GridObstacleMap:
     """Build Rust obstacle map from PCB data (legacy function for compatibility)."""
     # Build base map excluding just this net
     obstacles = build_base_obstacle_map(pcb_data, config, [exclude_net_id])
@@ -1348,19 +1438,24 @@ def build_obstacle_map(pcb_data: PCBData, config: GridRouteConfig,
 # Visualization support - captures blocked cell data for rendering
 # ============================================================================
 
+
 @dataclass
 class VisualizationData:
     """Data for visualization of obstacle map."""
-    blocked_cells: List[Set[Tuple[int, int]]] = field(default_factory=list)  # Per-layer
-    blocked_vias: Set[Tuple[int, int]] = field(default_factory=set)
-    bga_zones_grid: List[Tuple[int, int, int, int]] = field(default_factory=list)
-    bounds: Tuple[float, float, float, float] = (0, 0, 100, 100)  # min_x, min_y, max_x, max_y in mm
+
+    blocked_cells: list[set[tuple[int, int]]] = field(default_factory=list)  # Per-layer
+    blocked_vias: set[tuple[int, int]] = field(default_factory=set)
+    bga_zones_grid: list[tuple[int, int, int, int]] = field(default_factory=list)
+    bounds: tuple[float, float, float, float] = (0, 0, 100, 100)  # min_x, min_y, max_x, max_y in mm
 
 
-def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
-                                      nets_to_route: List[int],
-                                      extra_clearance: float = 0.0,
-                                      net_clearances: dict = None) -> Tuple[GridObstacleMap, VisualizationData]:
+def build_base_obstacle_map_with_vis(
+    pcb_data: PCBData,
+    config: GridRouteConfig,
+    nets_to_route: list[int],
+    extra_clearance: float = 0.0,
+    net_clearances: dict = None,
+) -> tuple[GridObstacleMap, VisualizationData]:
     """Build base obstacle map and capture visualization data.
 
     Same as build_base_obstacle_map, but also returns VisualizationData
@@ -1380,9 +1475,9 @@ def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
     obstacles = GridObstacleMap(num_layers)
 
     # Visualization data
-    blocked_cells: List[Set[Tuple[int, int]]] = [set() for _ in range(num_layers)]
-    blocked_vias: Set[Tuple[int, int]] = set()
-    bga_zones_grid: List[Tuple[int, int, int, int]] = []
+    blocked_cells: list[set[tuple[int, int]]] = [set() for _ in range(num_layers)]
+    blocked_vias: set[tuple[int, int]] = set()
+    bga_zones_grid: list[tuple[int, int, int, int]] = []
 
     # Set BGA exclusion zones - block vias AND tracks on ALL layers
     # Set BGA proximity radius for vertical attraction exclusion
@@ -1414,13 +1509,14 @@ def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
             continue
         # Compute expansion: layer-specific routing track half-width + obstacle half-width + clearance
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + effective_clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         via_block_mm = config.via_size / 2 + seg_width / 2 + effective_clearance + extra_clearance
         via_block_grid = max(1, coord.to_grid_dist_safe(via_block_mm))
-        _add_segment_obstacle(obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid,
-                              blocked_cells, blocked_vias)
+        _add_segment_obstacle(
+            obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid, blocked_cells, blocked_vias
+        )
 
     # Add vias as obstacles (excluding nets we'll route)
     # Use actual via size and max track width (vias span all layers)
@@ -1428,13 +1524,21 @@ def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
     for via in pcb_data.vias:
         if via.net_id in nets_to_route_set:
             continue
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
         via_track_mm = via_size / 2 + max_track_width / 2 + effective_clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
         via_via_mm = via_size / 2 + config.via_size / 2 + effective_clearance
         via_via_expansion_grid = max(1, coord.to_grid_dist(via_via_mm))
-        _add_via_obstacle(obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid,
-                          blocked_cells=blocked_cells, blocked_vias=blocked_vias)
+        _add_via_obstacle(
+            obstacles,
+            via,
+            coord,
+            num_layers,
+            via_track_expansion_grid,
+            via_via_expansion_grid,
+            blocked_cells=blocked_cells,
+            blocked_vias=blocked_vias,
+        )
 
     # Add pads as obstacles (excluding nets we'll route)
     # Use effective_clearance to ensure proper spacing between nets with different clearance requirements
@@ -1442,8 +1546,17 @@ def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
         if net_id in nets_to_route_set:
             continue
         for pad in pads:
-            _add_pad_obstacle(obstacles, pad, coord, layer_map, config, extra_clearance,
-                              blocked_cells, blocked_vias, clearance_override=effective_clearance)
+            _add_pad_obstacle(
+                obstacles,
+                pad,
+                coord,
+                layer_map,
+                config,
+                extra_clearance,
+                blocked_cells,
+                blocked_vias,
+                clearance_override=effective_clearance,
+            )
 
     # Add board edge clearance
     add_board_edge_obstacles(obstacles, pcb_data, config, extra_clearance)
@@ -1456,21 +1569,21 @@ def build_base_obstacle_map_with_vis(pcb_data: PCBData, config: GridRouteConfig,
     # Add hole-to-hole clearance blocking for existing drills
     add_drill_hole_obstacles(obstacles, pcb_data, config, nets_to_route_set)
 
-    vis_data = VisualizationData(
-        blocked_cells=blocked_cells,
-        blocked_vias=blocked_vias,
-        bga_zones_grid=bga_zones_grid
-    )
+    vis_data = VisualizationData(blocked_cells=blocked_cells, blocked_vias=blocked_vias, bga_zones_grid=bga_zones_grid)
 
     return obstacles, vis_data
 
 
-def add_net_obstacles_with_vis(obstacles: GridObstacleMap, pcb_data: PCBData,
-                                net_id: int, config: GridRouteConfig,
-                                extra_clearance: float = 0.0,
-                                blocked_cells: List[Set[Tuple[int, int]]] = None,
-                                blocked_vias: Set[Tuple[int, int]] = None,
-                                diagonal_margin: float = 0.0):
+def add_net_obstacles_with_vis(
+    obstacles: GridObstacleMap,
+    pcb_data: PCBData,
+    net_id: int,
+    config: GridRouteConfig,
+    extra_clearance: float = 0.0,
+    blocked_cells: list[set[tuple[int, int]]] = None,
+    blocked_vias: set[tuple[int, int]] = None,
+    diagonal_margin: float = 0.0,
+):
     """Add a net's segments, vias, and pads as obstacles, capturing vis data.
 
     This is a combined function for adding all of a net's obstacles at once,
@@ -1498,39 +1611,46 @@ def add_net_obstacles_with_vis(obstacles: GridObstacleMap, pcb_data: PCBData,
             continue
         # Use layer-specific track width for routing track portion
         layer_track_width = config.get_track_width(seg.layer)
-        seg_width = seg.width if hasattr(seg, 'width') and seg.width > 0 else layer_track_width
+        seg_width = seg.width if hasattr(seg, "width") and seg.width > 0 else layer_track_width
         expansion_mm = layer_track_width / 2 + seg_width / 2 + config.clearance + extra_clearance
         expansion_grid = max(1, coord.to_grid_dist(expansion_mm))
         via_block_mm = config.via_size / 2 + seg_width / 2 + config.clearance + extra_clearance
         via_block_grid = max(1, coord.to_grid_dist_safe(via_block_mm))
-        _add_segment_obstacle(obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid,
-                              blocked_cells, blocked_vias)
+        _add_segment_obstacle(
+            obstacles, seg, coord, layer_idx, expansion_grid, via_block_grid, blocked_cells, blocked_vias
+        )
 
     # Add vias - use actual via size and max track width (vias span all layers)
     max_track_width = config.get_max_track_width()
     for via in pcb_data.vias:
         if via.net_id != net_id:
             continue
-        via_size = via.size if hasattr(via, 'size') and via.size > 0 else config.via_size
+        via_size = via.size if hasattr(via, "size") and via.size > 0 else config.via_size
         via_track_mm = via_size / 2 + max_track_width / 2 + config.clearance + extra_clearance
         via_track_expansion_grid = max(1, coord.to_grid_dist_safe(via_track_mm))
         via_via_mm = via_size / 2 + config.via_size / 2 + config.clearance
         via_via_expansion_grid = max(1, coord.to_grid_dist(via_via_mm))
-        _add_via_obstacle(obstacles, via, coord, num_layers, via_track_expansion_grid, via_via_expansion_grid,
-                          diagonal_margin, blocked_cells, blocked_vias)
+        _add_via_obstacle(
+            obstacles,
+            via,
+            coord,
+            num_layers,
+            via_track_expansion_grid,
+            via_via_expansion_grid,
+            diagonal_margin,
+            blocked_cells,
+            blocked_vias,
+        )
 
     # Add pads
     pads = pcb_data.pads_by_net.get(net_id, [])
     for pad in pads:
-        _add_pad_obstacle(obstacles, pad, coord, layer_map, config, extra_clearance,
-                          blocked_cells, blocked_vias)
+        _add_pad_obstacle(obstacles, pad, coord, layer_map, config, extra_clearance, blocked_cells, blocked_vias)
 
 
-def check_line_clearance(obstacles: GridObstacleMap,
-                         x1: float, y1: float,
-                         x2: float, y2: float,
-                         layer_idx: int,
-                         config: GridRouteConfig) -> bool:
+def check_line_clearance(
+    obstacles: GridObstacleMap, x1: float, y1: float, x2: float, y2: float, layer_idx: int, config: GridRouteConfig
+) -> bool:
     """Check if a line segment from (x1,y1) to (x2,y2) is clear of track obstacles on the given layer.
 
     Uses fine sampling (half grid step) to ensure complete coverage.
@@ -1571,10 +1691,9 @@ def check_line_clearance(obstacles: GridObstacleMap,
     return True
 
 
-def check_stub_layer_clearance(obstacles: GridObstacleMap,
-                                stub_segments: List[Segment],
-                                target_layer_idx: int,
-                                config: GridRouteConfig) -> bool:
+def check_stub_layer_clearance(
+    obstacles: GridObstacleMap, stub_segments: list[Segment], target_layer_idx: int, config: GridRouteConfig
+) -> bool:
     """Check if all stub segments can be placed on target_layer without conflicts.
 
     Args:
@@ -1587,19 +1706,24 @@ def check_stub_layer_clearance(obstacles: GridObstacleMap,
         True if all segments are clear on target_layer, False otherwise
     """
     for seg in stub_segments:
-        if not check_line_clearance(obstacles, seg.start_x, seg.start_y,
-                                     seg.end_x, seg.end_y, target_layer_idx, config):
+        if not check_line_clearance(
+            obstacles, seg.start_x, seg.start_y, seg.end_x, seg.end_y, target_layer_idx, config
+        ):
             return False
     return True
 
 
-def add_connector_region_via_blocking(obstacles: GridObstacleMap,
-                                       center_x: float, center_y: float,
-                                       dir_x: float, dir_y: float,
-                                       setback_distance: float,
-                                       spacing_mm: float,
-                                       config: GridRouteConfig,
-                                       debug: bool = False):
+def add_connector_region_via_blocking(
+    obstacles: GridObstacleMap,
+    center_x: float,
+    center_y: float,
+    dir_x: float,
+    dir_y: float,
+    setback_distance: float,
+    spacing_mm: float,
+    config: GridRouteConfig,
+    debug: bool = False,
+):
     """Block vias in the connector region between stub center and setback position.
 
     The connector region extends from the stub center in the stub direction
@@ -1632,9 +1756,11 @@ def add_connector_region_via_blocking(obstacles: GridObstacleMap,
     perp_y = dir_x
 
     if debug:
-        print(f"    Blocking corridor: center=({center_x:.2f},{center_y:.2f}), "
-              f"dir=({dir_x:.2f},{dir_y:.2f}), dist={total_distance:.2f}mm, "
-              f"half_width={corridor_half_width:.3f}mm")
+        print(
+            f"    Blocking corridor: center=({center_x:.2f},{center_y:.2f}), "
+            f"dir=({dir_x:.2f},{dir_y:.2f}), dist={total_distance:.2f}mm, "
+            f"half_width={corridor_half_width:.3f}mm"
+        )
 
     # Sample points along the connector region and block vias
     # Use half grid step for better coverage of diagonal corridors
@@ -1664,7 +1790,7 @@ def add_connector_region_via_blocking(obstacles: GridObstacleMap,
         print(f"    Blocked {len(blocked_set)} via positions")
 
 
-def get_net_bounds(pcb_data: PCBData, net_ids: List[int], padding: float = 5.0) -> Tuple[float, float, float, float]:
+def get_net_bounds(pcb_data: PCBData, net_ids: list[int], padding: float = 5.0) -> tuple[float, float, float, float]:
     """Get bounding box around all the nets' components.
 
     Returns (min_x, min_y, max_x, max_y) in mm.
@@ -1690,8 +1816,9 @@ def get_net_bounds(pcb_data: PCBData, net_ids: List[int], padding: float = 5.0) 
     return (min(xs) - padding, min(ys) - padding, max(xs) + padding, max(ys) + padding)
 
 
-def draw_exclusion_zones_debug(config: GridRouteConfig,
-                                unrouted_stubs: List[Tuple[float, float]] = None) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+def draw_exclusion_zones_debug(
+    config: GridRouteConfig, unrouted_stubs: list[tuple[float, float]] = None
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Get exclusion zone outline lines for User.5 layer debugging.
 
     Returns line segments for:
@@ -1714,10 +1841,7 @@ def draw_exclusion_zones_debug(config: GridRouteConfig,
     for zone in config.bga_exclusion_zones:
         min_x, min_y, max_x, max_y = zone[:4]
         # Draw inner rectangle (BGA zone itself)
-        corners = [
-            (min_x, min_y), (max_x, min_y),
-            (max_x, max_y), (min_x, max_y)
-        ]
+        corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)]
         for i in range(4):
             x1, y1 = corners[i]
             x2, y2 = corners[(i + 1) % 4]
@@ -1729,7 +1853,7 @@ def draw_exclusion_zones_debug(config: GridRouteConfig,
                 (min_x - prox_radius, min_y - prox_radius),
                 (max_x + prox_radius, min_y - prox_radius),
                 (max_x + prox_radius, max_y + prox_radius),
-                (min_x - prox_radius, max_y + prox_radius)
+                (min_x - prox_radius, max_y + prox_radius),
             ]
             for i in range(4):
                 x1, y1 = outer_corners[i]

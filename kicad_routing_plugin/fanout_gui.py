@@ -6,6 +6,7 @@ Provides wx-based panels for BGA and QFN fanout configuration.
 
 import os
 import sys
+
 import wx
 
 # Add parent directory to path
@@ -26,9 +27,10 @@ def _get_net_classes_from_board():
     """
     try:
         import pcbnew
+
         board = pcbnew.GetBoard()
         if board is None:
-            return {}, ['Default']
+            return {}, ["Default"]
 
         net_to_class = {}
         netclass_names = set()
@@ -43,7 +45,7 @@ def _get_net_classes_from_board():
             netclass_names.add(str(class_name))
 
         # Always include Default
-        netclass_names.add('Default')
+        netclass_names.add("Default")
 
         # Get net class for each net using GetEffectiveNetClass
         net_info = board.GetNetInfo()
@@ -51,7 +53,7 @@ def _get_net_classes_from_board():
 
         for net_name_wx, net in nets_by_name.items():
             net_name = str(net_name_wx)
-            if not net_name or net_name.lower().startswith('unconnected-'):
+            if not net_name or net_name.lower().startswith("unconnected-"):
                 continue
 
             try:
@@ -61,41 +63,45 @@ def _get_net_classes_from_board():
                     class_name_raw = str(netclass.GetName())
                     # Handle composite class names like 'Wide,Default'
                     # Use the first non-Default class, or 'Default' if only Default
-                    if ',' in class_name_raw:
-                        parts = [p.strip() for p in class_name_raw.split(',')]
-                        non_default = [p for p in parts if p != 'Default']
-                        class_name = non_default[0] if non_default else 'Default'
+                    if "," in class_name_raw:
+                        parts = [p.strip() for p in class_name_raw.split(",")]
+                        non_default = [p for p in parts if p != "Default"]
+                        class_name = non_default[0] if non_default else "Default"
                     else:
                         class_name = class_name_raw
                 else:
-                    class_name = 'Default'
+                    class_name = "Default"
                 net_to_class[net_name] = class_name
             except Exception:
-                net_to_class[net_name] = 'Default'
+                net_to_class[net_name] = "Default"
 
         # Sort with 'Default' first
-        sorted_classes = ['Default'] if 'Default' in netclass_names else []
-        sorted_classes.extend(sorted(c for c in netclass_names if c != 'Default'))
+        sorted_classes = ["Default"] if "Default" in netclass_names else []
+        sorted_classes.extend(sorted(c for c in netclass_names if c != "Default"))
 
         return net_to_class, sorted_classes
     except Exception:
-        return {}, ['Default']
+        return {}, ["Default"]
 
 
 class NetSelectionPanel(wx.Panel):
     """Reusable net selection panel with filtering."""
 
-    def __init__(self, parent, pcb_data,
-                 instructions=None,
-                 hide_label="Hide connected",
-                 hide_tooltip="Hide nets that are already processed",
-                 show_hide_checkbox=True,
-                 show_component_filter=True,
-                 show_component_dropdown=False,
-                 min_pads_for_dropdown=3,
-                 show_hide_differential=False,
-                 hide_differential_default=True,
-                 auto_hide_differential=False):
+    def __init__(
+        self,
+        parent,
+        pcb_data,
+        instructions=None,
+        hide_label="Hide connected",
+        hide_tooltip="Hide nets that are already processed",
+        show_hide_checkbox=True,
+        show_component_filter=True,
+        show_component_dropdown=False,
+        min_pads_for_dropdown=3,
+        show_hide_differential=False,
+        hide_differential_default=True,
+        auto_hide_differential=False,
+    ):
         """
         Create a net selection panel.
 
@@ -133,16 +139,18 @@ class NetSelectionPanel(wx.Panel):
         # Net class separation
         self._separate_by_netclass = False
         self._net_to_class = {}  # net_name -> netclass_name
-        self._netclass_names = ['Default']
+        self._netclass_names = ["Default"]
         self._tabbed_net_lists = {}  # netclass_name -> wx.CheckListBox
         self._netclass_notebook = None
 
-        self._create_ui(instructions, hide_label, hide_tooltip, show_hide_checkbox,
-                       show_component_filter, show_component_dropdown)
+        self._create_ui(
+            instructions, hide_label, hide_tooltip, show_hide_checkbox, show_component_filter, show_component_dropdown
+        )
         self._load_nets()
 
-    def _create_ui(self, instructions, hide_label, hide_tooltip, show_hide_checkbox,
-                   show_component_filter, show_component_dropdown):
+    def _create_ui(
+        self, instructions, hide_label, hide_tooltip, show_hide_checkbox, show_component_filter, show_component_dropdown
+    ):
         """Create the panel UI."""
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -272,7 +280,7 @@ class NetSelectionPanel(wx.Panel):
         else:
             # Extract component reference (remove pad count)
             text = self.component_dropdown.GetString(selection)
-            ref = text.split(' (')[0]
+            ref = text.split(" (")[0]
             self._component_filter_value = ref
 
         self._update_net_list()
@@ -290,7 +298,7 @@ class NetSelectionPanel(wx.Panel):
             if not net.name or net_id <= 0:
                 continue
             # Skip unconnected nets
-            if net.name.lower().startswith('unconnected-'):
+            if net.name.lower().startswith("unconnected-"):
                 continue
             self.all_nets.append((net.name, net_id))
         self.all_nets.sort(key=lambda x: x[0].lower())
@@ -449,7 +457,7 @@ class NetSelectionPanel(wx.Panel):
             # Check if should be hidden (differential)
             if hide_diff and self._is_differential_net(name):
                 continue
-            class_name = self._net_to_class.get(name, 'Default')
+            class_name = self._net_to_class.get(name, "Default")
             if class_name in nets_by_class:
                 nets_by_class[class_name].append((name, net_id))
 
@@ -477,7 +485,7 @@ class NetSelectionPanel(wx.Panel):
     def _on_net_list_key(self, event):
         """Handle keyboard events in net list."""
         # Ctrl+A selects all items
-        if event.GetKeyCode() == ord('A') and event.ControlDown():
+        if event.GetKeyCode() == ord("A") and event.ControlDown():
             for i in range(self.net_list.GetCount()):
                 self.net_list.SetSelection(i)
         else:
@@ -545,6 +553,7 @@ class NetSelectionPanel(wx.Panel):
     def _is_differential_net(self, name):
         """Check if a net name looks like a differential pair net."""
         from net_queries import extract_diff_pair_base
+
         return extract_diff_pair_base(name) is not None
 
     def _on_separate_netclass_changed(self, event):
@@ -592,7 +601,7 @@ class NetSelectionPanel(wx.Panel):
             wx.MessageBox(
                 "No custom net classes found. All nets are in 'Default' class.",
                 "Net Classes",
-                wx.OK | wx.ICON_INFORMATION
+                wx.OK | wx.ICON_INFORMATION,
             )
             self.separate_netclass_check.SetValue(False)
             return False
@@ -664,7 +673,7 @@ class NetSelectionPanel(wx.Panel):
         from net_queries import find_differential_pairs
 
         # Find all differential pairs
-        diff_pairs = find_differential_pairs(self.pcb_data, ['*'])
+        diff_pairs = find_differential_pairs(self.pcb_data, ["*"])
 
         self.all_nets = []
         self._diff_pairs = {}
@@ -701,7 +710,7 @@ class NetSelectionPanel(wx.Panel):
             return None
         # Extract component reference (remove pad count)
         text = self.component_dropdown.GetString(selection)
-        return text.split(' (')[0]
+        return text.split(" (")[0]
 
 
 class BGAOptionsPanel(wx.Panel):
@@ -731,11 +740,12 @@ class BGAOptionsPanel(wx.Panel):
         grid.AddGrowableCol(1)
 
         # Exit margin
-        r = defaults.PARAM_RANGES['exit_margin']
+        r = defaults.PARAM_RANGES["exit_margin"]
         grid.Add(wx.StaticText(self, label="Exit Margin (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.exit_margin = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                              initial=defaults.BGA_EXIT_MARGIN, inc=r['inc'])
-        self.exit_margin.SetDigits(r['digits'])
+        self.exit_margin = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.BGA_EXIT_MARGIN, inc=r["inc"]
+        )
+        self.exit_margin.SetDigits(r["digits"])
         self.exit_margin.SetToolTip("Distance from BGA edge to route escape vias")
         grid.Add(self.exit_margin, 0, wx.EXPAND)
 
@@ -759,8 +769,7 @@ class BGAOptionsPanel(wx.Panel):
         escape_sizer = wx.StaticBoxSizer(escape_box, wx.VERTICAL)
 
         self.escape_direction = wx.RadioBox(
-            self, label="", choices=["Horizontal", "Vertical"],
-            majorDimension=2, style=wx.RA_SPECIFY_COLS
+            self, label="", choices=["Horizontal", "Vertical"], majorDimension=2, style=wx.RA_SPECIFY_COLS
         )
         self.escape_direction.SetToolTip("Primary direction for escape routes from BGA pads")
         escape_sizer.Add(self.escape_direction, 0, wx.EXPAND | wx.ALL, 5)
@@ -802,14 +811,14 @@ class BGAOptionsPanel(wx.Panel):
         """Get the configuration values (BGA-specific only, shared params come from Basic tab)."""
         is_differential = self.differential_check.GetValue()
         return {
-            'exit_margin': self.exit_margin.GetValue(),
-            'differential': is_differential,
-            'diff_pair_patterns': ['*'] if is_differential else [],  # Auto-detect all diff pairs when enabled
-            'primary_escape': 'horizontal' if self.escape_direction.GetSelection() == 0 else 'vertical',
-            'force_escape_direction': self.force_escape.GetValue(),
-            'rebalance_escape': self.rebalance_escape.GetValue(),
-            'check_for_previous': self.check_previous.GetValue(),
-            'no_inner_top_layer': self.no_inner_top.GetValue(),
+            "exit_margin": self.exit_margin.GetValue(),
+            "differential": is_differential,
+            "diff_pair_patterns": ["*"] if is_differential else [],  # Auto-detect all diff pairs when enabled
+            "primary_escape": "horizontal" if self.escape_direction.GetSelection() == 0 else "vertical",
+            "force_escape_direction": self.force_escape.GetValue(),
+            "rebalance_escape": self.rebalance_escape.GetValue(),
+            "check_for_previous": self.check_previous.GetValue(),
+            "no_inner_top_layer": self.no_inner_top.GetValue(),
         }
 
 
@@ -831,7 +840,9 @@ class QFNOptionsPanel(wx.Panel):
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
         # Info text - QFN uses component's layer automatically
-        info_text = wx.StaticText(self, label="QFN fanout routes on the component's layer.\nTrack width comes from Basic tab.")
+        info_text = wx.StaticText(
+            self, label="QFN fanout routes on the component's layer.\nTrack width comes from Basic tab."
+        )
         info_text.Wrap(350)
         main_sizer.Add(info_text, 0, wx.ALL, 10)
 
@@ -843,11 +854,12 @@ class QFNOptionsPanel(wx.Panel):
         grid.AddGrowableCol(1)
 
         # Extension parameter
-        r = defaults.PARAM_RANGES['qfn_extension']
+        r = defaults.PARAM_RANGES["qfn_extension"]
         grid.Add(wx.StaticText(self, label="Extension (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        self.extension = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                            initial=defaults.QFN_EXTENSION, inc=r['inc'])
-        self.extension.SetDigits(r['digits'])
+        self.extension = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.QFN_EXTENSION, inc=r["inc"]
+        )
+        self.extension.SetDigits(r["digits"])
         self.extension.SetToolTip("Extension past pad edge before bend")
         grid.Add(self.extension, 0, wx.EXPAND)
 
@@ -859,16 +871,22 @@ class QFNOptionsPanel(wx.Panel):
     def get_config(self):
         """Get the configuration values (QFN-specific only, shared params come from Basic tab)."""
         return {
-            'extension': self.extension.GetValue(),
+            "extension": self.extension.GetValue(),
         }
 
 
 class FanoutTab(wx.Panel):
     """Complete fanout tab combining component/net selection with options."""
 
-    def __init__(self, parent, pcb_data, board_filename,
-                 get_shared_params=None, on_fanout_complete=None,
-                 get_connectivity_check=None):
+    def __init__(
+        self,
+        parent,
+        pcb_data,
+        board_filename,
+        get_shared_params=None,
+        on_fanout_complete=None,
+        get_connectivity_check=None,
+    ):
         """
         Create the fanout tab.
 
@@ -903,7 +921,8 @@ class FanoutTab(wx.Panel):
         net_box_sizer = wx.StaticBoxSizer(net_box, wx.VERTICAL)
 
         self.net_panel = NetSelectionPanel(
-            self, self.pcb_data,
+            self,
+            self.pcb_data,
             instructions="Select nets to fanout...",
             hide_label="Hide connected",
             hide_tooltip="Hide nets that are already fully connected",
@@ -911,7 +930,7 @@ class FanoutTab(wx.Panel):
             show_component_filter=True,
             show_component_dropdown=True,
             min_pads_for_dropdown=3,
-            auto_hide_differential=True
+            auto_hide_differential=True,
         )
         net_box_sizer.Add(self.net_panel, 1, wx.EXPAND)
 
@@ -925,8 +944,7 @@ class FanoutTab(wx.Panel):
         type_sizer = wx.StaticBoxSizer(type_box, wx.VERTICAL)
 
         self.fanout_type = wx.RadioBox(
-            self, label="", choices=["BGA", "QFN/QFP"],
-            majorDimension=2, style=wx.RA_SPECIFY_COLS
+            self, label="", choices=["BGA", "QFN/QFP"], majorDimension=2, style=wx.RA_SPECIFY_COLS
         )
         self.fanout_type.SetToolTip("BGA: Ball Grid Array with via escape\nQFN/QFP: Side pads with outward extension")
         self.fanout_type.Bind(wx.EVT_RADIOBOX, self._on_type_changed)
@@ -992,11 +1010,7 @@ class FanoutTab(wx.Panel):
         """Handle fanout button click."""
         component_ref = self.net_panel.get_selected_component()
         if not component_ref:
-            wx.MessageBox(
-                "Please select a component.",
-                "No Component Selected",
-                wx.OK | wx.ICON_WARNING
-            )
+            wx.MessageBox("Please select a component.", "No Component Selected", wx.OK | wx.ICON_WARNING)
             return
 
         is_bga = self.fanout_type.GetSelection() == 0
@@ -1008,7 +1022,7 @@ class FanoutTab(wx.Panel):
                 wx.MessageBox(
                     "Please select at least one differential pair to fanout.",
                     "No Pairs Selected",
-                    wx.OK | wx.ICON_WARNING
+                    wx.OK | wx.ICON_WARNING,
                 )
                 return
             # Convert net IDs to net names for the filter
@@ -1023,21 +1037,13 @@ class FanoutTab(wx.Panel):
         else:
             selected_nets = self.net_panel.get_selected_nets()
             if not selected_nets:
-                wx.MessageBox(
-                    "Please select at least one net to fanout.",
-                    "No Nets Selected",
-                    wx.OK | wx.ICON_WARNING
-                )
+                wx.MessageBox("Please select at least one net to fanout.", "No Nets Selected", wx.OK | wx.ICON_WARNING)
                 return
 
         # Get component footprint
         footprint = self.pcb_data.footprints.get(component_ref)
         if not footprint:
-            wx.MessageBox(
-                f"Component {component_ref} not found.",
-                "Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"Component {component_ref} not found.", "Error", wx.OK | wx.ICON_ERROR)
             return
 
         if is_bga:
@@ -1056,17 +1062,15 @@ class FanoutTab(wx.Panel):
 
         # Get shared parameters from Basic tab (includes layers)
         shared = self.get_shared_params() if self.get_shared_params else {}
-        track_width = shared.get('track_width', defaults.BGA_TRACK_WIDTH)
-        clearance = shared.get('clearance', defaults.BGA_CLEARANCE)
-        via_size = shared.get('via_size', defaults.BGA_VIA_SIZE)
-        via_drill = shared.get('via_drill', defaults.BGA_VIA_DRILL)
-        layers = shared.get('layers', defaults.DEFAULT_LAYERS)
+        track_width = shared.get("track_width", defaults.BGA_TRACK_WIDTH)
+        clearance = shared.get("clearance", defaults.BGA_CLEARANCE)
+        via_size = shared.get("via_size", defaults.BGA_VIA_SIZE)
+        via_drill = shared.get("via_drill", defaults.BGA_VIA_DRILL)
+        layers = shared.get("layers", defaults.DEFAULT_LAYERS)
 
         if not layers:
             wx.MessageBox(
-                "Please select at least one layer on the Basic tab.",
-                "No Layers Selected",
-                wx.OK | wx.ICON_WARNING
+                "Please select at least one layer on the Basic tab.", "No Layers Selected", wx.OK | wx.ICON_WARNING
             )
             self.fanout_btn.Enable()
             self.progress_bar.SetValue(0)
@@ -1079,38 +1083,39 @@ class FanoutTab(wx.Panel):
                 footprint,
                 self.pcb_data,
                 net_filter=net_patterns,
-                diff_pair_patterns=config['diff_pair_patterns'] or None,
+                diff_pair_patterns=config["diff_pair_patterns"] or None,
                 layers=layers,
                 track_width=track_width,
                 clearance=clearance,
-                diff_pair_gap=shared.get('diff_pair_gap', defaults.DIFF_PAIR_GAP),
-                exit_margin=config['exit_margin'],
-                primary_escape=config['primary_escape'],
-                force_escape_direction=config['force_escape_direction'],
-                rebalance_escape=config['rebalance_escape'],
+                diff_pair_gap=shared.get("diff_pair_gap", defaults.DIFF_PAIR_GAP),
+                exit_margin=config["exit_margin"],
+                primary_escape=config["primary_escape"],
+                force_escape_direction=config["force_escape_direction"],
+                rebalance_escape=config["rebalance_escape"],
                 via_size=via_size,
                 via_drill=via_drill,
-                check_for_previous=config['check_for_previous'],
-                no_inner_top_layer=config['no_inner_top_layer'],
+                check_for_previous=config["check_for_previous"],
+                no_inner_top_layer=config["no_inner_top_layer"],
             )
 
             self._apply_fanout_results(
-                tracks, vias_to_add,
+                tracks,
+                vias_to_add,
                 failed_nets=failed_nets,
                 fanout_config={
-                    'track_width': track_width, 'clearance': clearance,
-                    'via_size': via_size, 'via_drill': via_drill,
-                    'exit_margin': config.get('exit_margin'),
-                })
+                    "track_width": track_width,
+                    "clearance": clearance,
+                    "via_size": via_size,
+                    "via_drill": via_drill,
+                    "exit_margin": config.get("exit_margin"),
+                },
+            )
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
-            wx.MessageBox(
-                f"BGA fanout failed:\n\n{e}",
-                "Fanout Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"BGA fanout failed:\n\n{e}", "Fanout Error", wx.OK | wx.ICON_ERROR)
         finally:
             self.fanout_btn.Enable()
             self.progress_bar.SetValue(0)
@@ -1124,16 +1129,16 @@ class FanoutTab(wx.Panel):
 
         # Get shared parameters from Basic tab
         shared = self.get_shared_params() if self.get_shared_params else {}
-        track_width = shared.get('track_width', defaults.QFN_TRACK_WIDTH)
+        track_width = shared.get("track_width", defaults.QFN_TRACK_WIDTH)
 
         # Get extension from config (QFN-specific parameter)
-        extension = config.get('extension', defaults.QFN_EXTENSION)
+        extension = config.get("extension", defaults.QFN_EXTENSION)
 
         try:
             from qfn_fanout import generate_qfn_fanout
 
             # Use the component's layer (F.Cu for top, B.Cu for bottom)
-            component_layer = footprint.layer if hasattr(footprint, 'layer') else 'F.Cu'
+            component_layer = footprint.layer if hasattr(footprint, "layer") else "F.Cu"
 
             tracks, vias, failed_nets = generate_qfn_fanout(
                 footprint,
@@ -1145,28 +1150,26 @@ class FanoutTab(wx.Panel):
             )
 
             self._apply_fanout_results(
-                tracks, vias,
+                tracks,
+                vias,
                 failed_nets=failed_nets,
                 fanout_config={
-                    'track_width': track_width,
-                    'extension': extension,
+                    "track_width": track_width,
+                    "extension": extension,
                 },
-                fanout_kind='qfn')
+                fanout_kind="qfn",
+            )
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
-            wx.MessageBox(
-                f"QFN fanout failed:\n\n{e}",
-                "Fanout Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox(f"QFN fanout failed:\n\n{e}", "Fanout Error", wx.OK | wx.ICON_ERROR)
         finally:
             self.fanout_btn.Enable()
             self.progress_bar.SetValue(0)
 
-    def _apply_fanout_results(self, tracks, vias, failed_nets=None,
-                              fanout_config=None, fanout_kind='bga'):
+    def _apply_fanout_results(self, tracks, vias, failed_nets=None, fanout_config=None, fanout_kind="bga"):
         """Apply fanout results to the pcbnew board.
 
         Args:
@@ -1182,6 +1185,7 @@ class FanoutTab(wx.Panel):
                 to use when displaying parameter advice.
         """
         import pcbnew
+
         from .swig_gui import _build_layer_mappings
 
         board = pcbnew.GetBoard()
@@ -1201,35 +1205,25 @@ class FanoutTab(wx.Panel):
         # Add tracks
         for track_dict in tracks:
             track = pcbnew.PCB_TRACK(board)
-            track.SetStart(pcbnew.VECTOR2I(
-                pcbnew.FromMM(track_dict['start'][0]),
-                pcbnew.FromMM(track_dict['start'][1])
-            ))
-            track.SetEnd(pcbnew.VECTOR2I(
-                pcbnew.FromMM(track_dict['end'][0]),
-                pcbnew.FromMM(track_dict['end'][1])
-            ))
-            track.SetWidth(pcbnew.FromMM(track_dict['width']))
-            track.SetLayer(get_layer_id(track_dict['layer']))
-            track.SetNetCode(track_dict['net_id'])
+            track.SetStart(
+                pcbnew.VECTOR2I(pcbnew.FromMM(track_dict["start"][0]), pcbnew.FromMM(track_dict["start"][1]))
+            )
+            track.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(track_dict["end"][0]), pcbnew.FromMM(track_dict["end"][1])))
+            track.SetWidth(pcbnew.FromMM(track_dict["width"]))
+            track.SetLayer(get_layer_id(track_dict["layer"]))
+            track.SetNetCode(track_dict["net_id"])
             board.Add(track)
             tracks_added += 1
 
         # Add vias
         for via_dict in vias:
             via = pcbnew.PCB_VIA(board)
-            via.SetPosition(pcbnew.VECTOR2I(
-                pcbnew.FromMM(via_dict['x']),
-                pcbnew.FromMM(via_dict['y'])
-            ))
-            via.SetWidth(pcbnew.FromMM(via_dict['size']))
-            via.SetDrill(pcbnew.FromMM(via_dict['drill']))
-            via.SetNetCode(via_dict['net_id'])
-            if 'layers' in via_dict and len(via_dict['layers']) >= 2:
-                via.SetLayerPair(
-                    get_layer_id(via_dict['layers'][0]),
-                    get_layer_id(via_dict['layers'][1])
-                )
+            via.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(via_dict["x"]), pcbnew.FromMM(via_dict["y"])))
+            via.SetWidth(pcbnew.FromMM(via_dict["size"]))
+            via.SetDrill(pcbnew.FromMM(via_dict["drill"]))
+            via.SetNetCode(via_dict["net_id"])
+            if "layers" in via_dict and len(via_dict["layers"]) >= 2:
+                via.SetLayerPair(get_layer_id(via_dict["layers"][0]), get_layer_id(via_dict["layers"][1]))
             board.Add(via)
             vias_added += 1
 
@@ -1244,12 +1238,12 @@ class FanoutTab(wx.Panel):
         self.progress_bar.SetValue(100)
 
         # Show completion message
-        msg = f"Fanout complete!\n\n"
-        msg += f"Added to board:\n"
+        msg = "Fanout complete!\n\n"
+        msg += "Added to board:\n"
         msg += f"  {tracks_added} tracks\n"
         msg += f"  {vias_added} vias\n"
         if failed_nets:
-            if fanout_kind == 'qfn':
+            if fanout_kind == "qfn":
                 msg += f"\nNets whose stubs are too close to neighbours ({len(failed_nets)}):\n"
             else:
                 msg += f"\nFailed nets ({len(failed_nets)}):\n"
@@ -1259,18 +1253,16 @@ class FanoutTab(wx.Panel):
                 msg += f"  ... and {len(failed_nets) - 8} more (see Log tab)\n"
             try:
                 from routing_diagnostics import (
+                    format_suggestions_for_dialog,
                     suggest_bga_fanout_adjustments,
                     suggest_qfn_fanout_adjustments,
-                    format_suggestions_for_dialog)
-                suggest_fn = (suggest_qfn_fanout_adjustments
-                              if fanout_kind == 'qfn'
-                              else suggest_bga_fanout_adjustments)
+                )
+
+                suggest_fn = suggest_qfn_fanout_adjustments if fanout_kind == "qfn" else suggest_bga_fanout_adjustments
                 # Estimate "total" - we don't know the input count here, just
                 # use failed + tracks_added as a rough denominator.
                 rough_total = max(len(failed_nets) + tracks_added, len(failed_nets))
-                suggestions = suggest_fn(
-                    failed=len(failed_nets), total=rough_total,
-                    config=fanout_config or {})
+                suggestions = suggest_fn(failed=len(failed_nets), total=rough_total, config=fanout_config or {})
                 block = format_suggestions_for_dialog(suggestions)
                 if block:
                     msg += "\n" + block + "\n"

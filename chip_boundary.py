@@ -10,20 +10,20 @@ if their source ordering is inverted relative to their target ordering.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
-from kicad_parser import PCBData, Footprint
+from kicad_parser import PCBData
 
 
 @dataclass
 class ChipBoundary:
     """Information about a chip for boundary ordering."""
+
     reference: str  # Component reference (e.g., "U1")
-    center: Tuple[float, float]  # Chip center
-    bounds: Tuple[float, float, float, float]  # (min_x, min_y, max_x, max_y)
+    center: tuple[float, float]  # Chip center
+    bounds: tuple[float, float, float, float]  # (min_x, min_y, max_x, max_y)
 
 
-def build_chip_list(pcb_data: PCBData, min_pads: int = 4) -> List[ChipBoundary]:
+def build_chip_list(pcb_data: PCBData, min_pads: int = 4) -> list[ChipBoundary]:
     """
     Build list of chips with their boundaries from PCB data.
 
@@ -60,20 +60,14 @@ def build_chip_list(pcb_data: PCBData, min_pads: int = 4) -> List[ChipBoundary]:
 
         center = ((min_x + max_x) / 2, (min_y + max_y) / 2)
 
-        chips.append(ChipBoundary(
-            reference=ref,
-            center=center,
-            bounds=(min_x, min_y, max_x, max_y)
-        ))
+        chips.append(ChipBoundary(reference=ref, center=center, bounds=(min_x, min_y, max_x, max_y)))
 
     return chips
 
 
 def identify_chip_for_point(
-    point: Tuple[float, float],
-    chips: List[ChipBoundary],
-    tolerance: float = 2.0
-) -> Optional[ChipBoundary]:
+    point: tuple[float, float], chips: list[ChipBoundary], tolerance: float = 2.0
+) -> ChipBoundary | None:
     """
     Find which chip a point belongs to.
 
@@ -99,7 +93,7 @@ def identify_chip_for_point(
 
     # Not inside any chip, find nearest within tolerance
     best_chip = None
-    best_dist = float('inf')
+    best_dist = float("inf")
 
     for chip in chips:
         min_x, min_y, max_x, max_y = chip.bounds
@@ -116,10 +110,7 @@ def identify_chip_for_point(
     return best_chip
 
 
-def compute_far_side(
-    source_chip: ChipBoundary,
-    target_chip: ChipBoundary
-) -> Tuple[str, str]:
+def compute_far_side(source_chip: ChipBoundary, target_chip: ChipBoundary) -> tuple[str, str]:
     """
     Determine the "far side" for each chip based on chip-to-chip direction.
 
@@ -142,30 +133,29 @@ def compute_far_side(
         # Horizontal arrangement
         if dx > 0:
             # Target is to the right of source
-            source_far = 'left'   # Source's far side is left
-            target_far = 'right'  # Target's far side is right
+            source_far = "left"  # Source's far side is left
+            target_far = "right"  # Target's far side is right
         else:
             # Target is to the left of source
-            source_far = 'right'
-            target_far = 'left'
+            source_far = "right"
+            target_far = "left"
     else:
         # Vertical arrangement
         if dy > 0:
             # Target is below source (Y increases downward in KiCad)
-            source_far = 'top'
-            target_far = 'bottom'
+            source_far = "top"
+            target_far = "bottom"
         else:
             # Target is above source
-            source_far = 'bottom'
-            target_far = 'top'
+            source_far = "bottom"
+            target_far = "top"
 
     return source_far, target_far
 
 
 def _project_to_boundary(
-    point: Tuple[float, float],
-    bounds: Tuple[float, float, float, float]
-) -> Tuple[Tuple[float, float], str]:
+    point: tuple[float, float], bounds: tuple[float, float, float, float]
+) -> tuple[tuple[float, float], str]:
     """
     Project a point onto the nearest edge of a rectangular boundary.
 
@@ -192,21 +182,17 @@ def _project_to_boundary(
     min_dist = min(dist_left, dist_right, dist_top, dist_bottom)
 
     if min_dist == dist_left:
-        return (min_x, cy), 'left'
+        return (min_x, cy), "left"
     elif min_dist == dist_right:
-        return (max_x, cy), 'right'
+        return (max_x, cy), "right"
     elif min_dist == dist_top:
-        return (cx, min_y), 'top'
+        return (cx, min_y), "top"
     else:
-        return (cx, max_y), 'bottom'
+        return (cx, max_y), "bottom"
 
 
 def compute_boundary_position(
-    chip: ChipBoundary,
-    point: Tuple[float, float],
-    far_side: str,
-    clockwise: bool = True,
-    exit_edge: str = None
+    chip: ChipBoundary, point: tuple[float, float], far_side: str, clockwise: bool = True, exit_edge: str = None
 ) -> float:
     """
     Compute normalized position [0, 1] along chip boundary.
@@ -247,11 +233,11 @@ def compute_boundary_position(
         x, y = point
         cx = max(min_x, min(max_x, x))
         cy = max(min_y, min(max_y, y))
-        if edge == 'left':
+        if edge == "left":
             px, py = min_x, cy
-        elif edge == 'right':
+        elif edge == "right":
             px, py = max_x, cy
-        elif edge == 'top':
+        elif edge == "top":
             px, py = cx, min_y
         else:  # bottom
             px, py = cx, max_y
@@ -271,93 +257,93 @@ def compute_boundary_position(
     #
     # Counter-clockwise is the reverse within each edge
 
-    if far_side == 'left':
+    if far_side == "left":
         if clockwise:
             # left(down/+Y) → bottom(right/+X) → right(up/-Y) → top(left/-X)
-            edge_info = [('left', True), ('bottom', True), ('right', False), ('top', False)]
+            edge_info = [("left", True), ("bottom", True), ("right", False), ("top", False)]
         else:
             # left(up/-Y) → top(right/+X) → right(down/+Y) → bottom(left/-X)
-            edge_info = [('left', False), ('top', True), ('right', True), ('bottom', False)]
-    elif far_side == 'right':
+            edge_info = [("left", False), ("top", True), ("right", True), ("bottom", False)]
+    elif far_side == "right":
         if clockwise:
             # right(up/-Y) → top(left/-X) → left(down/+Y) → bottom(right/+X)
-            edge_info = [('right', False), ('top', False), ('left', True), ('bottom', True)]
+            edge_info = [("right", False), ("top", False), ("left", True), ("bottom", True)]
         else:
             # right(down/+Y) → bottom(left/-X) → left(up/-Y) → top(right/+X)
-            edge_info = [('right', True), ('bottom', False), ('left', False), ('top', True)]
-    elif far_side == 'top':
+            edge_info = [("right", True), ("bottom", False), ("left", False), ("top", True)]
+    elif far_side == "top":
         if clockwise:
             # top(left/-X) → left(down/+Y) → bottom(right/+X) → right(up/-Y)
-            edge_info = [('top', False), ('left', True), ('bottom', True), ('right', False)]
+            edge_info = [("top", False), ("left", True), ("bottom", True), ("right", False)]
         else:
             # top(right/+X) → right(down/+Y) → bottom(left/-X) → left(up/-Y)
-            edge_info = [('top', True), ('right', True), ('bottom', False), ('left', False)]
-    elif far_side == 'bottom':
+            edge_info = [("top", True), ("right", True), ("bottom", False), ("left", False)]
+    elif far_side == "bottom":
         if clockwise:
             # bottom(right/+X) → right(up/-Y) → top(left/-X) → left(down/+Y)
-            edge_info = [('bottom', True), ('right', False), ('top', False), ('left', True)]
+            edge_info = [("bottom", True), ("right", False), ("top", False), ("left", True)]
         else:
             # bottom(left/-X) → left(up/-Y) → top(right/+X) → right(down/+Y)
-            edge_info = [('bottom', False), ('left', False), ('top', True), ('right', True)]
+            edge_info = [("bottom", False), ("left", False), ("top", True), ("right", True)]
     else:
-        edge_info = [('left', True), ('bottom', True), ('right', False), ('top', False)]
+        edge_info = [("left", True), ("bottom", True), ("right", False), ("top", False)]
 
     # Compute distance along perimeter from start of far side to projected point
     distance = 0.0
 
     for current_edge, forward in edge_info:
-        if current_edge == 'left':
+        if current_edge == "left":
             edge_length = height
-            if edge == 'left':
+            if edge == "left":
                 if forward:
                     # Going down (increasing Y): distance from top
-                    distance += (py - min_y)
+                    distance += py - min_y
                 else:
                     # Going up (decreasing Y): distance from bottom
-                    distance += (max_y - py)
+                    distance += max_y - py
                 break
             else:
                 distance += edge_length
-        elif current_edge == 'bottom':
+        elif current_edge == "bottom":
             edge_length = width
-            if edge == 'bottom':
+            if edge == "bottom":
                 if forward:
                     # Going right (increasing X): distance from left
-                    distance += (px - min_x)
+                    distance += px - min_x
                 else:
                     # Going left (decreasing X): distance from right
-                    distance += (max_x - px)
+                    distance += max_x - px
                 break
             else:
                 distance += edge_length
-        elif current_edge == 'right':
+        elif current_edge == "right":
             edge_length = height
-            if edge == 'right':
+            if edge == "right":
                 if forward:
                     # Going down (increasing Y): distance from top
-                    distance += (py - min_y)
+                    distance += py - min_y
                 else:
                     # Going up (decreasing Y): distance from bottom
-                    distance += (max_y - py)
+                    distance += max_y - py
                 break
             else:
                 distance += edge_length
-        elif current_edge == 'top':
+        elif current_edge == "top":
             edge_length = width
-            if edge == 'top':
+            if edge == "top":
                 if forward:
                     # Going right (increasing X): distance from left
-                    distance += (px - min_x)
+                    distance += px - min_x
                 else:
                     # Going left (decreasing X): distance from right
-                    distance += (max_x - px)
+                    distance += max_x - px
                 break
             else:
                 distance += edge_length
 
     # Shift so that position 0 is at the MIDDLE of the far side edge
     # This makes numbering radiate outward from the center of the far side
-    far_side_length = height if far_side in ('left', 'right') else width
+    far_side_length = height if far_side in ("left", "right") else width
     middle_offset = far_side_length / 2.0
     distance = distance - middle_offset
     if distance < 0:
@@ -366,12 +352,7 @@ def compute_boundary_position(
     return distance / perimeter
 
 
-def crossings_from_boundary_order(
-    src_pos_a: float,
-    tgt_pos_a: float,
-    src_pos_b: float,
-    tgt_pos_b: float
-) -> bool:
+def crossings_from_boundary_order(src_pos_a: float, tgt_pos_a: float, src_pos_b: float, tgt_pos_b: float) -> bool:
     """
     Check if two nets cross based on their boundary positions.
 
@@ -390,18 +371,18 @@ def crossings_from_boundary_order(
     Returns:
         True if the nets cross, False otherwise
     """
-    source_order = (src_pos_a < src_pos_b)
-    target_order = (tgt_pos_a < tgt_pos_b)
+    source_order = src_pos_a < src_pos_b
+    target_order = tgt_pos_a < tgt_pos_b
     return source_order != target_order
 
 
 def generate_boundary_debug_labels(
-    centroids: List[Tuple[float, float]],
-    chips: List[ChipBoundary],
+    centroids: list[tuple[float, float]],
+    chips: list[ChipBoundary],
     far_side: str,
     clockwise: bool,
-    layer: str = "User.6"
-) -> List[dict]:
+    layer: str = "User.6",
+) -> list[dict]:
     """
     Generate debug labels showing boundary position ordering.
 
@@ -436,12 +417,14 @@ def generate_boundary_debug_labels(
     labels = []
     for order_num, idx in enumerate(sorted_indices, start=1):
         pos, projected, original = positions[idx]
-        labels.append({
-            'text': str(order_num),
-            'x': projected[0],
-            'y': projected[1],
-            'layer': layer,
-            'pos_value': pos  # Include for debugging
-        })
+        labels.append(
+            {
+                "text": str(order_num),
+                "x": projected[0],
+                "y": projected[1],
+                "layer": layer,
+                "pos_value": pos,  # Include for debugging
+            }
+        )
 
     return labels

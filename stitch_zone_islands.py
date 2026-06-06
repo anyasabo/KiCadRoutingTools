@@ -10,12 +10,14 @@ Usage:
 """
 
 import argparse
+
 import pcbnew
 from shapely.geometry import Point, Polygon
 
 
-def find_and_stitch_islands(input_path, output_path, net_name="GND", layer_name="F.Cu",
-                            via_size=0.6, via_drill=0.3, min_island_area=0.5):
+def find_and_stitch_islands(
+    input_path, output_path, net_name="GND", layer_name="F.Cu", via_size=0.6, via_drill=0.3, min_island_area=0.5
+):
     board = pcbnew.LoadBoard(input_path)
     layer_id = board.GetLayerID(layer_name)
 
@@ -113,8 +115,10 @@ def find_and_stitch_islands(input_path, output_path, net_name="GND", layer_name=
         islands = []
         for outline_idx in range(filled.OutlineCount()):
             outline = filled.Outline(outline_idx)
-            pts = [(pcbnew.ToMM(outline.CPoint(i).x), pcbnew.ToMM(outline.CPoint(i).y))
-                   for i in range(outline.PointCount())]
+            pts = [
+                (pcbnew.ToMM(outline.CPoint(i).x), pcbnew.ToMM(outline.CPoint(i).y))
+                for i in range(outline.PointCount())
+            ]
             if len(pts) < 3:
                 continue
             poly = Polygon(pts)
@@ -144,5 +148,4 @@ if __name__ == "__main__":
     parser.add_argument("--min-area", type=float, default=0.5, help="Min island area in mm²")
     args = parser.parse_args()
 
-    find_and_stitch_islands(args.input, args.output, args.net, args.layer,
-                            args.via_size, args.via_drill, args.min_area)
+    find_and_stitch_islands(args.input, args.output, args.net, args.layer, args.via_size, args.via_drill, args.min_area)

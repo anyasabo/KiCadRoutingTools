@@ -11,53 +11,53 @@ Works with any QFN/QFP package regardless of pin count or size.
 """
 
 import math
-from typing import List, Dict, Tuple, Optional
-from collections import defaultdict
-
-import sys
 import os
+import sys
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kicad_parser import parse_kicad_pcb, Footprint, PCBData, find_components_by_type, KICAD_10_MIN_VERSION
-from kicad_writer import add_tracks_and_vias_to_pcb
-from qfn_fanout.types import QFNLayout, PadInfo, FanoutStub
 from bga_fanout.constants import POSITION_TOLERANCE
+from kicad_parser import KICAD_10_MIN_VERSION, Footprint, PCBData, find_components_by_type, parse_kicad_pcb
+from kicad_writer import add_tracks_and_vias_to_pcb
 from net_queries import matches_net_filter
-from qfn_fanout.layout import analyze_qfn_layout, analyze_pad
 from qfn_fanout.geometry import calculate_fanout_stub
-
+from qfn_fanout.layout import analyze_pad, analyze_qfn_layout
+from qfn_fanout.types import FanoutStub, PadInfo, QFNLayout
 
 # Public API
 __all__ = [
-    'generate_qfn_fanout',
-    'main',
+    "generate_qfn_fanout",
+    "main",
     # Types re-exported for external use
-    'QFNLayout',
-    'PadInfo',
-    'FanoutStub',
+    "QFNLayout",
+    "PadInfo",
+    "FanoutStub",
 ]
 
 
-def check_endpoint_spacing(stubs: List[FanoutStub], min_spacing: float) -> List[Tuple[int, int, float]]:
+def check_endpoint_spacing(stubs: list[FanoutStub], min_spacing: float) -> list[tuple[int, int, float]]:
     """Check for endpoints that are too close together."""
     collisions = []
     for i, s1 in enumerate(stubs):
-        for j, s2 in enumerate(stubs[i+1:], i+1):
+        for j, s2 in enumerate(stubs[i + 1 :], i + 1):
             if s1.pad.net_id == s2.pad.net_id:
                 continue
-            dist = math.sqrt((s1.stub_end[0] - s2.stub_end[0])**2 +
-                           (s1.stub_end[1] - s2.stub_end[1])**2)
+            dist = math.sqrt((s1.stub_end[0] - s2.stub_end[0]) ** 2 + (s1.stub_end[1] - s2.stub_end[1]) ** 2)
             if dist < min_spacing:
                 collisions.append((i, j, dist))
     return collisions
 
 
-def generate_qfn_fanout(footprint: Footprint,
-                        pcb_data: PCBData,
-                        net_filter: Optional[List[str]] = None,
-                        layer: str = "F.Cu",
-                        track_width: float = 0.1,
-                        extension: float = 0.1) -> Tuple[List[Dict], List[Dict], List[str]]:
+def generate_qfn_fanout(
+    footprint: Footprint,
+    pcb_data: PCBData,
+    net_filter: list[str] | None = None,
+    layer: str = "F.Cu",
+    track_width: float = 0.1,
+    extension: float = 0.1,
+) -> tuple[list[dict], list[dict], list[str]]:
     """
     Generate QFN fanout tracks for a footprint.
 
@@ -94,11 +94,11 @@ def generate_qfn_fanout(footprint: Footprint,
     print(f"  Size: {layout.width:.2f} x {layout.height:.2f} mm")
     print(f"  Detected pad pitch: {layout.pad_pitch:.2f} mm")
     print(f"  Edge tolerance: {layout.edge_tolerance:.2f} mm")
-    print(f"  Stub length: pad_width / 2 + extension (clears pad before bend)")
+    print("  Stub length: pad_width / 2 + extension (clears pad before bend)")
     print(f"  Layer: {layer}")
 
     # Analyze all pads
-    pad_infos: List[PadInfo] = []
+    pad_infos: list[PadInfo] = []
     side_counts = defaultdict(int)
 
     for pad in footprint.pads:
@@ -106,14 +106,14 @@ def generate_qfn_fanout(footprint: Footprint,
             continue
 
         # Skip unconnected nets (KiCad pins not connected in schematic)
-        if pad.net_name.lower().startswith('unconnected-'):
+        if pad.net_name.lower().startswith("unconnected-"):
             continue
 
         if net_filter and not matches_net_filter(pad.net_name, net_filter):
             continue
 
         pad_info = analyze_pad(pad, layout)
-        if pad_info.side == 'center':
+        if pad_info.side == "center":
             continue  # Skip center/EP pads
 
         pad_infos.append(pad_info)
@@ -132,7 +132,7 @@ def generate_qfn_fanout(footprint: Footprint,
         return [], [], []
 
     # Build stubs
-    stubs: List[FanoutStub] = []
+    stubs: list[FanoutStub] = []
 
     # Max diagonal length for corner pads = chip_width / 3
     max_diagonal_length = max(layout.width, layout.height) / 3
@@ -141,9 +141,7 @@ def generate_qfn_fanout(footprint: Footprint,
         # Straight stub length = pad_width / 2 + extension (to clear the pad before bending)
         # pad_width is the dimension perpendicular to the chip edge (escape direction)
         straight_length = pad_info.pad_width / 2 + extension
-        corner_pos, stub_end = calculate_fanout_stub(
-            pad_info, layout, straight_length, max_diagonal_length
-        )
+        corner_pos, stub_end = calculate_fanout_stub(pad_info, layout, straight_length, max_diagonal_length)
 
         stub = FanoutStub(
             pad=pad_info.pad,
@@ -151,7 +149,7 @@ def generate_qfn_fanout(footprint: Footprint,
             corner_pos=corner_pos,
             stub_end=stub_end,
             side=pad_info.side,
-            layer=layer
+            layer=layer,
         )
         stubs.append(stub)
 
@@ -162,25 +160,29 @@ def generate_qfn_fanout(footprint: Footprint,
         dx1 = abs(stub.corner_pos[0] - stub.pad_pos[0])
         dy1 = abs(stub.corner_pos[1] - stub.pad_pos[1])
         if dx1 > POSITION_TOLERANCE or dy1 > POSITION_TOLERANCE:
-            tracks.append({
-                'start': stub.pad_pos,
-                'end': stub.corner_pos,
-                'width': track_width,
-                'layer': stub.layer,
-                'net_id': stub.net_id
-            })
+            tracks.append(
+                {
+                    "start": stub.pad_pos,
+                    "end": stub.corner_pos,
+                    "width": track_width,
+                    "layer": stub.layer,
+                    "net_id": stub.net_id,
+                }
+            )
 
         # Segment 2: 45 degree from corner to end
         dx2 = abs(stub.stub_end[0] - stub.corner_pos[0])
         dy2 = abs(stub.stub_end[1] - stub.corner_pos[1])
         if dx2 > POSITION_TOLERANCE or dy2 > POSITION_TOLERANCE:
-            tracks.append({
-                'start': stub.corner_pos,
-                'end': stub.stub_end,
-                'width': track_width,
-                'layer': stub.layer,
-                'net_id': stub.net_id
-            })
+            tracks.append(
+                {
+                    "start": stub.corner_pos,
+                    "end": stub.stub_end,
+                    "width": track_width,
+                    "layer": stub.layer,
+                    "net_id": stub.net_id,
+                }
+            )
 
     print(f"  Generated {len(tracks)} track segments ({len(stubs)} stubs x 2 segments)")
 
@@ -188,12 +190,12 @@ def generate_qfn_fanout(footprint: Footprint,
     min_spacing = track_width + extension
     collisions = check_endpoint_spacing(stubs, min_spacing)
 
-    failed_nets: List[str] = []
+    failed_nets: list[str] = []
     if collisions:
         print(f"  WARNING: {len(collisions)} endpoint pairs too close!")
         for i, j, dist in collisions[:5]:
             print(f"    {stubs[i].pad.net_name} <-> {stubs[j].pad.net_name}: {dist:.3f}mm")
-        print(f"  Consider increasing extension")
+        print("  Consider increasing extension")
         # Collect the deduplicated set of nets involved in any collision -
         # these are the "failed" nets the GUI surfaces.
         seen = set()
@@ -203,7 +205,7 @@ def generate_qfn_fanout(footprint: Footprint,
                     seen.add(name)
                     failed_nets.append(name)
     else:
-        print(f"  Validated: No endpoint collisions")
+        print("  Validated: No endpoint collisions")
 
     return tracks, [], failed_nets
 
@@ -212,20 +214,14 @@ def main():
     """Run QFN fanout generation."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='Generate QFN/QFP fanout routing')
-    parser.add_argument('pcb', help='Input PCB file')
-    parser.add_argument('--output', '-o', default='kicad_files/qfn_fanout_test.kicad_pcb',
-                        help='Output PCB file')
-    parser.add_argument('--component', '-c', default=None,
-                        help='Component reference (auto-detected if not specified)')
-    parser.add_argument('--layer', '-l', default='F.Cu',
-                        help='Routing layer')
-    parser.add_argument('--width', '-w', type=float, default=0.1,
-                        help='Track width in mm')
-    parser.add_argument('--extension', type=float, default=0.1,
-                        help='Extension past pad edge before bend (mm)')
-    parser.add_argument('--nets', '-n', nargs='*',
-                        help='Net patterns to include')
+    parser = argparse.ArgumentParser(description="Generate QFN/QFP fanout routing")
+    parser.add_argument("pcb", help="Input PCB file")
+    parser.add_argument("--output", "-o", default="kicad_files/qfn_fanout_test.kicad_pcb", help="Output PCB file")
+    parser.add_argument("--component", "-c", default=None, help="Component reference (auto-detected if not specified)")
+    parser.add_argument("--layer", "-l", default="F.Cu", help="Routing layer")
+    parser.add_argument("--width", "-w", type=float, default=0.1, help="Track width in mm")
+    parser.add_argument("--extension", type=float, default=0.1, help="Extension past pad edge before bend (mm)")
+    parser.add_argument("--nets", "-n", nargs="*", help="Net patterns to include")
 
     args = parser.parse_args()
 
@@ -234,9 +230,9 @@ def main():
 
     # Auto-detect QFN/QFP component if not specified
     if args.component is None:
-        qfn_components = find_components_by_type(pcb_data, 'QFN')
+        qfn_components = find_components_by_type(pcb_data, "QFN")
         if not qfn_components:
-            qfn_components = find_components_by_type(pcb_data, 'QFP')
+            qfn_components = find_components_by_type(pcb_data, "QFP")
         if qfn_components:
             args.component = qfn_components[0].reference
             print(f"Auto-detected QFN/QFP component: {args.component}")
@@ -259,19 +255,13 @@ def main():
     print(f"  Pads: {len(footprint.pads)}")
 
     tracks, vias, _failed_nets = generate_qfn_fanout(
-        footprint,
-        pcb_data,
-        net_filter=args.nets,
-        layer=args.layer,
-        track_width=args.width,
-        extension=args.extension
+        footprint, pcb_data, net_filter=args.nets, layer=args.layer, track_width=args.width, extension=args.extension
     )
 
     if tracks:
         print(f"\nWriting {len(tracks)} tracks to {args.output}...")
         kicad_v10_names = pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None
-        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias,
-                                   net_id_to_name=kicad_v10_names)
+        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias, net_id_to_name=kicad_v10_names)
         print("Done!")
     else:
         print("\nNo fanout tracks generated")
@@ -279,5 +269,5 @@ def main():
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

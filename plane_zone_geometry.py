@@ -5,25 +5,24 @@ Handles Voronoi zone boundary computation, polygon clipping, merging, and groupi
 """
 
 import math
-from typing import List, Dict, Tuple, Optional
 
 import numpy as np
-
-from geometry_utils import UnionFind
-from routing_constants import POLYGON_BUFFER_DISTANCE, POLYGON_EDGE_TOLERANCE
 from scipy.spatial import Voronoi
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.ops import unary_union
 from shapely.validation import make_valid
 
+from geometry_utils import UnionFind
+from routing_constants import POLYGON_BUFFER_DISTANCE, POLYGON_EDGE_TOLERANCE
+
 
 def compute_zone_boundaries(
-    vias_by_net: Dict[int, List[Tuple[float, float]]],
-    board_bounds: Tuple[float, float, float, float],
+    vias_by_net: dict[int, list[tuple[float, float]]],
+    board_bounds: tuple[float, float, float, float],
     return_raw_polygons: bool = False,
     board_edge_clearance: float = 0.0,
-    verbose: bool = False
-) -> Dict[int, List[Tuple[float, float]]]:
+    verbose: bool = False,
+) -> dict[int, list[tuple[float, float]]]:
     """
     Compute non-overlapping zone polygons for multiple nets using Voronoi.
 
@@ -69,8 +68,16 @@ def compute_zone_boundaries(
         # Single via or empty: return full board rectangle (with clearance) for the one net
         if len(all_vias) == 1:
             net_id = via_net_ids[0]
-            return {net_id: [[(clip_min_x, clip_min_y), (clip_max_x, clip_min_y),
-                             (clip_max_x, clip_max_y), (clip_min_x, clip_max_y)]]}
+            return {
+                net_id: [
+                    [
+                        (clip_min_x, clip_min_y),
+                        (clip_max_x, clip_min_y),
+                        (clip_max_x, clip_max_y),
+                        (clip_min_x, clip_max_y),
+                    ]
+                ]
+            }
         return {}
 
     # Add mirror points outside board bounds to ensure all regions are finite
@@ -92,8 +99,8 @@ def compute_zone_boundaries(
 
     # Build polygon for each real via (not mirror points)
     # Also track which via produced which polygon (for disconnection routing)
-    via_polygons: Dict[int, List[List[Tuple[float, float]]]] = {net_id: [] for net_id in vias_by_net}
-    via_to_polygon_idx: Dict[int, Dict[Tuple[float, float], int]] = {net_id: {} for net_id in vias_by_net}
+    via_polygons: dict[int, list[list[tuple[float, float]]]] = {net_id: [] for net_id in vias_by_net}
+    via_to_polygon_idx: dict[int, dict[tuple[float, float], int]] = {net_id: {} for net_id in vias_by_net}
 
     for via_idx in range(len(all_vias)):
         region_idx = vor.point_region[via_idx]
@@ -118,7 +125,7 @@ def compute_zone_boundaries(
             via_to_polygon_idx[net_id][via_pos] = polygon_idx
 
     # Merge polygons for each net
-    result: Dict[int, List[Tuple[float, float]]] = {}
+    result: dict[int, list[tuple[float, float]]] = {}
 
     for net_id, polygons in via_polygons.items():
         if not polygons:
@@ -138,7 +145,7 @@ def compute_zone_boundaries(
                 # Polygons are disconnected - use unary_union to combine what we can
                 # This preserves boundaries rather than using convex hull which would overlap
                 if verbose:
-                    print(f"    merge_polygons returned None - using unary_union fallback")
+                    print("    merge_polygons returned None - using unary_union fallback")
                 shapely_polys = []
                 for poly in polygons:
                     if len(poly) >= 3:
@@ -153,16 +160,16 @@ def compute_zone_boundaries(
 
                     # If MultiPolygon, try buffering to merge nearly-touching polygons
                     # (Voronoi cells can have tiny gaps due to floating point precision)
-                    if combined.geom_type == 'MultiPolygon':
+                    if combined.geom_type == "MultiPolygon":
                         buffer_dist = POLYGON_BUFFER_DISTANCE
                         buffered = [p.buffer(buffer_dist) for p in shapely_polys]
                         combined_buffered = unary_union(buffered)
-                        if combined_buffered.geom_type == 'Polygon':
+                        if combined_buffered.geom_type == "Polygon":
                             # Successfully merged - shrink back
                             combined = combined_buffered.buffer(-buffer_dist)
                             if verbose:
-                                print(f"    Buffered merge succeeded")
-                        elif combined_buffered.geom_type == 'MultiPolygon':
+                                print("    Buffered merge succeeded")
+                        elif combined_buffered.geom_type == "MultiPolygon":
                             # Still disconnected - shrink each part back
                             shrunk_parts = []
                             for geom in combined_buffered.geoms:
@@ -174,13 +181,15 @@ def compute_zone_boundaries(
 
                     if verbose:
                         print(f"    Fallback unary_union result: {combined.geom_type}")
-                    if combined.geom_type == 'Polygon':
+                    if combined.geom_type == "Polygon":
                         coords = list(combined.exterior.coords)[:-1]
                         result[net_id] = [[(float(x), float(y)) for x, y in coords]]
-                    elif combined.geom_type == 'MultiPolygon':
+                    elif combined.geom_type == "MultiPolygon":
                         # Keep ALL polygons - they'll become separate zones
                         if verbose:
-                            print(f"    Net has {len(combined.geoms)} disconnected regions (separate zones will be created)")
+                            print(
+                                f"    Net has {len(combined.geoms)} disconnected regions (separate zones will be created)"
+                            )
                             for i, geom in enumerate(combined.geoms):
                                 print(f"      Region {i}: area={geom.area:.2f}")
                         result[net_id] = []
@@ -194,22 +203,22 @@ def compute_zone_boundaries(
 
 
 def clip_polygon_to_rect(
-    polygon: List[Tuple[float, float]],
-    min_x: float, min_y: float, max_x: float, max_y: float
-) -> List[Tuple[float, float]]:
+    polygon: list[tuple[float, float]], min_x: float, min_y: float, max_x: float, max_y: float
+) -> list[tuple[float, float]]:
     """
     Clip a polygon to a rectangle using Sutherland-Hodgman algorithm.
     """
+
     def inside_edge(p, edge):
         """Check if point p is inside the clipping edge."""
         x, y = p
-        if edge == 'left':
+        if edge == "left":
             return x >= min_x
-        elif edge == 'right':
+        elif edge == "right":
             return x <= max_x
-        elif edge == 'bottom':
+        elif edge == "bottom":
             return y >= min_y
-        elif edge == 'top':
+        elif edge == "top":
             return y <= max_y
         return True
 
@@ -220,22 +229,22 @@ def clip_polygon_to_rect(
         dx = x2 - x1
         dy = y2 - y1
 
-        if edge == 'left':
+        if edge == "left":
             if abs(dx) < 1e-10:
                 return (min_x, y1)
             t = (min_x - x1) / dx
             return (min_x, y1 + t * dy)
-        elif edge == 'right':
+        elif edge == "right":
             if abs(dx) < 1e-10:
                 return (max_x, y1)
             t = (max_x - x1) / dx
             return (max_x, y1 + t * dy)
-        elif edge == 'bottom':
+        elif edge == "bottom":
             if abs(dy) < 1e-10:
                 return (x1, min_y)
             t = (min_y - y1) / dy
             return (x1 + t * dx, min_y)
-        elif edge == 'top':
+        elif edge == "top":
             if abs(dy) < 1e-10:
                 return (x1, max_y)
             t = (max_y - y1) / dy
@@ -243,7 +252,7 @@ def clip_polygon_to_rect(
         return p1
 
     output = polygon
-    for edge in ['left', 'right', 'bottom', 'top']:
+    for edge in ["left", "right", "bottom", "top"]:
         if not output:
             return []
         input_poly = output
@@ -268,7 +277,9 @@ def clip_polygon_to_rect(
     return output
 
 
-def merge_polygons(polygons: List[List[Tuple[float, float]]], verbose: bool = False) -> Optional[List[Tuple[float, float]]]:
+def merge_polygons(
+    polygons: list[list[tuple[float, float]]], verbose: bool = False
+) -> list[tuple[float, float]] | None:
     """
     Merge a list of adjacent polygons into a single polygon.
     Returns None if polygons are not all adjacent (i.e., disconnected).
@@ -310,24 +321,24 @@ def merge_polygons(polygons: List[List[Tuple[float, float]]], verbose: bool = Fa
     # Extract exterior coordinates
     if merged.is_empty:
         return None
-    if merged.geom_type == 'Polygon':
+    if merged.geom_type == "Polygon":
         coords = list(merged.exterior.coords)[:-1]  # Remove duplicate closing point
         return [(float(x), float(y)) for x, y in coords]
-    elif merged.geom_type == 'MultiPolygon':
+    elif merged.geom_type == "MultiPolygon":
         # Multiple disconnected polygons - return None to let caller handle them all
         if verbose:
             print(f"      WARNING: unary_union returned MultiPolygon with {len(merged.geoms)} parts!")
             for i, geom in enumerate(merged.geoms):
-                print(f"        Part {i}: area={geom.area:.2f}, centroid=({geom.centroid.x:.2f}, {geom.centroid.y:.2f})")
+                print(
+                    f"        Part {i}: area={geom.area:.2f}, centroid=({geom.centroid.x:.2f}, {geom.centroid.y:.2f})"
+                )
         return None  # Let compute_zone_boundaries handle all polygons via fallback
     else:
         return None
 
 
 def polygons_share_edge(
-    poly1: List[Tuple[float, float]],
-    poly2: List[Tuple[float, float]],
-    tolerance: float = POLYGON_EDGE_TOLERANCE
+    poly1: list[tuple[float, float]], poly2: list[tuple[float, float]], tolerance: float = POLYGON_EDGE_TOLERANCE
 ) -> bool:
     """
     Check if two polygons share a common edge (not just a point).
@@ -351,13 +362,14 @@ def polygons_share_edge(
         p2 = poly2[(i + 1) % len(poly2)]
         edges2.append((p1, p2))
 
-    def points_match(a: Tuple[float, float], b: Tuple[float, float]) -> bool:
+    def points_match(a: tuple[float, float], b: tuple[float, float]) -> bool:
         return abs(a[0] - b[0]) < tolerance and abs(a[1] - b[1]) < tolerance
 
-    def edges_match(e1: Tuple, e2: Tuple) -> bool:
+    def edges_match(e1: tuple, e2: tuple) -> bool:
         # Check if edges match in either direction
-        return ((points_match(e1[0], e2[0]) and points_match(e1[1], e2[1])) or
-                (points_match(e1[0], e2[1]) and points_match(e1[1], e2[0])))
+        return (points_match(e1[0], e2[0]) and points_match(e1[1], e2[1])) or (
+            points_match(e1[0], e2[1]) and points_match(e1[1], e2[0])
+        )
 
     # Check if any edge from poly1 matches any edge from poly2
     for e1 in edges1:
@@ -369,10 +381,8 @@ def polygons_share_edge(
 
 
 def find_polygon_groups(
-    polygons: List[List[Tuple[float, float]]],
-    tolerance: float = POLYGON_EDGE_TOLERANCE,
-    verbose: bool = False
-) -> List[List[int]]:
+    polygons: list[list[tuple[float, float]]], tolerance: float = POLYGON_EDGE_TOLERANCE, verbose: bool = False
+) -> list[list[int]]:
     """
     Group polygons by adjacency using union-find.
 
@@ -412,7 +422,7 @@ def find_polygon_groups(
         print(f"      Found {len(adjacencies)} adjacencies: {adjacencies}")
 
     # Group polygons by their root
-    groups: Dict[int, List[int]] = {}
+    groups: dict[int, list[int]] = {}
     for i in range(n):
         root = uf.find(i)
         if root not in groups:
@@ -427,9 +437,8 @@ def find_polygon_groups(
 
 
 def sample_route_for_voronoi(
-    route_path: List[Tuple[float, float]],
-    sample_interval: float = 2.0
-) -> List[Tuple[float, float]]:
+    route_path: list[tuple[float, float]], sample_interval: float = 2.0
+) -> list[tuple[float, float]]:
     """
     Sample points along a route path for Voronoi seeding.
 

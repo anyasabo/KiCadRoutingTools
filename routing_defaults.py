@@ -88,7 +88,7 @@ HOLE_TO_HOLE_CLEARANCE = 0.5  # mm - matches PCBWay/JLCPCB DRU requirement
 BOARD_EDGE_CLEARANCE = 0.0  # mm
 
 # Default layers
-DEFAULT_LAYERS = ['F.Cu', 'B.Cu']
+DEFAULT_LAYERS = ["F.Cu", "B.Cu"]
 
 # Ordering strategy
 DEFAULT_ORDERING_STRATEGY = "mps"
@@ -124,9 +124,9 @@ PLANE_MAX_VIA_REUSE_RADIUS = 1.0  # mm - max radius to reuse existing via
 PLANE_MAX_RIP_NETS = 3  # max blocker nets to rip up
 PLANE_TRACK_VIA_CLEARANCE = 0.8  # mm - clearance from track center to other nets' via centers
 SAME_NET_PAD_CLEARANCE = -1.0  # mm - edge-to-edge clearance between via and same-net pads
-                               # when placing plane stitching vias. -1 disables (allow via-in-pad).
-                               # Any value >= 0 forces vias to be placed outside same-net pads
-                               # with that much edge-to-edge clearance.
+# when placing plane stitching vias. -1 disables (allow via-in-pad).
+# Any value >= 0 forces vias to be placed outside same-net pads
+# with that much edge-to-edge clearance.
 
 # Repair disconnected planes defaults (route_disconnected_planes.py)
 REPAIR_MAX_TRACK_WIDTH = 2.0  # mm - maximum track width for connections
@@ -137,65 +137,65 @@ REPAIR_ANALYSIS_GRID_STEP = 0.5  # mm - grid step for connectivity analysis
 # GUI-specific ranges (min, max, increment, digits)
 # These define the SpinCtrl ranges for the GUI
 PARAM_RANGES = {
-    'track_width': {'min': 0.05, 'max': 25.0, 'inc': 0.05, 'digits': 2},
-    'clearance': {'min': 0.05, 'max': 5.0, 'inc': 0.05, 'digits': 2},
-    'via_size': {'min': 0.2, 'max': 2.0, 'inc': 0.05, 'digits': 2},
-    'via_drill': {'min': 0.1, 'max': 1.5, 'inc': 0.05, 'digits': 2},
-    'grid_step': {'min': 0.01, 'max': 1.0, 'inc': 0.01, 'digits': 2},
-    'via_cost': {'min': 1, 'max': 1000},
-    'max_iterations': {'min': 1000, 'max': 100000000},
-    'heuristic_weight': {'min': 1.0, 'max': 10.0, 'inc': 0.1, 'digits': 1},
-    'proximity_heuristic_factor': {'min': 0.0, 'max': 0.2, 'inc': 0.01, 'digits': 2},
-    'turn_cost': {'min': 0, 'max': 10000},
-    'direction_preference_cost': {'min': 0, 'max': 10000},
-    'max_ripup': {'min': 0, 'max': 50},
-    'stub_proximity_radius': {'min': 0.0, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'stub_proximity_cost': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'via_proximity_cost': {'min': 0.0, 'max': 100.0, 'inc': 1.0, 'digits': 1},
-    'track_proximity_distance': {'min': 0.0, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'track_proximity_cost': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'routing_clearance_margin': {'min': 0.5, 'max': 2.0, 'inc': 0.1, 'digits': 1},
-    'hole_to_hole_clearance': {'min': 0.0, 'max': 1.0, 'inc': 0.05, 'digits': 2},
-    'board_edge_clearance': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'bga_proximity_radius': {'min': 0.0, 'max': 20.0, 'inc': 0.5, 'digits': 1},
-    'bga_proximity_cost': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'vertical_attraction_radius': {'min': 0.0, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'vertical_attraction_cost': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'ripped_route_avoidance_radius': {'min': 0.0, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'ripped_route_avoidance_cost': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'impedance': {'min': 10, 'max': 200, 'inc': 1, 'digits': 0},
-    'crossing_penalty': {'min': 0.0, 'max': 10000.0, 'inc': 100.0, 'digits': 0},
-    'max_probe_iterations': {'min': 100, 'max': 100000},
-    'length_match_tolerance': {'min': 0.01, 'max': 5.0, 'inc': 0.01, 'digits': 2},
-    'meander_amplitude': {'min': 0.1, 'max': 10.0, 'inc': 0.1, 'digits': 1},
-    'time_match_tolerance': {'min': 0.1, 'max': 50.0, 'inc': 0.1, 'digits': 1},
-    'gnd_via_distance': {'min': 0.5, 'max': 10.0, 'inc': 0.5, 'digits': 1},
+    "track_width": {"min": 0.05, "max": 25.0, "inc": 0.05, "digits": 2},
+    "clearance": {"min": 0.05, "max": 5.0, "inc": 0.05, "digits": 2},
+    "via_size": {"min": 0.2, "max": 2.0, "inc": 0.05, "digits": 2},
+    "via_drill": {"min": 0.1, "max": 1.5, "inc": 0.05, "digits": 2},
+    "grid_step": {"min": 0.01, "max": 1.0, "inc": 0.01, "digits": 2},
+    "via_cost": {"min": 1, "max": 1000},
+    "max_iterations": {"min": 1000, "max": 100000000},
+    "heuristic_weight": {"min": 1.0, "max": 10.0, "inc": 0.1, "digits": 1},
+    "proximity_heuristic_factor": {"min": 0.0, "max": 0.2, "inc": 0.01, "digits": 2},
+    "turn_cost": {"min": 0, "max": 10000},
+    "direction_preference_cost": {"min": 0, "max": 10000},
+    "max_ripup": {"min": 0, "max": 50},
+    "stub_proximity_radius": {"min": 0.0, "max": 10.0, "inc": 0.5, "digits": 1},
+    "stub_proximity_cost": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "via_proximity_cost": {"min": 0.0, "max": 100.0, "inc": 1.0, "digits": 1},
+    "track_proximity_distance": {"min": 0.0, "max": 10.0, "inc": 0.5, "digits": 1},
+    "track_proximity_cost": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "routing_clearance_margin": {"min": 0.5, "max": 2.0, "inc": 0.1, "digits": 1},
+    "hole_to_hole_clearance": {"min": 0.0, "max": 1.0, "inc": 0.05, "digits": 2},
+    "board_edge_clearance": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "bga_proximity_radius": {"min": 0.0, "max": 20.0, "inc": 0.5, "digits": 1},
+    "bga_proximity_cost": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "vertical_attraction_radius": {"min": 0.0, "max": 10.0, "inc": 0.5, "digits": 1},
+    "vertical_attraction_cost": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "ripped_route_avoidance_radius": {"min": 0.0, "max": 10.0, "inc": 0.5, "digits": 1},
+    "ripped_route_avoidance_cost": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "impedance": {"min": 10, "max": 200, "inc": 1, "digits": 0},
+    "crossing_penalty": {"min": 0.0, "max": 10000.0, "inc": 100.0, "digits": 0},
+    "max_probe_iterations": {"min": 100, "max": 100000},
+    "length_match_tolerance": {"min": 0.01, "max": 5.0, "inc": 0.01, "digits": 2},
+    "meander_amplitude": {"min": 0.1, "max": 10.0, "inc": 0.1, "digits": 1},
+    "time_match_tolerance": {"min": 0.1, "max": 50.0, "inc": 0.1, "digits": 1},
+    "gnd_via_distance": {"min": 0.5, "max": 10.0, "inc": 0.5, "digits": 1},
     # Fanout parameters
-    'exit_margin': {'min': 0.1, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'diff_pair_gap': {'min': 0.05, 'max': 5.0, 'inc': 0.01, 'digits': 2},
-    'qfn_extension': {'min': 0.05, 'max': 10.0, 'inc': 0.05, 'digits': 2},
+    "exit_margin": {"min": 0.1, "max": 5.0, "inc": 0.1, "digits": 1},
+    "diff_pair_gap": {"min": 0.05, "max": 5.0, "inc": 0.01, "digits": 2},
+    "qfn_extension": {"min": 0.05, "max": 10.0, "inc": 0.05, "digits": 2},
     # Differential pair routing parameters
-    'diff_pair_width': {'min': 0.05, 'max': 5.0, 'inc': 0.05, 'digits': 2},
-    'diff_pair_min_turning_radius': {'min': 0.05, 'max': 2.0, 'inc': 0.05, 'digits': 2},
-    'diff_pair_max_setback_angle': {'min': 10.0, 'max': 90.0, 'inc': 5.0, 'digits': 0},
-    'diff_pair_max_turn_angle': {'min': 45.0, 'max': 360.0, 'inc': 15.0, 'digits': 0},
-    'diff_pair_chamfer_extra': {'min': 1.0, 'max': 3.0, 'inc': 0.1, 'digits': 1},
-    'diff_pair_centerline_setback': {'min': 0.0, 'max': 10.0, 'inc': 0.1, 'digits': 1},  # 0 = auto
+    "diff_pair_width": {"min": 0.05, "max": 5.0, "inc": 0.05, "digits": 2},
+    "diff_pair_min_turning_radius": {"min": 0.05, "max": 2.0, "inc": 0.05, "digits": 2},
+    "diff_pair_max_setback_angle": {"min": 10.0, "max": 90.0, "inc": 5.0, "digits": 0},
+    "diff_pair_max_turn_angle": {"min": 45.0, "max": 360.0, "inc": 15.0, "digits": 0},
+    "diff_pair_chamfer_extra": {"min": 1.0, "max": 3.0, "inc": 0.1, "digits": 1},
+    "diff_pair_centerline_setback": {"min": 0.0, "max": 10.0, "inc": 0.1, "digits": 1},  # 0 = auto
     # Plane routing parameters
-    'plane_zone_clearance': {'min': 0.05, 'max': 2.0, 'inc': 0.05, 'digits': 2},
-    'plane_min_thickness': {'min': 0.05, 'max': 1.0, 'inc': 0.05, 'digits': 2},
-    'plane_edge_clearance': {'min': 0.0, 'max': 5.0, 'inc': 0.1, 'digits': 1},
-    'plane_max_search_radius': {'min': 1.0, 'max': 50.0, 'inc': 1.0, 'digits': 1},
-    'plane_max_via_reuse_radius': {'min': 0.0, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'plane_max_rip_nets': {'min': 1, 'max': 10},
-    'same_net_pad_clearance': {'min': 0.0, 'max': 5.0, 'inc': 0.05, 'digits': 2},
+    "plane_zone_clearance": {"min": 0.05, "max": 2.0, "inc": 0.05, "digits": 2},
+    "plane_min_thickness": {"min": 0.05, "max": 1.0, "inc": 0.05, "digits": 2},
+    "plane_edge_clearance": {"min": 0.0, "max": 5.0, "inc": 0.1, "digits": 1},
+    "plane_max_search_radius": {"min": 1.0, "max": 50.0, "inc": 1.0, "digits": 1},
+    "plane_max_via_reuse_radius": {"min": 0.0, "max": 10.0, "inc": 0.5, "digits": 1},
+    "plane_max_rip_nets": {"min": 1, "max": 10},
+    "same_net_pad_clearance": {"min": 0.0, "max": 5.0, "inc": 0.05, "digits": 2},
     # Repair planes parameters
-    'repair_max_track_width': {'min': 0.1, 'max': 10.0, 'inc': 0.1, 'digits': 1},
-    'repair_min_track_width': {'min': 0.05, 'max': 5.0, 'inc': 0.05, 'digits': 2},
-    'repair_analysis_grid_step': {'min': 0.1, 'max': 2.0, 'inc': 0.1, 'digits': 1},
+    "repair_max_track_width": {"min": 0.1, "max": 10.0, "inc": 0.1, "digits": 1},
+    "repair_min_track_width": {"min": 0.05, "max": 5.0, "inc": 0.05, "digits": 2},
+    "repair_analysis_grid_step": {"min": 0.1, "max": 2.0, "inc": 0.1, "digits": 1},
     # Bus routing parameters
-    'bus_detection_radius': {'min': 0.5, 'max': 100.0, 'inc': 0.5, 'digits': 1},
-    'bus_attraction_radius': {'min': 0.5, 'max': 10.0, 'inc': 0.5, 'digits': 1},
-    'bus_attraction_bonus': {'min': 0, 'max': 10000},
-    'bus_min_nets': {'min': 2, 'max': 20},
+    "bus_detection_radius": {"min": 0.5, "max": 100.0, "inc": 0.5, "digits": 1},
+    "bus_attraction_radius": {"min": 0.5, "max": 10.0, "inc": 0.5, "digits": 1},
+    "bus_attraction_bonus": {"min": 0, "max": 10000},
+    "bus_min_nets": {"min": 2, "max": 20},
 }

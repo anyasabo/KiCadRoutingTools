@@ -21,29 +21,29 @@ Examples:
 import argparse
 import sys
 from collections import Counter, defaultdict
-from typing import Set, Tuple, Dict, List, Optional
 
 # Add current directory to path for imports
-sys.path.insert(0, '.')
+sys.path.insert(0, ".")
 
 
 def load_pcb_data(filename: str):
     """Load PCB data using kicad_parser."""
     from kicad_parser import parse_kicad_pcb
+
     return parse_kicad_pcb(filename)
 
 
 class SpatialIndex:
     """Simple grid-based spatial index for fast proximity queries."""
 
-    def __init__(self, points: Set[Tuple[float, float]], cell_size: float = 0.5):
+    def __init__(self, points: set[tuple[float, float]], cell_size: float = 0.5):
         self.cell_size = cell_size
-        self.grid: Dict[Tuple[int, int], List[Tuple[float, float]]] = defaultdict(list)
+        self.grid: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
         for pt in points:
             cell = (int(pt[0] / cell_size), int(pt[1] / cell_size))
             self.grid[cell].append(pt)
 
-    def has_nearby(self, pt: Tuple[float, float], tolerance: float = 0.15) -> bool:
+    def has_nearby(self, pt: tuple[float, float], tolerance: float = 0.15) -> bool:
         """Check if any point is within tolerance of pt."""
         cx, cy = int(pt[0] / self.cell_size), int(pt[1] / self.cell_size)
         # Check the cell and all 8 neighbors
@@ -55,8 +55,9 @@ class SpatialIndex:
         return False
 
 
-def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
-                      layer: Optional[str] = None) -> Dict[str, Dict[str, Set[Tuple[float, float]]]]:
+def find_orphan_stubs(
+    filename: str, net_name: str | None = None, layer: str | None = None
+) -> dict[str, dict[str, set[tuple[float, float]]]]:
     """
     Find all orphan stubs in a PCB file.
 
@@ -66,17 +67,16 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
 
     # Build lookup structures once
     # Vias by net_id
-    vias_by_net: Dict[int, Set[Tuple[float, float]]] = defaultdict(set)
+    vias_by_net: dict[int, set[tuple[float, float]]] = defaultdict(set)
     for via in pcb_data.vias:
         vias_by_net[via.net_id].add((via.x, via.y))
 
     # Segments by (net_id, layer)
-    segments_by_net_layer: Dict[Tuple[int, str], List[Dict]] = defaultdict(list)
+    segments_by_net_layer: dict[tuple[int, str], list[dict]] = defaultdict(list)
     for seg in pcb_data.segments:
-        segments_by_net_layer[(seg.net_id, seg.layer)].append({
-            'start': (seg.start_x, seg.start_y),
-            'end': (seg.end_x, seg.end_y)
-        })
+        segments_by_net_layer[(seg.net_id, seg.layer)].append(
+            {"start": (seg.start_x, seg.start_y), "end": (seg.end_x, seg.end_y)}
+        )
 
     # Determine which nets to check
     if net_name:
@@ -84,12 +84,11 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
         nets_to_check = [(nid, net) for nid, net in pcb_data.nets.items() if net.name == net_name]
     else:
         # Check all nets with segments
-        nets_with_segments = {key[0] for key in segments_by_net_layer.keys()}
-        nets_to_check = [(nid, net) for nid, net in pcb_data.nets.items()
-                         if net.name and nid in nets_with_segments]
+        nets_with_segments = {key[0] for key in segments_by_net_layer}
+        nets_to_check = [(nid, net) for nid, net in pcb_data.nets.items() if net.name and nid in nets_with_segments]
 
     # Determine which layers to check
-    layers_to_check = [layer] if layer else ['F.Cu', 'B.Cu', 'In1.Cu', 'In2.Cu']
+    layers_to_check = [layer] if layer else ["F.Cu", "B.Cu", "In1.Cu", "In2.Cu"]
 
     results = {}
 
@@ -99,7 +98,7 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
         # Get through-hole pads (drill > 0 or *.Cu in layers)
         through_hole_pads = set()
         for pad in net.pads:
-            if pad.drill > 0 or '*.Cu' in pad.layers:
+            if pad.drill > 0 or "*.Cu" in pad.layers:
                 through_hole_pads.add((pad.global_x, pad.global_y))
 
         net_results = {}
@@ -111,8 +110,8 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
             # Find single endpoints (degree-1 nodes)
             endpoints = Counter()
             for seg in segments:
-                endpoints[seg['start']] += 1
-                endpoints[seg['end']] += 1
+                endpoints[seg["start"]] += 1
+                endpoints[seg["end"]] += 1
             single_endpoints = [pt for pt, count in endpoints.items() if count == 1]
 
             if not single_endpoints:
@@ -121,7 +120,7 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
             # Get layer-specific pads (including SMD pads on this layer)
             layer_pads = set()
             for pad in net.pads:
-                if lyr in pad.layers or '*.Cu' in pad.layers:
+                if lyr in pad.layers or "*.Cu" in pad.layers:
                     layer_pads.add((pad.global_x, pad.global_y))
 
             # Combined valid endpoints: vias, through-hole pads, or layer-specific pads
@@ -144,8 +143,7 @@ def find_orphan_stubs(filename: str, net_name: Optional[str] = None,
     return results
 
 
-def compare_orphans(file1: str, file2: str, net_name: Optional[str] = None,
-                   layer: Optional[str] = None) -> Dict:
+def compare_orphans(file1: str, file2: str, net_name: str | None = None, layer: str | None = None) -> dict:
     """Compare orphan stubs between two files."""
     orphans1 = find_orphan_stubs(file1, net_name, layer)
     orphans2 = find_orphan_stubs(file2, net_name, layer)
@@ -168,23 +166,20 @@ def compare_orphans(file1: str, file2: str, net_name: Optional[str] = None,
     removed_orphans = all_orphans_1 - all_orphans_2
 
     return {
-        'file1_total': len(all_orphans_1),
-        'file2_total': len(all_orphans_2),
-        'new': new_orphans,
-        'removed': removed_orphans
+        "file1_total": len(all_orphans_1),
+        "file2_total": len(all_orphans_2),
+        "new": new_orphans,
+        "removed": removed_orphans,
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Check for orphan trace stubs in KiCad PCB files')
-    parser.add_argument('input', help='Input PCB file')
-    parser.add_argument('compare_file', nargs='?',
-                       help='Second file to compare against (optional)')
-    parser.add_argument('--net', help='Only check this net')
-    parser.add_argument('--layer', help='Only check this layer')
-    parser.add_argument('--compare', action='store_true',
-                       help='Compare two files (requires two input files)')
+    parser = argparse.ArgumentParser(description="Check for orphan trace stubs in KiCad PCB files")
+    parser.add_argument("input", help="Input PCB file")
+    parser.add_argument("compare_file", nargs="?", help="Second file to compare against (optional)")
+    parser.add_argument("--net", help="Only check this net")
+    parser.add_argument("--layer", help="Only check this layer")
+    parser.add_argument("--compare", action="store_true", help="Compare two files (requires two input files)")
 
     args = parser.parse_args()
 
@@ -195,20 +190,20 @@ def main():
 
         result = compare_orphans(args.input, args.compare_file, args.net, args.layer)
 
-        print(f"\nOrphan Stub Comparison")
-        print(f"=" * 60)
+        print("\nOrphan Stub Comparison")
+        print("=" * 60)
         print(f"File 1 ({args.input}): {result['file1_total']} orphans")
         print(f"File 2 ({args.compare_file}): {result['file2_total']} orphans")
         print(f"\nNew orphans in file 2: {len(result['new'])}")
-        if result['new']:
-            for net, lyr, pt in sorted(result['new'])[:20]:
+        if result["new"]:
+            for net, lyr, pt in sorted(result["new"])[:20]:
                 print(f"  {net} {lyr}: ({pt[0]:.2f}, {pt[1]:.2f})")
-            if len(result['new']) > 20:
+            if len(result["new"]) > 20:
                 print(f"  ... and {len(result['new']) - 20} more")
 
         print(f"\nRemoved orphans (fixed): {len(result['removed'])}")
 
-        if result['new']:
+        if result["new"]:
             sys.exit(1)
     else:
         print(f"Loading {args.input}...")
@@ -219,7 +214,7 @@ def main():
             for lyr, pts in layers.items():
                 total += len(pts)
 
-        print(f"\nChecking for orphan trace stubs...")
+        print("\nChecking for orphan trace stubs...")
 
         print("\n" + "=" * 60)
         if not orphans:
@@ -242,5 +237,5 @@ def main():
             sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

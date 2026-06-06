@@ -6,35 +6,32 @@ When MPS ordering puts nets in Round 2+ due to same-layer crossings, this module
 attempts layer swaps to eliminate those crossings, then triggers an MPS re-run.
 """
 
-from typing import Dict, Set, List, Tuple, Optional
 from dataclasses import dataclass
 
-from kicad_parser import PCBData
-from routing_config import GridRouteConfig, DiffPairNet
-from net_queries import MPSResult
-from stub_layer_switching import (
-    get_stub_info, apply_stub_layer_switch, validate_swap, validate_single_swap,
-    StubInfo
-)
-from diff_pair_routing import get_diff_pair_endpoints
 from connectivity import get_net_endpoints
+from diff_pair_routing import get_diff_pair_endpoints
+from kicad_parser import PCBData
+from net_queries import MPSResult
+from routing_config import DiffPairNet, GridRouteConfig
+from stub_layer_switching import StubInfo, apply_stub_layer_switch, get_stub_info, validate_single_swap, validate_swap
 
 
 @dataclass
 class MPSLayerSwapResult:
     """Result of MPS-aware layer swap optimization."""
+
     swaps_applied: int
-    nets_swapped: Set[int]
+    nets_swapped: set[int]
 
 
 def _get_unit_stub_info(
     pcb_data: PCBData,
     config: GridRouteConfig,
     unit_id: int,
-    unit_to_nets: Dict[int, List[int]],
-    diff_pairs: Dict[str, DiffPairNet],
-    stub_type: str  # 'source' or 'target'
-) -> Tuple[Optional[StubInfo], Optional[StubInfo], Optional[str], bool]:
+    unit_to_nets: dict[int, list[int]],
+    diff_pairs: dict[str, DiffPairNet],
+    stub_type: str,  # 'source' or 'target'
+) -> tuple[StubInfo | None, StubInfo | None, str | None, bool]:
     """
     Get stub info for a routing unit (diff pair or single net).
 
@@ -66,24 +63,18 @@ def _get_unit_stub_info(
         if not pair:
             return None, None, None, True
 
-        sources, targets, error = get_diff_pair_endpoints(
-            pcb_data, pair.p_net_id, pair.n_net_id, config
-        )
+        sources, targets, error = get_diff_pair_endpoints(pcb_data, pair.p_net_id, pair.n_net_id, config)
         if error or not sources or not targets:
             return None, None, None, True
 
-        if stub_type == 'source':
+        if stub_type == "source":
             layer = config.layers[sources[0][4]]
-            stub_p = get_stub_info(pcb_data, pair.p_net_id,
-                                   sources[0][5], sources[0][6], layer)
-            stub_n = get_stub_info(pcb_data, pair.n_net_id,
-                                   sources[0][7], sources[0][8], layer)
+            stub_p = get_stub_info(pcb_data, pair.p_net_id, sources[0][5], sources[0][6], layer)
+            stub_n = get_stub_info(pcb_data, pair.n_net_id, sources[0][7], sources[0][8], layer)
         else:
             layer = config.layers[targets[0][4]]
-            stub_p = get_stub_info(pcb_data, pair.p_net_id,
-                                   targets[0][5], targets[0][6], layer)
-            stub_n = get_stub_info(pcb_data, pair.n_net_id,
-                                   targets[0][7], targets[0][8], layer)
+            stub_p = get_stub_info(pcb_data, pair.p_net_id, targets[0][5], targets[0][6], layer)
+            stub_n = get_stub_info(pcb_data, pair.n_net_id, targets[0][7], targets[0][8], layer)
 
         return stub_p, stub_n, layer, True
     else:
@@ -93,50 +84,44 @@ def _get_unit_stub_info(
         if error or not sources or not targets:
             return None, None, None, False
 
-        if stub_type == 'source':
+        if stub_type == "source":
             # sources[0] is (gx, gy, layer_idx, orig_x, orig_y)
             layer = config.layers[sources[0][2]]
-            stub = get_stub_info(pcb_data, net_id,
-                                 sources[0][3], sources[0][4], layer)
+            stub = get_stub_info(pcb_data, net_id, sources[0][3], sources[0][4], layer)
         else:
             # targets[0] is (gx, gy, layer_idx, orig_x, orig_y)
             layer = config.layers[targets[0][2]]
-            stub = get_stub_info(pcb_data, net_id,
-                                 targets[0][3], targets[0][4], layer)
+            stub = get_stub_info(pcb_data, net_id, targets[0][3], targets[0][4], layer)
 
         return stub, None, layer, False
 
 
-def _find_alternative_layers(
-    current_layer: str,
-    available_layers: List[str],
-    can_swap_to_top_layer: bool
-) -> List[str]:
+def _find_alternative_layers(current_layer: str, available_layers: list[str], can_swap_to_top_layer: bool) -> list[str]:
     """Get list of alternative layers to try swapping to."""
     alternatives = []
     for layer in available_layers:
         if layer == current_layer:
             continue
-        if not can_swap_to_top_layer and layer == 'F.Cu':
+        if not can_swap_to_top_layer and layer == "F.Cu":
             continue
         alternatives.append(layer)
     return alternatives
 
 
 def _apply_hypothetical_swap(
-    unit_layers: Tuple[Set[str], Set[str]],
+    unit_layers: tuple[set[str], set[str]],
     swap_type: str,  # 'source', 'target', or 'both'
     from_layer: str,
-    to_layer: str
-) -> Tuple[Set[str], Set[str]]:
+    to_layer: str,
+) -> tuple[set[str], set[str]]:
     """Apply a hypothetical swap and return the new layer sets."""
     new_src = set(unit_layers[0])
     new_tgt = set(unit_layers[1])
 
-    if swap_type in ('source', 'both'):
+    if swap_type in ("source", "both"):
         new_src.discard(from_layer)
         new_src.add(to_layer)
-    if swap_type in ('target', 'both'):
+    if swap_type in ("target", "both"):
         new_tgt.discard(from_layer)
         new_tgt.add(to_layer)
 
@@ -144,8 +129,7 @@ def _apply_hypothetical_swap(
 
 
 def _count_global_same_layer_conflicts(
-    all_unit_layers: Dict[int, Tuple[Set[str], Set[str]]],
-    conflicts: Dict[int, Set[int]]
+    all_unit_layers: dict[int, tuple[set[str], set[str]]], conflicts: dict[int, set[int]]
 ) -> int:
     """Count total same-layer conflicts across all units."""
     count = 0
@@ -169,9 +153,9 @@ def _would_reduce_conflicts(
     swap_type: str,  # 'source', 'target', or 'both'
     from_layer: str,
     to_layer: str,
-    conflicts: Dict[int, Set[int]],
-    all_unit_layers: Dict[int, Tuple[Set[str], Set[str]]]
-) -> Tuple[bool, int, int]:
+    conflicts: dict[int, set[int]],
+    all_unit_layers: dict[int, tuple[set[str], set[str]]],
+) -> tuple[bool, int, int]:
     """
     Check if swapping a unit would reduce GLOBAL same-layer conflicts.
 
@@ -196,15 +180,15 @@ def try_mps_aware_layer_swaps(
     pcb_data: PCBData,
     config: GridRouteConfig,
     mps_result: MPSResult,
-    diff_pairs: Dict[str, DiffPairNet],
-    available_layers: List[str],
+    diff_pairs: dict[str, DiffPairNet],
+    available_layers: list[str],
     can_swap_to_top_layer: bool,
-    all_segment_modifications: List,
-    all_swap_vias: List,
-    all_stubs_by_layer: Dict,
-    stub_endpoints_by_layer: Dict,
+    all_segment_modifications: list,
+    all_swap_vias: list,
+    all_stubs_by_layer: dict,
+    stub_endpoints_by_layer: dict,
     max_iterations: int = 10,
-    verbose: bool = False
+    verbose: bool = False,
 ) -> MPSLayerSwapResult:
     """
     Try layer swaps to reduce MPS rounds by eliminating same-layer crossings.
@@ -231,7 +215,7 @@ def try_mps_aware_layer_swaps(
         MPSLayerSwapResult with number of swaps applied
     """
     swaps_applied = 0
-    nets_swapped: Set[int] = set()
+    nets_swapped: set[int] = set()
 
     # Use geometric_conflicts (all crossings regardless of layer) for swap checking
     # This is important because we need to detect NEW conflicts that might be
@@ -245,10 +229,7 @@ def try_mps_aware_layer_swaps(
         return MPSLayerSwapResult(swaps_applied=0, nets_swapped=set())
 
     # Find Round 2+ units and their Round 1 conflicts
-    round2_plus_units = [
-        uid for uid, rnd in mps_result.round_assignments.items()
-        if rnd > 1
-    ]
+    round2_plus_units = [uid for uid, rnd in mps_result.round_assignments.items() if rnd > 1]
 
     if verbose:
         print(f"MPS layer swap: Found {len(round2_plus_units)} Round 2+ unit(s)")
@@ -262,8 +243,7 @@ def try_mps_aware_layer_swaps(
 
             # Find Round 1 units this conflicts with
             r1_conflicts = [
-                uid for uid in mps_result.conflicts.get(r2_unit, set())
-                if mps_result.round_assignments.get(uid, 1) == 1
+                uid for uid in mps_result.conflicts.get(r2_unit, set()) if mps_result.round_assignments.get(uid, 1) == 1
             ]
 
             if not r1_conflicts:
@@ -291,7 +271,7 @@ def try_mps_aware_layer_swaps(
                 # For each unit, try individual swaps first, then both together
                 for swap_unit_id, swap_unit_name, swap_unit_layers in [
                     (r2_unit, r2_name, r2_layers),
-                    (r1_unit, mps_result.unit_names.get(r1_unit, f"Net {r1_unit}"), r1_layers)
+                    (r1_unit, mps_result.unit_names.get(r1_unit, f"Net {r1_unit}"), r1_layers),
                 ]:
                     if made_progress:
                         break  # Already resolved this conflict
@@ -302,37 +282,36 @@ def try_mps_aware_layer_swaps(
                         continue
 
                     other_unit_layers = r1_layers if swap_unit_id == r2_unit else r2_layers
-                    swap_which = 'a' if swap_unit_id == r2_unit else 'b'
+                    swap_which = "a" if swap_unit_id == r2_unit else "b"
 
                     if verbose and swap_unit_id == r1_unit:
                         print(f"  Trying R1 unit {swap_unit_name} instead...")
 
-                    for stub_type in ['source', 'target', 'both']:
-                        if stub_type == 'both':
+                    for stub_type in ["source", "target", "both"]:
+                        if stub_type == "both":
                             # Get both source and target stubs
                             src_stub_p, src_stub_n, src_layer, is_diff_pair = _get_unit_stub_info(
-                                pcb_data, config, swap_unit_id,
-                                mps_result.unit_to_nets, diff_pairs, 'source'
+                                pcb_data, config, swap_unit_id, mps_result.unit_to_nets, diff_pairs, "source"
                             )
                             tgt_stub_p, tgt_stub_n, tgt_layer, _ = _get_unit_stub_info(
-                                pcb_data, config, swap_unit_id,
-                                mps_result.unit_to_nets, diff_pairs, 'target'
+                                pcb_data, config, swap_unit_id, mps_result.unit_to_nets, diff_pairs, "target"
                             )
                             if not src_stub_p or not tgt_stub_p:
                                 if verbose:
-                                    print(f"    both: could not get stub info")
+                                    print("    both: could not get stub info")
                                 continue
                             # Both must be on the shared layer for 'both' swap to make sense
                             if src_layer != tgt_layer or src_layer not in shared_layers:
                                 if verbose:
-                                    print(f"    both: source ({src_layer}) and target ({tgt_layer}) not same shared layer")
+                                    print(
+                                        f"    both: source ({src_layer}) and target ({tgt_layer}) not same shared layer"
+                                    )
                                 continue
                             current_layer = src_layer
                             stub_p, stub_n = src_stub_p, src_stub_n
                         else:
                             stub_p, stub_n, current_layer, is_diff_pair = _get_unit_stub_info(
-                                pcb_data, config, swap_unit_id,
-                                mps_result.unit_to_nets, diff_pairs, stub_type
+                                pcb_data, config, swap_unit_id, mps_result.unit_to_nets, diff_pairs, stub_type
                             )
 
                             if not stub_p:
@@ -342,57 +321,70 @@ def try_mps_aware_layer_swaps(
 
                             if current_layer not in shared_layers:
                                 if verbose:
-                                    print(f"    {stub_type}: current layer {current_layer} not in shared layers {shared_layers}")
+                                    print(
+                                        f"    {stub_type}: current layer {current_layer} not in shared layers {shared_layers}"
+                                    )
                                 continue  # This stub isn't on a shared layer
 
                         if verbose:
                             print(f"    {stub_type}: stub on {current_layer}, trying alternatives...")
 
                         # Try alternative layers
-                        alt_layers = _find_alternative_layers(
-                            current_layer, available_layers, can_swap_to_top_layer
-                        )
+                        alt_layers = _find_alternative_layers(current_layer, available_layers, can_swap_to_top_layer)
 
                         for target_layer in alt_layers:
                             # Check if this swap would reduce GLOBAL same-layer conflicts
                             # Use all_conflicts (geometric crossings) to catch new conflicts
                             would_reduce, before, after = _would_reduce_conflicts(
-                                swap_unit_id, stub_type,
-                                current_layer, target_layer,
-                                all_conflicts, mps_result.unit_layers
+                                swap_unit_id,
+                                stub_type,
+                                current_layer,
+                                target_layer,
+                                all_conflicts,
+                                mps_result.unit_layers,
                             )
                             if not would_reduce:
                                 if verbose:
-                                    print(f"      -> {target_layer}: would not reduce global conflicts ({before} -> {after})")
+                                    print(
+                                        f"      -> {target_layer}: would not reduce global conflicts ({before} -> {after})"
+                                    )
                                 continue
                             if verbose:
-                                print(f"      -> {target_layer}: would reduce global conflicts ({before} -> {after}), validating...")
+                                print(
+                                    f"      -> {target_layer}: would reduce global conflicts ({before} -> {after}), validating..."
+                                )
 
                             # Validate the swap(s)
-                            if stub_type == 'both':
+                            if stub_type == "both":
                                 # Validate both source and target
                                 if is_diff_pair and src_stub_n:
                                     valid_src, reason_src = validate_swap(
-                                        src_stub_p, src_stub_n, target_layer,
-                                        all_stubs_by_layer, pcb_data, config,
-                                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                                        src_stub_p,
+                                        src_stub_n,
+                                        target_layer,
+                                        all_stubs_by_layer,
+                                        pcb_data,
+                                        config,
+                                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                                     )
                                 else:
                                     valid_src, reason_src = validate_single_swap(
-                                        src_stub_p, target_layer,
-                                        all_stubs_by_layer, pcb_data, config
+                                        src_stub_p, target_layer, all_stubs_by_layer, pcb_data, config
                                     )
 
                                 if is_diff_pair and tgt_stub_n:
                                     valid_tgt, reason_tgt = validate_swap(
-                                        tgt_stub_p, tgt_stub_n, target_layer,
-                                        all_stubs_by_layer, pcb_data, config,
-                                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                                        tgt_stub_p,
+                                        tgt_stub_n,
+                                        target_layer,
+                                        all_stubs_by_layer,
+                                        pcb_data,
+                                        config,
+                                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                                     )
                                 else:
                                     valid_tgt, reason_tgt = validate_single_swap(
-                                        tgt_stub_p, target_layer,
-                                        all_stubs_by_layer, pcb_data, config
+                                        tgt_stub_p, target_layer, all_stubs_by_layer, pcb_data, config
                                     )
 
                                 valid = valid_src and valid_tgt
@@ -400,14 +392,17 @@ def try_mps_aware_layer_swaps(
                             else:
                                 if is_diff_pair and stub_n:
                                     valid, reason = validate_swap(
-                                        stub_p, stub_n, target_layer,
-                                        all_stubs_by_layer, pcb_data, config,
-                                        stub_endpoints_by_layer=stub_endpoints_by_layer
+                                        stub_p,
+                                        stub_n,
+                                        target_layer,
+                                        all_stubs_by_layer,
+                                        pcb_data,
+                                        config,
+                                        stub_endpoints_by_layer=stub_endpoints_by_layer,
                                     )
                                 else:
                                     valid, reason = validate_single_swap(
-                                        stub_p, target_layer,
-                                        all_stubs_by_layer, pcb_data, config
+                                        stub_p, target_layer, all_stubs_by_layer, pcb_data, config
                                     )
 
                             if not valid:
@@ -417,7 +412,7 @@ def try_mps_aware_layer_swaps(
 
                             # Apply the swap(s)
                             total_vias = []
-                            if stub_type == 'both':
+                            if stub_type == "both":
                                 # Apply source swap
                                 new_vias, seg_mods = apply_stub_layer_switch(
                                     pcb_data, src_stub_p, target_layer, config, debug=verbose
@@ -475,21 +470,22 @@ def try_mps_aware_layer_swaps(
 
                             # Update the unit_layers for subsequent conflict checks
                             old_layers = mps_result.unit_layers.get(swap_unit_id, (set(), set()))
-                            new_layers = _apply_hypothetical_swap(
-                                old_layers, stub_type, current_layer, target_layer
-                            )
+                            new_layers = _apply_hypothetical_swap(old_layers, stub_type, current_layer, target_layer)
                             mps_result.unit_layers[swap_unit_id] = new_layers
 
                             # Update the stubs_by_layer cache (remove old, add new)
                             # This is a simplified update - full update would require re-collecting
                             if current_layer in all_stubs_by_layer:
                                 all_stubs_by_layer[current_layer] = [
-                                    (name, segs) for name, segs in all_stubs_by_layer[current_layer]
+                                    (name, segs)
+                                    for name, segs in all_stubs_by_layer[current_layer]
                                     if name != swap_unit_name
                                 ]
 
                             via_msg = f" (added {len(total_vias)} via(s))" if total_vias else ""
-                            print(f"  MPS layer swap: {swap_unit_name} {stub_type} {current_layer}->{target_layer}{via_msg}")
+                            print(
+                                f"  MPS layer swap: {swap_unit_name} {stub_type} {current_layer}->{target_layer}{via_msg}"
+                            )
 
                             break  # Stop trying layers for this stub
 
@@ -508,7 +504,4 @@ def try_mps_aware_layer_swaps(
     if swaps_applied > 0:
         print(f"MPS layer swap: Applied {swaps_applied} layer swap(s)")
 
-    return MPSLayerSwapResult(
-        swaps_applied=swaps_applied,
-        nets_swapped=nets_swapped
-    )
+    return MPSLayerSwapResult(swaps_applied=swaps_applied, nets_swapped=nets_swapped)

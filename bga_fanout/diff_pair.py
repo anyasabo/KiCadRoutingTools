@@ -4,16 +4,14 @@ Differential pair detection and routing utilities.
 Functions for finding and processing differential pairs in BGA footprints.
 """
 
-from typing import Dict, List
 import fnmatch
 
+from bga_fanout.types import DiffPairPads
 from kicad_parser import Footprint
 from net_queries import extract_diff_pair_base
-from bga_fanout.types import DiffPairPads
 
 
-def find_differential_pairs(footprint: Footprint,
-                           diff_pair_patterns: List[str]) -> Dict[str, DiffPairPads]:
+def find_differential_pairs(footprint: Footprint, diff_pair_patterns: list[str]) -> dict[str, DiffPairPads]:
     """
     Find all differential pairs in a footprint matching the given patterns.
 
@@ -24,15 +22,14 @@ def find_differential_pairs(footprint: Footprint,
     Returns:
         Dict mapping base_name to DiffPairPads
     """
-    pairs: Dict[str, DiffPairPads] = {}
+    pairs: dict[str, DiffPairPads] = {}
 
     for pad in footprint.pads:
         if not pad.net_name or pad.net_id == 0:
             continue
 
         # Check if this net matches any diff pair pattern
-        matched = any(fnmatch.fnmatch(pad.net_name, pattern)
-                     for pattern in diff_pair_patterns)
+        matched = any(fnmatch.fnmatch(pad.net_name, pattern) for pattern in diff_pair_patterns)
         if not matched:
             continue
 

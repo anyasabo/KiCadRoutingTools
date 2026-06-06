@@ -6,6 +6,7 @@ Provides wx-based panels for differential pair routing configuration.
 
 import os
 import sys
+
 import wx
 
 # Add parent directory to path
@@ -15,14 +16,14 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 import routing_defaults as defaults
+
 from .gui_utils import StdoutRedirector
 
 
 class DiffPairSelectionPanel(wx.Panel):
     """Panel for selecting differential pairs to route."""
 
-    def __init__(self, parent, pcb_data, instructions=None,
-                 show_hide_checkbox=True, show_component_dropdown=True):
+    def __init__(self, parent, pcb_data, instructions=None, show_hide_checkbox=True, show_component_dropdown=True):
         """
         Create a differential pair selection panel.
 
@@ -110,7 +111,7 @@ class DiffPairSelectionPanel(wx.Panel):
         from net_queries import find_differential_pairs
 
         # Find all differential pairs
-        diff_pairs = find_differential_pairs(self.pcb_data, ['*'])
+        diff_pairs = find_differential_pairs(self.pcb_data, ["*"])
 
         self.all_pairs = []
         for base_name, pair in diff_pairs.items():
@@ -218,7 +219,7 @@ class DiffPairSelectionPanel(wx.Panel):
 
     def _on_list_key(self, event):
         """Handle keyboard events."""
-        if event.GetKeyCode() == ord('A') and event.ControlDown():
+        if event.GetKeyCode() == ord("A") and event.ControlDown():
             for i in range(self.pair_list.GetCount()):
                 self.pair_list.SetSelection(i)
         else:
@@ -270,7 +271,7 @@ class DiffPairSelectionPanel(wx.Panel):
         # Return base names (strip _P/N suffix)
         selected = []
         for display_name in self._checked_pairs:
-            base_name = display_name.replace('_P/N', '')
+            base_name = display_name.replace("_P/N", "")
             selected.append(base_name)
         return selected
 
@@ -317,10 +318,17 @@ class DiffPairSelectionPanel(wx.Panel):
 class DifferentialTab(wx.Panel):
     """Tab for differential pair routing configuration."""
 
-    def __init__(self, parent, pcb_data, board_filename,
-                 get_shared_params=None, get_connectivity_check=None,
-                 get_routing_config=None, append_log=None,
-                 sync_pcb_data_callback=None):
+    def __init__(
+        self,
+        parent,
+        pcb_data,
+        board_filename,
+        get_shared_params=None,
+        get_connectivity_check=None,
+        get_routing_config=None,
+        append_log=None,
+        sync_pcb_data_callback=None,
+    ):
         """
         Create the differential pair routing tab.
 
@@ -360,10 +368,11 @@ class DifferentialTab(wx.Panel):
         pair_box_sizer = wx.StaticBoxSizer(pair_box, wx.VERTICAL)
 
         self.pair_panel = DiffPairSelectionPanel(
-            self, self.pcb_data,
+            self,
+            self.pcb_data,
             instructions="Select differential pairs to route...",
             show_hide_checkbox=True,
-            show_component_dropdown=True
+            show_component_dropdown=True,
         )
         pair_box_sizer.Add(self.pair_panel, 1, wx.EXPAND)
 
@@ -388,65 +397,74 @@ class DifferentialTab(wx.Panel):
 
         # Diff pair width
         param_grid.Add(wx.StaticText(self, label="Pair Width (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_width']
-        self.diff_pair_width = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                  initial=defaults.DIFF_PAIR_WIDTH, inc=r['inc'])
-        self.diff_pair_width.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["diff_pair_width"]
+        self.diff_pair_width = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_WIDTH, inc=r["inc"]
+        )
+        self.diff_pair_width.SetDigits(r["digits"])
         self.diff_pair_width.SetToolTip("Track width for differential pair traces")
         param_grid.Add(self.diff_pair_width, 0, wx.EXPAND)
 
         # Diff pair gap
         param_grid.Add(wx.StaticText(self, label="Pair Gap (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_gap']
-        self.diff_pair_gap = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                initial=defaults.DIFF_PAIR_GAP, inc=r['inc'])
-        self.diff_pair_gap.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["diff_pair_gap"]
+        self.diff_pair_gap = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_GAP, inc=r["inc"]
+        )
+        self.diff_pair_gap.SetDigits(r["digits"])
         self.diff_pair_gap.SetToolTip("Gap between P and N traces")
         param_grid.Add(self.diff_pair_gap, 0, wx.EXPAND)
 
         # Min turning radius
         param_grid.Add(wx.StaticText(self, label="Min Turn Radius (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_min_turning_radius']
-        self.min_turning_radius = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                     initial=defaults.DIFF_PAIR_MIN_TURNING_RADIUS, inc=r['inc'])
-        self.min_turning_radius.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["diff_pair_min_turning_radius"]
+        self.min_turning_radius = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_MIN_TURNING_RADIUS, inc=r["inc"]
+        )
+        self.min_turning_radius.SetDigits(r["digits"])
         self.min_turning_radius.SetToolTip("Minimum turning radius for curved routing")
         param_grid.Add(self.min_turning_radius, 0, wx.EXPAND)
 
         # Max setback angle
         param_grid.Add(wx.StaticText(self, label="Max Setback Angle:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_max_setback_angle']
-        self.max_setback_angle = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                    initial=defaults.DIFF_PAIR_MAX_SETBACK_ANGLE, inc=r['inc'])
-        self.max_setback_angle.SetDigits(int(r['digits']))
+        r = defaults.PARAM_RANGES["diff_pair_max_setback_angle"]
+        self.max_setback_angle = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_MAX_SETBACK_ANGLE, inc=r["inc"]
+        )
+        self.max_setback_angle.SetDigits(int(r["digits"]))
         self.max_setback_angle.SetToolTip("Maximum angle for setback position search")
         param_grid.Add(self.max_setback_angle, 0, wx.EXPAND)
 
         # Max turn angle
         param_grid.Add(wx.StaticText(self, label="Max Turn Angle:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_max_turn_angle']
-        self.max_turn_angle = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                 initial=defaults.DIFF_PAIR_MAX_TURN_ANGLE, inc=r['inc'])
-        self.max_turn_angle.SetDigits(int(r['digits']))
+        r = defaults.PARAM_RANGES["diff_pair_max_turn_angle"]
+        self.max_turn_angle = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_MAX_TURN_ANGLE, inc=r["inc"]
+        )
+        self.max_turn_angle.SetDigits(int(r["digits"]))
         self.max_turn_angle.SetToolTip("Max cumulative turn angle before reset (prevents U-turns)")
         param_grid.Add(self.max_turn_angle, 0, wx.EXPAND)
 
         # Chamfer extra
         param_grid.Add(wx.StaticText(self, label="Meander Chamfer:"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_chamfer_extra']
-        self.chamfer_extra = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                initial=defaults.DIFF_PAIR_CHAMFER_EXTRA, inc=r['inc'])
-        self.chamfer_extra.SetDigits(r['digits'])
+        r = defaults.PARAM_RANGES["diff_pair_chamfer_extra"]
+        self.chamfer_extra = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_CHAMFER_EXTRA, inc=r["inc"]
+        )
+        self.chamfer_extra.SetDigits(r["digits"])
         self.chamfer_extra.SetToolTip("Chamfer multiplier for meanders (>1 avoids P/N crossings)")
         param_grid.Add(self.chamfer_extra, 0, wx.EXPAND)
 
         # Centerline setback
         param_grid.Add(wx.StaticText(self, label="Centerline Setback (mm):"), 0, wx.ALIGN_CENTER_VERTICAL)
-        r = defaults.PARAM_RANGES['diff_pair_centerline_setback']
-        self.centerline_setback = wx.SpinCtrlDouble(self, min=r['min'], max=r['max'],
-                                                     initial=defaults.DIFF_PAIR_CENTERLINE_SETBACK, inc=r['inc'])
-        self.centerline_setback.SetDigits(r['digits'])
-        self.centerline_setback.SetToolTip("Distance in front of stubs to start centerline route (0 = auto: 2x P-N spacing)")
+        r = defaults.PARAM_RANGES["diff_pair_centerline_setback"]
+        self.centerline_setback = wx.SpinCtrlDouble(
+            self, min=r["min"], max=r["max"], initial=defaults.DIFF_PAIR_CENTERLINE_SETBACK, inc=r["inc"]
+        )
+        self.centerline_setback.SetDigits(r["digits"])
+        self.centerline_setback.SetToolTip(
+            "Distance in front of stubs to start centerline route (0 = auto: 2x P-N spacing)"
+        )
         param_grid.Add(self.centerline_setback, 0, wx.EXPAND)
 
         param_sizer.Add(param_grid, 0, wx.EXPAND | wx.ALL, 5)
@@ -526,27 +544,19 @@ class DifferentialTab(wx.Panel):
         selected_pair_info = self.get_selected_pair_net_ids()
         if not selected_pair_info:
             wx.MessageBox(
-                "Please select at least one differential pair to route.",
-                "No Pairs Selected",
-                wx.OK | wx.ICON_WARNING
+                "Please select at least one differential pair to route.", "No Pairs Selected", wx.OK | wx.ICON_WARNING
             )
             return
 
         # Get routing config from main dialog
         if not self.get_routing_config:
-            wx.MessageBox(
-                "Routing configuration not available.",
-                "Error",
-                wx.OK | wx.ICON_ERROR
-            )
+            wx.MessageBox("Routing configuration not available.", "Error", wx.OK | wx.ICON_ERROR)
             return
 
         routing_config = self.get_routing_config()
-        if not routing_config.get('layers'):
+        if not routing_config.get("layers"):
             wx.MessageBox(
-                "Please select at least one layer on the Basic tab.",
-                "No Layers Selected",
-                wx.OK | wx.ICON_WARNING
+                "Please select at least one layer on the Basic tab.", "No Layers Selected", wx.OK | wx.ICON_WARNING
             )
             return
 
@@ -576,11 +586,8 @@ class DifferentialTab(wx.Panel):
 
         # Run routing in a thread
         import threading
-        self._routing_thread = threading.Thread(
-            target=self._run_diff_routing,
-            args=(config, net_names),
-            daemon=True
-        )
+
+        self._routing_thread = threading.Thread(target=self._run_diff_routing, args=(config, net_names), daemon=True)
         self._routing_thread.start()
 
         # Poll for completion
@@ -623,29 +630,29 @@ class DifferentialTab(wx.Panel):
                 input_file=self.board_filename,
                 output_file="",  # Not used when return_results=True
                 net_names=net_names,
-                layers=config.get('layers', defaults.DEFAULT_LAYERS),
-                track_width=config.get('diff_pair_width', defaults.DIFF_PAIR_WIDTH),
-                clearance=config.get('clearance', 0.1),
-                via_size=config.get('via_size', 0.3),
-                via_drill=config.get('via_drill', 0.2),
-                grid_step=config.get('grid_step', 0.1),
-                via_cost=config.get('via_cost', 50),
-                max_iterations=config.get('max_iterations', 200000),
-                proximity_heuristic_factor=config.get('proximity_heuristic_factor', 0.02),
-                keepout_enabled=config.get('keepout_enabled', False),
-                keepout_layer=config.get('keepout_layer', defaults.KEEPOUT_LAYER),
-                diff_pair_gap=config.get('diff_pair_gap', 0.101),
-                min_turning_radius=config.get('min_turning_radius', 0.2),
-                max_setback_angle=config.get('max_setback_angle', 45.0),
-                max_turn_angle=config.get('max_turn_angle', 180.0),
-                diff_chamfer_extra=config.get('diff_chamfer_extra', 1.5),
-                diff_pair_centerline_setback=config.get('diff_pair_centerline_setback'),
-                fix_polarity=config.get('fix_polarity', True),
-                gnd_via_enabled=config.get('gnd_via_enabled', True),
-                diff_pair_intra_match=config.get('diff_pair_intra_match', False),
-                enable_layer_switch=config.get('enable_layer_switch', True),
-                debug_lines=config.get('debug_lines', False),
-                verbose=config.get('verbose', False),
+                layers=config.get("layers", defaults.DEFAULT_LAYERS),
+                track_width=config.get("diff_pair_width", defaults.DIFF_PAIR_WIDTH),
+                clearance=config.get("clearance", 0.1),
+                via_size=config.get("via_size", 0.3),
+                via_drill=config.get("via_drill", 0.2),
+                grid_step=config.get("grid_step", 0.1),
+                via_cost=config.get("via_cost", 50),
+                max_iterations=config.get("max_iterations", 200000),
+                proximity_heuristic_factor=config.get("proximity_heuristic_factor", 0.02),
+                keepout_enabled=config.get("keepout_enabled", False),
+                keepout_layer=config.get("keepout_layer", defaults.KEEPOUT_LAYER),
+                diff_pair_gap=config.get("diff_pair_gap", 0.101),
+                min_turning_radius=config.get("min_turning_radius", 0.2),
+                max_setback_angle=config.get("max_setback_angle", 45.0),
+                max_turn_angle=config.get("max_turn_angle", 180.0),
+                diff_chamfer_extra=config.get("diff_chamfer_extra", 1.5),
+                diff_pair_centerline_setback=config.get("diff_pair_centerline_setback"),
+                fix_polarity=config.get("fix_polarity", True),
+                gnd_via_enabled=config.get("gnd_via_enabled", True),
+                diff_pair_intra_match=config.get("diff_pair_intra_match", False),
+                enable_layer_switch=config.get("enable_layer_switch", True),
+                debug_lines=config.get("debug_lines", False),
+                verbose=config.get("verbose", False),
                 return_results=True,
                 pcb_data=self.pcb_data,
                 cancel_check=check_cancel,
@@ -653,18 +660,19 @@ class DifferentialTab(wx.Panel):
             )
 
             self._routing_result = {
-                'successful': successful,
-                'failed': failed,
-                'total_time': total_time,
-                'results_data': results_data,
-                'config': config,
+                "successful": successful,
+                "failed": failed,
+                "total_time": total_time,
+                "results_data": results_data,
+                "config": config,
             }
 
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             self._routing_result = {
-                'error': str(e),
+                "error": str(e),
             }
 
         finally:
@@ -694,44 +702,42 @@ class DifferentialTab(wx.Panel):
             self.status_text.SetLabel("Cancelled")
             return
 
-        result = getattr(self, '_routing_result', None)
+        result = getattr(self, "_routing_result", None)
         if not result:
             self.status_text.SetLabel("Routing finished (no result)")
             return
 
-        if 'error' in result:
+        if "error" in result:
             self.status_text.SetLabel(f"Routing failed: {result['error']}")
             wx.MessageBox(
-                f"Differential pair routing failed:\n\n{result['error']}",
-                "Routing Error",
-                wx.OK | wx.ICON_ERROR
+                f"Differential pair routing failed:\n\n{result['error']}", "Routing Error", wx.OK | wx.ICON_ERROR
             )
             return
 
-        successful = result.get('successful', 0)
-        failed = result.get('failed', 0)
-        total_time = result.get('total_time', 0)
-        results_data = result.get('results_data', {})
+        successful = result.get("successful", 0)
+        failed = result.get("failed", 0)
+        total_time = result.get("total_time", 0)
+        results_data = result.get("results_data", {})
 
         # Apply results to the board
         tracks_added, vias_added = self._apply_results_to_board(results_data)
 
         self.status_text.SetLabel(f"Complete: {successful} routed, {failed} failed in {total_time:.1f}s")
 
-        msg = f"Differential pair routing complete!\n\n"
+        msg = "Differential pair routing complete!\n\n"
         msg += f"Routed: {successful}\n"
         msg += f"Failed: {failed}\n"
         msg += f"Time: {total_time:.1f}s\n\n"
-        msg += f"Added to board:\n"
+        msg += "Added to board:\n"
         msg += f"  {tracks_added} segments\n"
         msg += f"  {vias_added} vias\n"
         if failed > 0:
             try:
-                from routing_diagnostics import (
-                    suggest_diff_pair_adjustments, format_suggestions_for_dialog)
+                from routing_diagnostics import format_suggestions_for_dialog, suggest_diff_pair_adjustments
+
                 suggestions = suggest_diff_pair_adjustments(
-                    failed=failed, total=successful + failed,
-                    config=result.get('config', {}))
+                    failed=failed, total=successful + failed, config=result.get("config", {})
+                )
                 block = format_suggestions_for_dialog(suggestions)
                 if block:
                     msg += "\n" + block + "\n"
@@ -747,6 +753,7 @@ class DifferentialTab(wx.Panel):
     def _apply_results_to_board(self, results_data):
         """Apply routing results directly to the open pcbnew board."""
         import pcbnew
+
         from .swig_gui import _build_layer_mappings
 
         board = pcbnew.GetBoard()
@@ -764,29 +771,23 @@ class DifferentialTab(wx.Panel):
             return name_to_id.get(layer_name, pcbnew.F_Cu)
 
         # Add segments from routing results
-        for result in results_data.get('results', []):
-            for seg in result.get('new_segments', []):
+        for result in results_data.get("results", []):
+            for seg in result.get("new_segments", []):
                 track = pcbnew.PCB_TRACK(board)
-                track.SetStart(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(seg.start_x),
-                    pcbnew.FromMM(seg.start_y)
-                ))
-                track.SetEnd(pcbnew.VECTOR2I(
-                    pcbnew.FromMM(seg.end_x),
-                    pcbnew.FromMM(seg.end_y)
-                ))
+                track.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(seg.start_x), pcbnew.FromMM(seg.start_y)))
+                track.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(seg.end_x), pcbnew.FromMM(seg.end_y)))
                 track.SetWidth(pcbnew.FromMM(seg.width))
                 track.SetLayer(get_layer_id(seg.layer))
                 track.SetNetCode(seg.net_id)
                 board.Add(track)
                 tracks_added += 1
 
-            for via in result.get('new_vias', []):
+            for via in result.get("new_vias", []):
                 self._add_via_to_board(board, via, get_layer_id)
                 vias_added += 1
 
         # Add vias from layer swapping
-        for via in results_data.get('all_swap_vias', []):
+        for via in results_data.get("all_swap_vias", []):
             self._add_via_to_board(board, via, get_layer_id)
             vias_added += 1
 
@@ -805,15 +806,13 @@ class DifferentialTab(wx.Panel):
     def _add_via_to_board(self, board, via, get_layer_id):
         """Add a via to the pcbnew board."""
         import pcbnew
+
         pcb_via = pcbnew.PCB_VIA(board)
-        pcb_via.SetPosition(pcbnew.VECTOR2I(
-            pcbnew.FromMM(via.x),
-            pcbnew.FromMM(via.y)
-        ))
+        pcb_via.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(via.x), pcbnew.FromMM(via.y)))
         pcb_via.SetWidth(pcbnew.FromMM(via.size))
         pcb_via.SetDrill(pcbnew.FromMM(via.drill))
         pcb_via.SetNetCode(via.net_id)
-        if hasattr(via, 'layers') and len(via.layers) >= 2:
+        if hasattr(via, "layers") and len(via.layers) >= 2:
             top_layer = get_layer_id(via.layers[0])
             bot_layer = get_layer_id(via.layers[1])
             pcb_via.SetLayerPair(top_layer, bot_layer)
@@ -823,16 +822,16 @@ class DifferentialTab(wx.Panel):
         """Get the differential pair configuration."""
         setback = self.centerline_setback.GetValue()
         return {
-            'diff_pair_width': self.diff_pair_width.GetValue(),
-            'diff_pair_gap': self.diff_pair_gap.GetValue(),
-            'min_turning_radius': self.min_turning_radius.GetValue(),
-            'max_setback_angle': self.max_setback_angle.GetValue(),
-            'max_turn_angle': self.max_turn_angle.GetValue(),
-            'diff_chamfer_extra': self.chamfer_extra.GetValue(),
-            'diff_pair_centerline_setback': setback if setback > 0 else None,  # 0 = auto
-            'fix_polarity': self.fix_polarity_check.GetValue(),
-            'gnd_via_enabled': self.gnd_via_check.GetValue(),
-            'diff_pair_intra_match': self.intra_match_check.GetValue(),
+            "diff_pair_width": self.diff_pair_width.GetValue(),
+            "diff_pair_gap": self.diff_pair_gap.GetValue(),
+            "min_turning_radius": self.min_turning_radius.GetValue(),
+            "max_setback_angle": self.max_setback_angle.GetValue(),
+            "max_turn_angle": self.max_turn_angle.GetValue(),
+            "diff_chamfer_extra": self.chamfer_extra.GetValue(),
+            "diff_pair_centerline_setback": setback if setback > 0 else None,  # 0 = auto
+            "fix_polarity": self.fix_polarity_check.GetValue(),
+            "gnd_via_enabled": self.gnd_via_check.GetValue(),
+            "diff_pair_intra_match": self.intra_match_check.GetValue(),
         }
 
     def _on_use_netclass_changed(self, event):
@@ -841,15 +840,16 @@ class DifferentialTab(wx.Panel):
 
         if use_netclass:
             # Try to get net class from first selected pair, fall back to Default
-            class_name = self._get_selected_pair_netclass() or 'Default'
+            class_name = self._get_selected_pair_netclass() or "Default"
             from .swig_gui import _get_netclass_parameters
+
             params = _get_netclass_parameters(class_name)
             if params:
                 # Update diff pair width and gap from net class
-                if 'diff_pair_width' in params and params['diff_pair_width'] > 0:
-                    self.diff_pair_width.SetValue(params['diff_pair_width'])
-                if 'diff_pair_gap' in params and params['diff_pair_gap'] > 0:
-                    self.diff_pair_gap.SetValue(params['diff_pair_gap'])
+                if "diff_pair_width" in params and params["diff_pair_width"] > 0:
+                    self.diff_pair_width.SetValue(params["diff_pair_width"])
+                if "diff_pair_gap" in params and params["diff_pair_gap"] > 0:
+                    self.diff_pair_gap.SetValue(params["diff_pair_gap"])
             # Disable manual editing
             self.diff_pair_width.Enable(False)
             self.diff_pair_gap.Enable(False)
@@ -862,6 +862,7 @@ class DifferentialTab(wx.Panel):
         """Get the net class name for the first selected pair, or None."""
         try:
             import pcbnew
+
             board = pcbnew.GetBoard()
             if board is None:
                 return None

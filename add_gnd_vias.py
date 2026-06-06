@@ -5,22 +5,22 @@ Adds GND vias near signal vias for return current paths.
 """
 
 import math
-from typing import List, Dict
+
+from grid_router import GridObstacleMap
 
 from kicad_parser import PCBData, Via
-from routing_config import GridRouteConfig, GridCoord
-from grid_router import GridObstacleMap
+from routing_config import GridCoord, GridRouteConfig
 
 
 def add_gnd_vias_near_signal_vias(
-    results: List[Dict],
+    results: list[dict],
     pcb_data: PCBData,
     gnd_net_name: str,
     gnd_via_distance: float,
     config: GridRouteConfig,
     obstacles: GridObstacleMap,
-    coord: GridCoord
-) -> List[Via]:
+    coord: GridCoord,
+) -> list[Via]:
     """
     Add GND vias near signal vias that don't already have a nearby GND via or pad.
 
@@ -53,7 +53,7 @@ def add_gnd_vias_near_signal_vias(
     # Collect all signal vias from routing results (non-GND vias)
     signal_vias = []
     for result in results:
-        for via in result.get('new_vias', []):
+        for via in result.get("new_vias", []):
             if via.net_id != gnd_net_id:
                 signal_vias.append(via)
 
@@ -63,7 +63,7 @@ def add_gnd_vias_near_signal_vias(
     # Collect existing GND vias from PCB data and routing results
     existing_gnd_positions = [(v.x, v.y) for v in pcb_data.vias if v.net_id == gnd_net_id]
     for result in results:
-        for via in result.get('new_vias', []):
+        for via in result.get("new_vias", []):
             if via.net_id == gnd_net_id:
                 existing_gnd_positions.append((via.x, via.y))
 
@@ -108,16 +108,16 @@ def add_gnd_vias_near_signal_vias(
         for via in pcb_data.vias:
             if abs(via.x - skip_via_x) < 0.01 and abs(via.y - skip_via_y) < 0.01:
                 continue  # Skip the signal via we're placing a GND via for
-            dist = math.sqrt((x_mm - via.x)**2 + (y_mm - via.y)**2)
+            dist = math.sqrt((x_mm - via.x) ** 2 + (y_mm - via.y) ** 2)
             if dist < via_via_min_dist:
                 return False
 
         # Also check vias from routing results (the signal vias we're working with)
         for result in results:
-            for via in result.get('new_vias', []):
+            for via in result.get("new_vias", []):
                 if abs(via.x - skip_via_x) < 0.01 and abs(via.y - skip_via_y) < 0.01:
                     continue  # Skip the target signal via
-                dist = math.sqrt((x_mm - via.x)**2 + (y_mm - via.y)**2)
+                dist = math.sqrt((x_mm - via.x) ** 2 + (y_mm - via.y) ** 2)
                 if dist < via_via_min_dist:
                     return False
 
@@ -125,14 +125,14 @@ def add_gnd_vias_near_signal_vias(
         for net_id, pads in pcb_data.pads_by_net.items():
             for pad in pads:
                 if pad.drill and pad.drill > 0:
-                    dist = math.sqrt((x_mm - pad.global_x)**2 + (y_mm - pad.global_y)**2)
+                    dist = math.sqrt((x_mm - pad.global_x) ** 2 + (y_mm - pad.global_y) ** 2)
                     min_pad_dist = pad.drill / 2 + config.clearance + config.via_drill / 2
                     if dist < min_pad_dist:
                         return False
 
         # Check against GND vias we're placing in this batch
         for px, py in placed_gnd_positions:
-            dist = math.sqrt((x_mm - px)**2 + (y_mm - py)**2)
+            dist = math.sqrt((x_mm - px) ** 2 + (y_mm - py) ** 2)
             if dist < via_via_min_dist:
                 return False
 
@@ -147,7 +147,7 @@ def add_gnd_vias_near_signal_vias(
         # Check if there's already a GND via/pad within gnd_via_distance
         has_nearby_gnd = False
         for gx, gy in existing_gnd_positions + placed_gnd_positions:
-            dist = math.sqrt((sx - gx)**2 + (sy - gy)**2)
+            dist = math.sqrt((sx - gx) ** 2 + (sy - gy) ** 2)
             if dist <= gnd_via_distance:
                 has_nearby_gnd = True
                 break
@@ -186,7 +186,7 @@ def add_gnd_vias_near_signal_vias(
                 drill=config.via_drill,
                 layers=config.layers,
                 net_id=gnd_net_id,
-                free=True  # Prevent KiCad auto-assignment
+                free=True,  # Prevent KiCad auto-assignment
             )
             new_gnd_vias.append(gnd_via)
             placed_gnd_positions.append(best_pos)
@@ -204,8 +204,8 @@ def add_gnd_vias_to_existing_board(
     gnd_via_distance: float,
     config: GridRouteConfig,
     obstacles: GridObstacleMap,
-    coord: GridCoord
-) -> List[Via]:
+    coord: GridCoord,
+) -> list[Via]:
     """
     Add GND vias near existing signal vias in a PCB that don't already have a nearby GND via.
 
@@ -255,7 +255,7 @@ def add_gnd_vias_to_existing_board(
     min_distance = config.via_size / 2 + config.clearance + config.via_size / 2
 
     # Debug: Print clearance parameters
-    print(f"GND via placement parameters:")
+    print("GND via placement parameters:")
     print(f"  via_size={config.via_size}mm, via_drill={config.via_drill}mm, clearance={config.clearance}mm")
     print(f"  grid_step={config.grid_step}mm")
     print(f"  min_distance (center-to-center)={min_distance:.3f}mm")
@@ -300,7 +300,7 @@ def add_gnd_vias_to_existing_board(
             # Skip the signal via we're placing a GND via near
             if abs(via.x - sig_via_x) < 0.01 and abs(via.y - sig_via_y) < 0.01:
                 continue
-            dist = math.sqrt((x_mm - via.x)**2 + (y_mm - via.y)**2)
+            dist = math.sqrt((x_mm - via.x) ** 2 + (y_mm - via.y) ** 2)
             if dist < via_via_min_dist:
                 return (False, f"too_close_to_via({dist:.2f}mm)")
 
@@ -308,14 +308,14 @@ def add_gnd_vias_to_existing_board(
         for net_id, pads in pcb_data.pads_by_net.items():
             for pad in pads:
                 if pad.drill and pad.drill > 0:
-                    dist = math.sqrt((x_mm - pad.global_x)**2 + (y_mm - pad.global_y)**2)
+                    dist = math.sqrt((x_mm - pad.global_x) ** 2 + (y_mm - pad.global_y) ** 2)
                     min_pad_dist = pad.drill / 2 + config.clearance + config.via_drill / 2
                     if dist < min_pad_dist:
                         return (False, f"too_close_to_th_pad({dist:.2f}mm)")
 
         # Check against GND vias we're placing in this batch
         for px, py in placed_gnd_positions:
-            dist = math.sqrt((x_mm - px)**2 + (y_mm - py)**2)
+            dist = math.sqrt((x_mm - px) ** 2 + (y_mm - py) ** 2)
             if dist < via_via_min_dist:
                 return (False, f"too_close_to_batch_gnd_via({dist:.2f}mm)")
 
@@ -333,9 +333,9 @@ def add_gnd_vias_to_existing_board(
 
         # Check if there's already a GND via/pad within gnd_via_distance
         has_nearby_gnd = False
-        nearest_gnd_dist = float('inf')
+        nearest_gnd_dist = float("inf")
         for gx, gy in existing_gnd_positions + placed_gnd_positions:
-            dist = math.sqrt((sx - gx)**2 + (sy - gy)**2)
+            dist = math.sqrt((sx - gx) ** 2 + (sy - gy) ** 2)
             nearest_gnd_dist = min(nearest_gnd_dist, dist)
             if dist <= gnd_via_distance:
                 has_nearby_gnd = True
@@ -371,7 +371,7 @@ def add_gnd_vias_to_existing_board(
         if best_pos is None:
             skipped_no_space += 1
         else:
-            actual_dist = math.sqrt((best_pos[0] - sx)**2 + (best_pos[1] - sy)**2)
+            actual_dist = math.sqrt((best_pos[0] - sx) ** 2 + (best_pos[1] - sy) ** 2)
             placement_distances.append(actual_dist)
 
             gnd_via = Via(
@@ -381,7 +381,7 @@ def add_gnd_vias_to_existing_board(
                 drill=config.via_drill,
                 layers=config.layers,
                 net_id=gnd_net_id,
-                free=True
+                free=True,
             )
             new_gnd_vias.append(gnd_via)
             placed_gnd_positions.append(best_pos)

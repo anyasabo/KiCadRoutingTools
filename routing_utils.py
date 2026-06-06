@@ -9,12 +9,11 @@ The bulk of routing functionality has been split into:
 """
 
 import math
-from typing import Dict, List, Tuple
 
-from kicad_parser import Segment, POSITION_DECIMALS
+from kicad_parser import POSITION_DECIMALS, Segment
 
 
-def build_layer_map(layers: List[str]) -> Dict[str, int]:
+def build_layer_map(layers: list[str]) -> dict[str, int]:
     """
     Build a mapping from layer names to indices.
 
@@ -27,7 +26,7 @@ def build_layer_map(layers: List[str]) -> Dict[str, int]:
     return {name: idx for idx, name in enumerate(layers)}
 
 
-def pos_key(x: float, y: float) -> Tuple[float, float]:
+def pos_key(x: float, y: float) -> tuple[float, float]:
     """
     Normalize coordinates for position-based lookups.
 
@@ -39,13 +38,11 @@ def pos_key(x: float, y: float) -> Tuple[float, float]:
 
 def segment_length(seg: Segment) -> float:
     """Calculate the length of a single segment."""
-    return math.sqrt((seg.end_x - seg.start_x)**2 + (seg.end_y - seg.start_y)**2)
+    return math.sqrt((seg.end_x - seg.start_x) ** 2 + (seg.end_y - seg.start_y) ** 2)
 
 
 def dist_sq_to_rounded_rect(
-    point_x: float, point_y: float,
-    half_width: float, half_height: float,
-    corner_radius: float = 0.0
+    point_x: float, point_y: float, half_width: float, half_height: float, corner_radius: float = 0.0
 ) -> float:
     """
     Calculate squared distance from a point to a rounded rectangle centered at origin.
@@ -87,11 +84,13 @@ def dist_sq_to_rounded_rect(
 
 
 def iter_pad_blocked_cells(
-    pad_gx: int, pad_gy: int,
-    half_width: float, half_height: float,
+    pad_gx: int,
+    pad_gy: int,
+    half_width: float,
+    half_height: float,
     margin: float,
     grid_step: float,
-    corner_radius: float = 0.0
+    corner_radius: float = 0.0,
 ):
     """
     Generate grid cells that should be blocked for a pad.

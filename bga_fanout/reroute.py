@@ -4,41 +4,40 @@ Rerouting and collision resolution for BGA fanout routing.
 Functions for resolving collisions and rerouting signals through alternate channels.
 """
 
-from typing import List, Dict, Tuple, Optional, Set
-
-from kicad_parser import PCBData, Footprint
-from bga_fanout.types import (
-    create_track,
-    Channel,
-    BGAGrid,
-    FanoutRoute,
-)
 from bga_fanout.collision import (
     check_segment_collision,
     find_colliding_pairs,
     find_collision_partners,
 )
 from bga_fanout.constants import FANOUT_DETECTION_TOLERANCE
-from bga_fanout.layer_assignment import try_reassign_layer
-from bga_fanout.grid import is_edge_pad
+from bga_fanout.escape import get_alternate_channels_for_pad
 from bga_fanout.geometry import (
-    create_45_stub,
     calculate_exit_point,
     calculate_jog_end,
+    create_45_stub,
 )
-from bga_fanout.escape import get_alternate_channels_for_pad
+from bga_fanout.layer_assignment import try_reassign_layer
+from bga_fanout.types import (
+    BGAGrid,
+    Channel,
+    FanoutRoute,
+    create_track,
+)
+from kicad_parser import Footprint, PCBData
 
 
-def try_reroute_single_ended(route: 'FanoutRoute',
-                              alternate_channel: Channel,
-                              grid: BGAGrid,
-                              exit_margin: float,
-                              tracks: List[Dict],
-                              existing_tracks: List[Dict],
-                              available_layers: List[str],
-                              track_width: float,
-                              clearance: float,
-                              no_inner_top_layer: bool = False) -> Optional[Tuple['FanoutRoute', str]]:
+def try_reroute_single_ended(
+    route: "FanoutRoute",
+    alternate_channel: Channel,
+    grid: BGAGrid,
+    exit_margin: float,
+    tracks: list[dict],
+    existing_tracks: list[dict],
+    available_layers: list[str],
+    track_width: float,
+    clearance: float,
+    no_inner_top_layer: bool = False,
+) -> tuple["FanoutRoute", str] | None:
     """
     Try rerouting a single-ended signal through an alternate channel.
 
@@ -65,10 +64,7 @@ def try_reroute_single_ended(route: 'FanoutRoute',
     new_exit_pos = calculate_exit_point(new_stub_end, alternate_channel, route.escape_dir, grid, exit_margin)
 
     # Create new track segments to check for collisions
-    new_segments = [
-        {'start': route.pad_pos, 'end': new_stub_end},
-        {'start': new_stub_end, 'end': new_exit_pos}
-    ]
+    new_segments = [{"start": route.pad_pos, "end": new_stub_end}, {"start": new_stub_end, "end": new_exit_pos}]
 
     # If no_inner_top_layer is set, exclude F.Cu for inner routes
     if no_inner_top_layer:
@@ -77,7 +73,7 @@ def try_reroute_single_ended(route: 'FanoutRoute',
         candidate_layers = available_layers
 
     # Get other tracks (excluding this route's current tracks)
-    other_new_tracks = [t for t in tracks if t.get('net_id') != route.net_id]
+    other_new_tracks = [t for t in tracks if t.get("net_id") != route.net_id]
     all_other_tracks = other_new_tracks + existing_tracks
 
     # Try each layer
@@ -85,13 +81,11 @@ def try_reroute_single_ended(route: 'FanoutRoute',
         has_collision = False
         for seg in new_segments:
             for other in all_other_tracks:
-                if other['layer'] != layer:
+                if other["layer"] != layer:
                     continue
-                if other.get('net_id') == route.net_id:
+                if other.get("net_id") == route.net_id:
                     continue
-                if check_segment_collision(seg['start'], seg['end'],
-                                            other['start'], other['end'],
-                                            min_spacing):
+                if check_segment_collision(seg["start"], seg["end"], other["start"], other["end"], min_spacing):
                     has_collision = True
                     break
             if has_collision:
@@ -109,14 +103,14 @@ def try_reroute_single_ended(route: 'FanoutRoute',
                 is_edge=route.is_edge,
                 layer=layer,
                 pair_id=None,
-                is_p=None
+                is_p=None,
             )
             return new_route, layer
 
     return None
 
 
-def get_distance_to_escape_edge(route: 'FanoutRoute', grid: BGAGrid) -> float:
+def get_distance_to_escape_edge(route: "FanoutRoute", grid: BGAGrid) -> float:
     """
     Calculate how far the route's pad is from the escape edge.
     Larger value = farther from edge = should be jogged.
@@ -124,19 +118,18 @@ def get_distance_to_escape_edge(route: 'FanoutRoute', grid: BGAGrid) -> float:
     pad_x, pad_y = route.pad_pos
     escape_dir = route.escape_dir
 
-    if escape_dir == 'right':
+    if escape_dir == "right":
         return grid.max_x - pad_x  # farther from right edge = larger distance
-    elif escape_dir == 'left':
+    elif escape_dir == "left":
         return pad_x - grid.min_x  # farther from left edge = larger distance
-    elif escape_dir == 'down':
+    elif escape_dir == "down":
         return grid.max_y - pad_y  # farther from bottom edge = larger distance
-    elif escape_dir == 'up':
+    elif escape_dir == "up":
         return pad_y - grid.min_y  # farther from top edge = larger distance
     return 0.0
 
 
-def get_farther_channel(route: 'FanoutRoute', channels: List[Channel],
-                        grid: BGAGrid) -> Optional[Channel]:
+def get_farther_channel(route: "FanoutRoute", channels: list[Channel], grid: BGAGrid) -> Channel | None:
     """
     Get a channel one unit farther from the escape edge than the current channel.
 
@@ -147,13 +140,13 @@ def get_farther_channel(route: 'FanoutRoute', channels: List[Channel],
     if route.channel is None:
         return None
 
-    pitch = grid.pitch_y if route.channel.orientation == 'horizontal' else grid.pitch_x
+    pitch = grid.pitch_y if route.channel.orientation == "horizontal" else grid.pitch_x
     pad_x, pad_y = route.pad_pos
 
-    if route.channel.orientation == 'horizontal':
+    if route.channel.orientation == "horizontal":
         # For left/right escape, find channel one pitch farther from edge
         # "Farther from edge" means the route has to travel more vertically
-        same_orientation = [c for c in channels if c.orientation == 'horizontal' and c != route.channel]
+        same_orientation = [c for c in channels if c.orientation == "horizontal" and c != route.channel]
 
         if route.channel.position < pad_y:
             # Current channel is above pad - farther means even more above (smaller Y)
@@ -169,7 +162,7 @@ def get_farther_channel(route: 'FanoutRoute', channels: List[Channel],
                 return min(candidates, key=lambda c: c.position)
     else:
         # For up/down escape, find channel one pitch farther from edge
-        same_orientation = [c for c in channels if c.orientation == 'vertical' and c != route.channel]
+        same_orientation = [c for c in channels if c.orientation == "vertical" and c != route.channel]
 
         if route.channel.position < pad_x:
             # Current channel is left of pad - farther means even more left (smaller X)
@@ -185,17 +178,19 @@ def get_farther_channel(route: 'FanoutRoute', channels: List[Channel],
     return None
 
 
-def try_jogged_route(route: 'FanoutRoute',
-                     farther_channel: Channel,
-                     grid: BGAGrid,
-                     exit_margin: float,
-                     tracks: List[Dict],
-                     existing_tracks: List[Dict],
-                     available_layers: List[str],
-                     track_width: float,
-                     clearance: float,
-                     jog_length: float = None,
-                     no_inner_top_layer: bool = False) -> Optional[Tuple['FanoutRoute', str, List[Dict]]]:
+def try_jogged_route(
+    route: "FanoutRoute",
+    farther_channel: Channel,
+    grid: BGAGrid,
+    exit_margin: float,
+    tracks: list[dict],
+    existing_tracks: list[dict],
+    available_layers: list[str],
+    track_width: float,
+    clearance: float,
+    jog_length: float = None,
+    no_inner_top_layer: bool = False,
+) -> tuple["FanoutRoute", str, list[dict]] | None:
     """
     Try rerouting a signal through a farther channel using a jogged path.
 
@@ -237,7 +232,7 @@ def try_jogged_route(route: 'FanoutRoute',
     stub_end = create_45_stub(pad_x, pad_y, route.channel, route.escape_dir)
 
     # Step 2: Jog from stub_end to farther channel
-    if route.channel.orientation == 'horizontal':
+    if route.channel.orientation == "horizontal":
         # Jog is vertical (Y changes, X stays same)
         jog_point = (stub_end[0], farther_channel.position)
     else:
@@ -249,9 +244,9 @@ def try_jogged_route(route: 'FanoutRoute',
 
     # Create track segments for collision checking
     new_segments = [
-        {'start': route.pad_pos, 'end': stub_end},      # 45° stub
-        {'start': stub_end, 'end': jog_point},          # Vertical/horizontal jog
-        {'start': jog_point, 'end': exit_pos}           # Channel to exit
+        {"start": route.pad_pos, "end": stub_end},  # 45° stub
+        {"start": stub_end, "end": jog_point},  # Vertical/horizontal jog
+        {"start": jog_point, "end": exit_pos},  # Channel to exit
     ]
 
     # If no_inner_top_layer is set, exclude F.Cu for inner routes
@@ -261,7 +256,7 @@ def try_jogged_route(route: 'FanoutRoute',
         candidate_layers = available_layers
 
     # Get other tracks (excluding this route's current tracks)
-    other_new_tracks = [t for t in tracks if t.get('net_id') != route.net_id]
+    other_new_tracks = [t for t in tracks if t.get("net_id") != route.net_id]
     all_other_tracks = other_new_tracks + existing_tracks
 
     # Try each layer
@@ -269,13 +264,11 @@ def try_jogged_route(route: 'FanoutRoute',
         has_collision = False
         for seg in new_segments:
             for other in all_other_tracks:
-                if other['layer'] != layer:
+                if other["layer"] != layer:
                     continue
-                if other.get('net_id') == route.net_id:
+                if other.get("net_id") == route.net_id:
                     continue
-                if check_segment_collision(seg['start'], seg['end'],
-                                           other['start'], other['end'],
-                                           min_spacing):
+                if check_segment_collision(seg["start"], seg["end"], other["start"], other["end"], min_spacing):
                     has_collision = True
                     break
             if has_collision:
@@ -291,7 +284,7 @@ def try_jogged_route(route: 'FanoutRoute',
                 jog_length,
                 is_diff_pair=route.pair_id is not None,
                 is_outside_track=False,
-                pair_spacing=0
+                pair_spacing=0,
             )
 
             # Found a collision-free route
@@ -307,7 +300,7 @@ def try_jogged_route(route: 'FanoutRoute',
                 is_edge=route.is_edge,
                 layer=layer,
                 pair_id=route.pair_id,
-                is_p=route.is_p
+                is_p=route.is_p,
             )
 
             # Create track dicts for this route (including jog at exit)
@@ -323,9 +316,13 @@ def try_jogged_route(route: 'FanoutRoute',
     return None
 
 
-def find_existing_fanouts(pcb_data: PCBData, footprint: Footprint,
-                          grid: BGAGrid, channels: List[Channel],
-                          tolerance: float = FANOUT_DETECTION_TOLERANCE) -> Tuple[Set[int], Dict[Tuple[str, str, float], str]]:
+def find_existing_fanouts(
+    pcb_data: PCBData,
+    footprint: Footprint,
+    grid: BGAGrid,
+    channels: list[Channel],
+    tolerance: float = FANOUT_DETECTION_TOLERANCE,
+) -> tuple[set[int], dict[tuple[str, str, float], str]]:
     """
     Find pads that already have fanout tracks and identify occupied channel positions.
 
@@ -344,12 +341,12 @@ def find_existing_fanouts(pcb_data: PCBData, footprint: Footprint,
         - Set of net_ids that already have fanouts
         - Dict of occupied exit positions: (layer, direction_axis, position) -> net_name
     """
-    fanned_out_nets: Set[int] = set()
-    occupied_exits: Dict[Tuple[str, str, float], str] = {}
+    fanned_out_nets: set[int] = set()
+    occupied_exits: dict[tuple[str, str, float], str] = {}
 
     # Build a lookup of pad positions by net_id
-    pad_positions: Dict[int, Tuple[float, float]] = {}
-    net_names: Dict[int, str] = {}
+    pad_positions: dict[int, tuple[float, float]] = {}
+    net_names: dict[int, str] = {}
     for pad in footprint.pads:
         if pad.net_id > 0:
             pad_positions[pad.net_id] = (pad.global_x, pad.global_y)
@@ -363,10 +360,8 @@ def find_existing_fanouts(pcb_data: PCBData, footprint: Footprint,
         pad_x, pad_y = pad_positions[segment.net_id]
 
         # Check if segment starts or ends at the pad
-        starts_at_pad = (abs(segment.start_x - pad_x) < tolerance and
-                         abs(segment.start_y - pad_y) < tolerance)
-        ends_at_pad = (abs(segment.end_x - pad_x) < tolerance and
-                       abs(segment.end_y - pad_y) < tolerance)
+        starts_at_pad = abs(segment.start_x - pad_x) < tolerance and abs(segment.start_y - pad_y) < tolerance
+        ends_at_pad = abs(segment.end_x - pad_x) < tolerance and abs(segment.end_y - pad_y) < tolerance
 
         if starts_at_pad or ends_at_pad:
             fanned_out_nets.add(segment.net_id)
@@ -388,42 +383,47 @@ def find_existing_fanouts(pcb_data: PCBData, footprint: Footprint,
             if abs(dy) > abs(dx):
                 # Primarily vertical movement
                 if dy < 0:
-                    direction = 'up'
+                    direction = "up"
                 else:
-                    direction = 'down'
+                    direction = "down"
                 # Find the vertical channel being used
                 for ch in channels:
-                    if ch.orientation == 'vertical':
+                    if ch.orientation == "vertical":
                         if abs(ch.position - other_x) < grid.pitch_x / 2:
-                            exit_key = (segment.layer, f'{direction}_v', round(ch.position, 1))
+                            exit_key = (segment.layer, f"{direction}_v", round(ch.position, 1))
                             occupied_exits[exit_key] = net_names.get(segment.net_id, f"net_{segment.net_id}")
                             break
             else:
                 # Primarily horizontal movement
                 if dx < 0:
-                    direction = 'left'
+                    direction = "left"
                 else:
-                    direction = 'right'
+                    direction = "right"
                 # Find the horizontal channel being used
                 for ch in channels:
-                    if ch.orientation == 'horizontal':
+                    if ch.orientation == "horizontal":
                         if abs(ch.position - other_y) < grid.pitch_y / 2:
-                            exit_key = (segment.layer, f'{direction}_h', round(ch.position, 1))
+                            exit_key = (segment.layer, f"{direction}_h", round(ch.position, 1))
                             occupied_exits[exit_key] = net_names.get(segment.net_id, f"net_{segment.net_id}")
                             break
 
     return fanned_out_nets, occupied_exits
 
 
-def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
-                       available_layers: List[str], track_width: float,
-                       clearance: float, diff_pair_spacing: float,
-                       existing_tracks: List[Dict] = None,
-                       grid: BGAGrid = None,
-                       channels: List[Channel] = None,
-                       exit_margin: float = 0.5,
-                       net_names: Dict[int, str] = None,
-                       no_inner_top_layer: bool = False) -> Tuple[int, List[str]]:
+def resolve_collisions(
+    routes: list[FanoutRoute],
+    tracks: list[dict],
+    available_layers: list[str],
+    track_width: float,
+    clearance: float,
+    diff_pair_spacing: float,
+    existing_tracks: list[dict] = None,
+    grid: BGAGrid = None,
+    channels: list[Channel] = None,
+    exit_margin: float = 0.5,
+    net_names: dict[int, str] = None,
+    no_inner_top_layer: bool = False,
+) -> tuple[int, list[str]]:
     """Try to resolve collisions by reassigning layers for colliding pairs.
 
     First tries layer reassignment. If that fails for single-ended signals,
@@ -455,9 +455,9 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
 
     reassigned = 0
     rerouted = 0
-    failed_nets: List[str] = []
+    failed_nets: list[str] = []
     # Track which pairs have been moved this round to avoid moving collision partners to same layer
-    moved_this_round: Dict[str, str] = {}
+    moved_this_round: dict[str, str] = {}
 
     for identifier in sorted(colliding_pairs):
         # Find collision partners to avoid their new layers
@@ -467,12 +467,21 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
             if partner in moved_this_round:
                 avoid_layers.add(moved_this_round[partner])
 
-        new_layer = try_reassign_layer(identifier, routes, tracks, available_layers,
-                                        track_width, clearance, diff_pair_spacing,
-                                        avoid_layers, existing_tracks, no_inner_top_layer)
+        new_layer = try_reassign_layer(
+            identifier,
+            routes,
+            tracks,
+            available_layers,
+            track_width,
+            clearance,
+            diff_pair_spacing,
+            avoid_layers,
+            existing_tracks,
+            no_inner_top_layer,
+        )
         if new_layer:
             # Determine if this is a single-ended net or a diff pair
-            is_single_ended = identifier.startswith('net_')
+            is_single_ended = identifier.startswith("net_")
 
             if is_single_ended:
                 net_id = int(identifier[4:])
@@ -482,8 +491,8 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                         route.layer = new_layer
                 # Update tracks for this single-ended net
                 for track in tracks:
-                    if track.get('net_id') == net_id and not track.get('pair_id'):
-                        track['layer'] = new_layer
+                    if track.get("net_id") == net_id and not track.get("pair_id"):
+                        track["layer"] = new_layer
             else:
                 # Update routes for this diff pair
                 for route in routes:
@@ -491,15 +500,15 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                         route.layer = new_layer
                 # Update tracks for this diff pair
                 for track in tracks:
-                    if track.get('pair_id') == identifier:
-                        track['layer'] = new_layer
+                    if track.get("pair_id") == identifier:
+                        track["layer"] = new_layer
 
             moved_this_round[identifier] = new_layer
             reassigned += 1
             print(f"    Reassigned {identifier} to {new_layer}")
         else:
             # Layer reassignment failed - try alternate channel for single-ended signals
-            is_single_ended = identifier.startswith('net_')
+            is_single_ended = identifier.startswith("net_")
             resolved = False
 
             if is_single_ended and grid is not None and channels is not None:
@@ -515,23 +524,30 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                 if route and route.channel is not None:
                     # Get THE alternate channel (only one - on the opposite side)
                     alt_channels = get_alternate_channels_for_pad(
-                        route.pad_pos[0], route.pad_pos[1],
-                        route.channel, route.escape_dir, channels
+                        route.pad_pos[0], route.pad_pos[1], route.channel, route.escape_dir, channels
                     )
 
                     # Try the alternate channel (there's only one)
                     for alt_channel in alt_channels:
                         result = try_reroute_single_ended(
-                            route, alt_channel, grid, exit_margin,
-                            tracks, existing_tracks, available_layers,
-                            track_width, clearance, no_inner_top_layer
+                            route,
+                            alt_channel,
+                            grid,
+                            exit_margin,
+                            tracks,
+                            existing_tracks,
+                            available_layers,
+                            track_width,
+                            clearance,
+                            no_inner_top_layer,
                         )
                         if result:
                             new_route, new_layer = result
 
                             # Remove old tracks for this net
-                            old_track_indices = [i for i, t in enumerate(tracks)
-                                                if t.get('net_id') == net_id and not t.get('pair_id')]
+                            old_track_indices = [
+                                i for i, t in enumerate(tracks) if t.get("net_id") == net_id and not t.get("pair_id")
+                            ]
                             for idx in sorted(old_track_indices, reverse=True):
                                 tracks.pop(idx)
 
@@ -540,10 +556,12 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                             routes[route_idx] = new_route
 
                             # Add new tracks
-                            tracks.append(create_track(new_route.pad_pos, new_route.stub_end,
-                                                       track_width, new_layer, net_id))
-                            tracks.append(create_track(new_route.stub_end, new_route.exit_pos,
-                                                       track_width, new_layer, net_id))
+                            tracks.append(
+                                create_track(new_route.pad_pos, new_route.stub_end, track_width, new_layer, net_id)
+                            )
+                            tracks.append(
+                                create_track(new_route.stub_end, new_route.exit_pos, track_width, new_layer, net_id)
+                            )
 
                             rerouted += 1
                             resolved = True
@@ -560,9 +578,7 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                         if other_route.channel is None:
                             continue
                         # Check if they use the same channel (or the alternate channel we tried)
-                        if other_route.channel == route.channel:
-                            conflicting_routes.append(other_route)
-                        elif alt_channels and other_route.channel in alt_channels:
+                        if other_route.channel == route.channel or alt_channels and other_route.channel in alt_channels:
                             conflicting_routes.append(other_route)
 
                     # Try to move the route that is FARTHER from escape edge to a jogged path
@@ -587,17 +603,24 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                             continue
 
                         result = try_jogged_route(
-                            to_jog, farther_ch, grid, exit_margin,
-                            tracks, existing_tracks, available_layers,
-                            track_width, clearance, None, no_inner_top_layer
+                            to_jog,
+                            farther_ch,
+                            grid,
+                            exit_margin,
+                            tracks,
+                            existing_tracks,
+                            available_layers,
+                            track_width,
+                            clearance,
+                            None,
+                            no_inner_top_layer,
                         )
                         if result:
                             new_jogged_route, new_layer, new_jogged_tracks = result
                             jogged_net_name = net_names.get(to_jog.net_id, f"net_{to_jog.net_id}")
 
                             # Remove old tracks for the route being jogged
-                            old_track_indices = [i for i, t in enumerate(tracks)
-                                                if t.get('net_id') == to_jog.net_id]
+                            old_track_indices = [i for i, t in enumerate(tracks) if t.get("net_id") == to_jog.net_id]
                             for idx in sorted(old_track_indices, reverse=True):
                                 tracks.pop(idx)
 
@@ -619,16 +642,26 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                                 # We jogged the conflicting route - now retry the original route
                                 # First try the original channel (now freed up)
                                 retry_result = try_reroute_single_ended(
-                                    route, route.channel, grid, exit_margin,
-                                    tracks, existing_tracks, available_layers,
-                                    track_width, clearance, no_inner_top_layer
+                                    route,
+                                    route.channel,
+                                    grid,
+                                    exit_margin,
+                                    tracks,
+                                    existing_tracks,
+                                    available_layers,
+                                    track_width,
+                                    clearance,
+                                    no_inner_top_layer,
                                 )
                                 if retry_result:
                                     new_route, retry_layer = retry_result
 
                                     # Remove old tracks for this net
-                                    old_track_indices = [i for i, t in enumerate(tracks)
-                                                        if t.get('net_id') == net_id and not t.get('pair_id')]
+                                    old_track_indices = [
+                                        i
+                                        for i, t in enumerate(tracks)
+                                        if t.get("net_id") == net_id and not t.get("pair_id")
+                                    ]
                                     for idx in sorted(old_track_indices, reverse=True):
                                         tracks.pop(idx)
 
@@ -637,10 +670,16 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                                     routes[route_idx] = new_route
 
                                     # Add new tracks
-                                    tracks.append(create_track(new_route.pad_pos, new_route.stub_end,
-                                                               track_width, retry_layer, net_id))
-                                    tracks.append(create_track(new_route.stub_end, new_route.exit_pos,
-                                                               track_width, retry_layer, net_id))
+                                    tracks.append(
+                                        create_track(
+                                            new_route.pad_pos, new_route.stub_end, track_width, retry_layer, net_id
+                                        )
+                                    )
+                                    tracks.append(
+                                        create_track(
+                                            new_route.stub_end, new_route.exit_pos, track_width, retry_layer, net_id
+                                        )
+                                    )
 
                                     rerouted += 1
                                     resolved = True
@@ -657,8 +696,9 @@ def resolve_collisions(routes: List[FanoutRoute], tracks: List[Dict],
                         routes.remove(route)
 
                     # Remove tracks for this net
-                    old_track_indices = [i for i, t in enumerate(tracks)
-                                        if t.get('net_id') == net_id and not t.get('pair_id')]
+                    old_track_indices = [
+                        i for i, t in enumerate(tracks) if t.get("net_id") == net_id and not t.get("pair_id")
+                    ]
                     for idx in sorted(old_track_indices, reverse=True):
                         tracks.pop(idx)
 

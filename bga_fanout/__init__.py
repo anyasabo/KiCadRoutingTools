@@ -22,7 +22,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kicad_parser import parse_kicad_pcb, Pad, Footprint, PCBData, find_components_by_type
+from kicad_parser import parse_kicad_pcb, Pad, Footprint, PCBData, find_components_by_type, KICAD_10_MIN_VERSION
 from net_queries import matches_net_filter
 from kicad_writer import add_tracks_and_vias_to_pcb
 from bga_fanout.types import (
@@ -1615,7 +1615,9 @@ def main():
             print(f"  Adding {len(vias_to_add)} vias")
         if vias_to_remove:
             print(f"  Removing {len(vias_to_remove)} vias")
-        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias_to_add, vias_to_remove)
+        kicad_v10_names = pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None
+        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias_to_add, vias_to_remove,
+                                   net_id_to_name=kicad_v10_names)
         print("Done!")
     else:
         print("\nNo fanout tracks generated")

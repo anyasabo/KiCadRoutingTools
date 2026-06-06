@@ -190,12 +190,12 @@ def generate_zone_sexpr(
     # Connect pads mode: "yes" for direct solid connection, omit for thermal relief
     if direct_connect:
         connect_pads_str = f'''(connect_pads yes
-		(clearance {clearance})
-	)'''
+			(clearance {clearance})
+		)'''
     else:
         connect_pads_str = f'''(connect_pads
-		(clearance {clearance})
-	)'''
+			(clearance {clearance})
+		)'''
 
     # KiCad 10: (net "name"), no (net_name ...) line; KiCad 9: (net id) + (net_name "name")
     if use_net_name:

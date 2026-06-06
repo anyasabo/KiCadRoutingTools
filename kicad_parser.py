@@ -1474,6 +1474,17 @@ def build_pcb_data_from_board(board, guide_layer: str = "User.1",
         val = getattr(pcbnew, attr, None)
         if val is not None:
             pad_shape_map[val] = name
+    # KiCad 10 enum class: pcbnew.PAD_SHAPE.CIRCLE, etc.
+    pad_shape_enum = getattr(pcbnew, 'PAD_SHAPE', None)
+    if pad_shape_enum is not None:
+        for member, name in [
+            ('CIRCLE', 'circle'), ('RECTANGLE', 'rect'), ('OVAL', 'oval'),
+            ('ROUNDRECT', 'roundrect'), ('TRAPEZOID', 'trapezoid'),
+            ('CUSTOM', 'custom'), ('CHAMFERED_RECT', 'roundrect'),
+        ]:
+            val = getattr(pad_shape_enum, member, None)
+            if val is not None and val not in pad_shape_map:
+                pad_shape_map[val] = name
 
     def get_pad_shape_name(shape_enum):
         return pad_shape_map.get(shape_enum, 'rect')
@@ -1848,6 +1859,21 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
     if edge_cuts_id is None:
         return [], []
 
+    # Resolve shape type constants across KiCad versions:
+    # KiCad 8: S_SEGMENT, S_RECT, S_ARC
+    # KiCad 9: SHAPE_T_SEGMENT, SHAPE_T_RECT, SHAPE_T_ARC
+    # KiCad 10: SHAPE_T.SEGMENT, SHAPE_T.RECT, SHAPE_T.ARC (enum class)
+    shape_t = getattr(pcbnew, 'SHAPE_T', None)
+    SHAPE_SEGMENT = getattr(shape_t, 'SEGMENT', None) if shape_t else None
+    SHAPE_RECT = getattr(shape_t, 'RECT', None) if shape_t else None
+    SHAPE_ARC = getattr(shape_t, 'ARC', None) if shape_t else None
+    if SHAPE_SEGMENT is None:
+        SHAPE_SEGMENT = getattr(pcbnew, 'SHAPE_T_SEGMENT', getattr(pcbnew, 'S_SEGMENT', -1))
+    if SHAPE_RECT is None:
+        SHAPE_RECT = getattr(pcbnew, 'SHAPE_T_RECT', getattr(pcbnew, 'S_RECT', -2))
+    if SHAPE_ARC is None:
+        SHAPE_ARC = getattr(pcbnew, 'SHAPE_T_ARC', getattr(pcbnew, 'S_ARC', -3))
+
     segments = []
     for drawing in board.GetDrawings():
         if drawing.GetLayer() != edge_cuts_id:
@@ -1857,14 +1883,14 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
             try:
                 shape_type = drawing.GetShape()
                 # Line segment
-                if shape_type == getattr(pcbnew, 'SHAPE_T_SEGMENT', getattr(pcbnew, 'S_SEGMENT', -1)):
+                if shape_type == SHAPE_SEGMENT:
                     start = drawing.GetStart()
                     end = drawing.GetEnd()
                     segments.append((
                         (to_mm(start.x), to_mm(start.y)),
                         (to_mm(end.x), to_mm(end.y))
                     ))
-                elif shape_type == getattr(pcbnew, 'SHAPE_T_RECT', getattr(pcbnew, 'S_RECT', -1)):
+                elif shape_type == SHAPE_RECT:
                     start = drawing.GetStart()
                     end = drawing.GetEnd()
                     x1, y1 = to_mm(start.x), to_mm(start.y)
@@ -1873,7 +1899,7 @@ def _extract_board_contours_from_pcbnew(board, to_mm):
                     segments.append(((x2, y1), (x2, y2)))
                     segments.append(((x2, y2), (x1, y2)))
                     segments.append(((x1, y2), (x1, y1)))
-                elif shape_type == getattr(pcbnew, 'SHAPE_T_ARC', getattr(pcbnew, 'S_ARC', -1)):
+                elif shape_type == SHAPE_ARC:
                     start = drawing.GetStart()
                     mid = drawing.GetArcMid()
                     end = drawing.GetEnd()

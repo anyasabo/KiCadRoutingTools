@@ -2676,7 +2676,11 @@ class RoutingDialog(wx.Dialog):
             nonlocal count
             layer_id = user_layers.get(layer_name, pcbnew.User_9)
             shape = pcbnew.PCB_SHAPE(board)
-            shape.SetShape(pcbnew.SHAPE_T_SEGMENT)
+            shape_t = getattr(pcbnew, 'SHAPE_T', None)
+            seg_type = getattr(shape_t, 'SEGMENT', None) if shape_t else None
+            if seg_type is None:
+                seg_type = getattr(pcbnew, 'SHAPE_T_SEGMENT', getattr(pcbnew, 'S_SEGMENT', 0))
+            shape.SetShape(seg_type)
             shape.SetStart(pcbnew.VECTOR2I(
                 pcbnew.FromMM(start[0]),
                 pcbnew.FromMM(start[1])

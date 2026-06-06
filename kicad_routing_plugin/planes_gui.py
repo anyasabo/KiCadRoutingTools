@@ -929,7 +929,8 @@ class PlanesTab(wx.Panel):
 
         # Get layer name to ID mapping
         name_to_id = {}
-        for i in range(pcbnew.PCB_LAYER_ID_COUNT):
+        layer_count = getattr(pcbnew, 'PCB_LAYER_ID_COUNT', 128)
+        for i in range(layer_count):
             name = board.GetLayerName(i)
             if name:
                 name_to_id[name] = i
@@ -1036,7 +1037,11 @@ class PlanesTab(wx.Panel):
                 # Set zone properties
                 zone.SetLocalClearance(pcbnew.FromMM(zone_data.get('clearance', 0.2)))
                 zone.SetMinThickness(pcbnew.FromMM(zone_data.get('min_thickness', 0.1)))
-                zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)  # Direct connect
+                zc_enum = getattr(pcbnew, 'ZONE_CONNECTION', None)
+                zc_full = getattr(zc_enum, 'FULL', None) if zc_enum else None
+                if zc_full is None:
+                    zc_full = getattr(pcbnew, 'ZONE_CONNECTION_FULL', 1)
+                zone.SetPadConnection(zc_full)
                 # Hatch the outline so the zone is visible immediately;
                 # the actual copper fill is computed below via ZONE_FILLER.
                 try:

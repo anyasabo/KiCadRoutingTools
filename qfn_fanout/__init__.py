@@ -18,7 +18,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kicad_parser import parse_kicad_pcb, Footprint, PCBData, find_components_by_type
+from kicad_parser import parse_kicad_pcb, Footprint, PCBData, find_components_by_type, KICAD_10_MIN_VERSION
 from kicad_writer import add_tracks_and_vias_to_pcb
 from qfn_fanout.types import QFNLayout, PadInfo, FanoutStub
 from bga_fanout.constants import POSITION_TOLERANCE
@@ -269,7 +269,9 @@ def main():
 
     if tracks:
         print(f"\nWriting {len(tracks)} tracks to {args.output}...")
-        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias)
+        kicad_v10_names = pcb_data.net_id_to_name if pcb_data.kicad_version >= KICAD_10_MIN_VERSION else None
+        add_tracks_and_vias_to_pcb(args.pcb, args.output, tracks, vias,
+                                   net_id_to_name=kicad_v10_names)
         print("Done!")
     else:
         print("\nNo fanout tracks generated")

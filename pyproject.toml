@@ -39,13 +39,20 @@ select = [
     "SIM", # flake8-simplify
 ]
 ignore = [
-    "E501",   # line too long
-    "SIM108", # ternary operator
+    "E402",   # module-level import not at top (sys.path + utility functions pattern)
+    "E501",   # line too long (handled by formatter)
+    "E741",   # ambiguous variable name (l, I — context makes clear)
+    "B007",   # unused loop variable (prefixing with _ is noise)
+    "B023",   # loop variable in closure (false positive — called within same iteration)
+    "SIM102", # nested if → combined if (nested is often clearer)
+    "SIM108", # ternary operator (explicit if/else preferred)
+    "SIM112", # env var capitalization (OneDrive is the real Windows var name)
+    "SIM116", # dict instead of if-chain (if-chain is clearer for 3-4 branches)
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"kicad_routing_plugin/*" = ["F401", "E402"]
-"pygame_visualizer/*" = ["F401", "E402"]
+"kicad_routing_plugin/*" = ["F401", "E402", "UP035", "B904", "SIM105"]
+"pygame_visualizer/*" = ["F401", "E402", "UP035"]
 
 [tool.pyright]
 pythonVersion = "3.14"
@@ -54,6 +61,16 @@ typeCheckingMode = "basic"
 reportMissingImports = "warning"
 reportMissingModuleSource = false
 reportMissingTypeStubs = false
+reportOptionalMemberAccess = "warning"
+reportOptionalSubscript = "warning"
+reportOptionalOperand = "warning"
+reportGeneralTypeIssues = "warning"
+reportArgumentType = "warning"
+reportReturnType = "warning"
+reportCallIssue = "warning"
+reportIndexIssue = "warning"
+reportOperatorIssue = "warning"
+reportAttributeAccessIssue = "warning"
 exclude = [
     "kicad_routing_plugin/",
     "pygame_visualizer/",

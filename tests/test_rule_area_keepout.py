@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from pathlib import Path
 
 from test_keepout import (
     BASE_BOARD,
@@ -39,7 +40,7 @@ def _keepout_zone(points, layers=("F.Cu", "B.Cu"), tracks_allowed=False, vias_al
 
 def make_board_with_zones(zones_text):
     """Write a temp board = base board + the given keepout zone S-expressions."""
-    text = open(BASE_BOARD).read()
+    text = Path(BASE_BOARD).read_text()
     idx = text.rstrip().rfind(")")
     fd, path = tempfile.mkstemp(suffix=".kicad_pcb", prefix="ruleko_test_")
     os.close(fd)

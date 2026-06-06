@@ -1,6 +1,7 @@
 # KiCad Routing Tools - SWIG Action Plugin Registration
 # This file must be at the root of the plugin directory for KiCad to find it
 
+import contextlib
 import os
 import platform
 import shutil
@@ -37,10 +38,8 @@ def _resolve_rust_binary():
     for name in candidates:
         src = os.path.join(rust_dir, name)
         if os.path.exists(src):
-            try:
+            with contextlib.suppress(OSError):
                 shutil.copy2(src, os.path.join(rust_dir, canonical))
-            except OSError:
-                pass
             return
 
 

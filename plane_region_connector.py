@@ -766,7 +766,6 @@ def _try_route_between_regions(
 
     # Step 2: If we found a route at min width, try wider widths with bounded budget
     if result is not None and len(track_widths_narrow_first) > 1:
-        narrow_result = result
         iter_budget = max(base_iterations * 3, 1000)  # at least 1000
 
         # Try wider widths (skip min_track_width which we already did)

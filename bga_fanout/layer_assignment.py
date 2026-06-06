@@ -56,7 +56,7 @@ def assign_layers_smart(
     track_width: float,
     clearance: float,
     diff_pair_spacing: float = 0.0,
-    existing_tracks: list[dict] = None,
+    existing_tracks: list[dict] | None = None,
     no_inner_top_layer: bool = False,
 ) -> None:
     """
@@ -276,8 +276,8 @@ def try_reassign_layer(
     track_width: float,
     clearance: float,
     diff_pair_spacing: float,
-    avoid_layers: set[str] = None,
-    existing_tracks: list[dict] = None,
+    avoid_layers: set[str] | None = None,
+    existing_tracks: list[dict] | None = None,
     no_inner_top_layer: bool = False,
 ) -> str | None:
     """Try to find a different layer for a colliding pair/net that has no conflicts.

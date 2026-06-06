@@ -79,9 +79,9 @@ def batch_route_diff_pairs(
     input_file: str,
     output_file: str,
     net_names: list[str],
-    layers: list[str] = None,
-    bga_exclusion_zones: list[tuple[float, float, float, float]] | None = None,
-    direction_order: str = None,
+    layers: list[str] | None = None,
+    bga_exclusion_zones: list[tuple[float, float, float, float, float]] | None = None,
+    direction_order: str | None = None,
     ordering_strategy: str = "inside_out",
     disable_bga_zones: list[str] | None = None,
     track_width: float = 0.1,
@@ -112,7 +112,7 @@ def batch_route_diff_pairs(
     track_proximity_distance: float = defaults.TRACK_PROXIMITY_DISTANCE,
     track_proximity_cost: float = defaults.TRACK_PROXIMITY_COST,
     diff_pair_gap: float = defaults.DIFF_PAIR_GAP,
-    diff_pair_centerline_setback: float = None,
+    diff_pair_centerline_setback: float | None = None,
     min_turning_radius: float = defaults.DIFF_PAIR_MIN_TURNING_RADIUS,
     debug_lines: bool = False,
     verbose: bool = False,
@@ -620,18 +620,11 @@ def batch_route_diff_pairs(
     )
 
     # Create local aliases for frequently-used state fields
-    routed_net_ids = state.routed_net_ids
-    routed_net_paths = state.routed_net_paths
     routed_results = state.routed_results
     diff_pair_by_net_id = state.diff_pair_by_net_id
-    track_proximity_cache = state.track_proximity_cache
-    layer_map = state.layer_map
-    reroute_queue = state.reroute_queue
     polarity_swapped_pairs = state.polarity_swapped_pairs
-    rip_and_retry_history = state.rip_and_retry_history
     ripup_success_pairs = state.ripup_success_pairs
     rerouted_pairs = state.rerouted_pairs
-    remaining_net_ids = state.remaining_net_ids
     results = state.results
     pad_swaps = state.pad_swaps
 
@@ -682,9 +675,9 @@ def batch_route_diff_pairs(
             pair_name = pair_info[0] if pair_info else f"net_{net_id}"
 
             print(f"\n{pair_name}:")
-            seg_count_before = len(result.get("new_segments", []))
+            len(result.get("new_segments", []))
             apply_intra_pair_length_matching(result, config, pcb_data)
-            seg_count_after = len(result.get("new_segments", []))
+            len(result.get("new_segments", []))
 
     # Sync pcb_data with length-matched segments
     sync_pcb_data_segments(pcb_data, routed_results, original_segment_ids, state, config)

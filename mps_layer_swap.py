@@ -53,11 +53,9 @@ def _get_unit_stub_info(
     if is_diff_pair:
         # Find the diff pair for this unit
         pair = None
-        pair_name = None
         for name, p in diff_pairs.items():
             if p.p_net_id in net_ids and p.n_net_id in net_ids:
                 pair = p
-                pair_name = name
                 break
 
         if not pair:
@@ -280,9 +278,6 @@ def try_mps_aware_layer_swaps(
                     swap_nets = mps_result.unit_to_nets.get(swap_unit_id, [swap_unit_id])
                     if any(n in nets_swapped for n in swap_nets):
                         continue
-
-                    other_unit_layers = r1_layers if swap_unit_id == r2_unit else r2_layers
-                    swap_which = "a" if swap_unit_id == r2_unit else "b"
 
                     if verbose and swap_unit_id == r1_unit:
                         print(f"  Trying R1 unit {swap_unit_name} instead...")

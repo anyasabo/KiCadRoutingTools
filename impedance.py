@@ -883,7 +883,7 @@ def get_via_barrel_epsilon_eff(pcb: PCBData, layer1: str, layer2: str) -> float:
     return weighted_epsilon / total_thickness
 
 
-def calculate_route_propagation_time_ps(segments: list, vias: list = None, pcb_data: PCBData = None) -> float:
+def calculate_route_propagation_time_ps(segments: list, vias: list = None, pcb_data: PCBData | None = None) -> float:
     """
     Calculate total propagation time for a route in picoseconds.
 

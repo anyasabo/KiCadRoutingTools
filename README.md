@@ -955,12 +955,51 @@ Features:
 - **Hole-to-hole clearance** - Respects drill hole clearances when placing new vias
 - **Multi-layer routing** - Can route through any copper layer to connect regions
 
+## Development
+
+### Setup
+
+```bash
+# Install uv (https://docs.astral.sh/uv/)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create venv and install dev dependencies
+uv sync --extra dev
+
+# Build the Rust router extension
+uv run python build_router.py
+```
+
+### Running tests
+
+```bash
+uv run pytest                          # all fast tests
+uv run pytest -m "not slow"            # skip full-pipeline tests
+uv run pytest tests/test_parser.py -v  # specific file
+uv run pytest --quick                  # pipeline tests in abbreviated mode
+```
+
+### Linting and formatting
+
+```bash
+uv run ruff check .          # lint
+uv run ruff check --fix .    # lint + auto-fix
+uv run ruff format .         # format
+uv run ruff format --check . # check only (CI)
+```
+
+### Type checking
+
+```bash
+uv run pyright .
+```
+
+Warnings for `grid_router` (Rust extension) and `pcbnew` (KiCad runtime) imports are expected — these modules are only available at runtime.
+
 ## Requirements
 
-- Python 3.7+
-- numpy (`pip3 install numpy`)
-- scipy (`pip3 install scipy`) - used for optimal target assignment and Voronoi partitioning
-- shapely (`pip3 install shapely`) - used for polygon union in multi-net plane layers
+- Python 3.14+
+- numpy, scipy, shapely (installed automatically via `uv sync`)
 - Rust toolchain — only needed if you build the router from source (`python build_router.py --from-source`); not required when using the prebuilt binary
 - pygame-ce (optional, for visualizer: `pip3 install pygame-ce`)
 

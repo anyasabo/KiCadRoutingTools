@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -45,7 +46,7 @@ def _gr_line(x1, y1, x2, y2):
 
 def make_board_with_guide(segments):
     """Write a temp board = base board + the given User.1 guide segments."""
-    text = open(BASE_BOARD).read()
+    text = Path(BASE_BOARD).read_text()
     guide = "\n" + "".join(_gr_line(*s) for s in segments) + "\n"
     idx = text.rstrip().rfind(")")
     fd, path = tempfile.mkstemp(suffix=".kicad_pcb", prefix="guide_test_")

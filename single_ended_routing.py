@@ -26,12 +26,17 @@ from terminal_colors import RESET, YELLOW
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from grid_router import GridObstacleMap, GridRouter, VisualRouter
-except ImportError:
-    GridObstacleMap = None
-    GridRouter = None
-    VisualRouter = None
+else:
+    try:
+        from grid_router import GridObstacleMap, GridRouter, VisualRouter
+    except ImportError:
+        GridObstacleMap = None
+        GridRouter = None
+        VisualRouter = None
 
 
 def print_route_stats(stats: dict, print_prefix: str = "  "):
@@ -240,8 +245,8 @@ def _diagnose_blocked_start(
     label: str,
     print_prefix: str = "",
     track_margin: int = 0,
-    pcb_data: PCBData = None,
-    config: GridRouteConfig = None,
+    pcb_data: PCBData | None = None,
+    config: GridRouteConfig | None = None,
     current_net_id: int = -1,
 ):
     """
@@ -330,7 +335,7 @@ def _probe_route_with_frontier(
     print_prefix: str = "",
     direction_labels: tuple[str, str] = ("forward", "backward"),
     track_margin: int = 0,
-    pcb_data: PCBData = None,
+    pcb_data: PCBData | None = None,
     current_net_id: int = -1,
     single_direction: bool = False,
 ) -> tuple[list | None, int, list, list, bool, int, int]:
@@ -1203,7 +1208,7 @@ def build_corridor_waypoints(pcb_data: PCBData, config: GridRouteConfig) -> list
         pts = list(gp.points)
         if gp.is_closed and len(pts) >= 2:
             pts.append(pts[0])
-        for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:], strict=False):
             g1 = coord.to_grid(x1, y1)
             g2 = coord.to_grid(x2, y2)
             cells.append(g1)
@@ -2075,7 +2080,7 @@ def route_multipoint_main(
 
 
 def get_all_segment_tap_points(
-    segments: list[Segment], coord: GridCoord, layer_names: list[str], vias: list = None
+    segments: list[Segment], coord: GridCoord, layer_names: list[str], vias: list | None = None
 ) -> list[tuple[int, int, int, float, float]]:
     """
     Get all grid points along existing segments and vias as potential tap sources.
@@ -2447,7 +2452,7 @@ def route_multipoint_taps(
         1 for i in range(len(pad_info)) if i in routed_indices or pad_components.get(i, i) in routed_components
     )
     pads_total = len(pad_info)
-    pads_failed = pads_total - pads_connected
+    pads_total - pads_connected
 
     # Collect detailed info about failed (unconnected) pads
     failed_pads_info = []
@@ -2496,7 +2501,7 @@ def _path_to_segments_vias(
     config: GridRouteConfig,
     start_original: tuple[float, float, str],
     end_original: tuple[float, float, str],
-    through_hole_positions: set[tuple[int, int]] = None,
+    through_hole_positions: set[tuple[int, int]] | None = None,
 ) -> tuple[list[Segment], list[Via]]:
     """
     Convert a grid path to Segment and Via objects.

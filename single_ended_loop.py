@@ -122,11 +122,11 @@ def route_single_ended_nets(
     state: RoutingState,
     single_ended_nets: list[tuple[str, int]],
     visualize: bool = False,
-    vis_callback: Any = None,
-    base_vis_data: Any = None,
+    vis_callback: Any | None = None,
+    base_vis_data: Any | None = None,
     route_index_start: int = 0,
-    cancel_check: Any = None,
-    progress_callback: Any = None,
+    cancel_check: Any | None = None,
+    progress_callback: Any | None = None,
 ) -> tuple[int, int, float, int, int, bool]:
     """
     Route all single-ended nets.

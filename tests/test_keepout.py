@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -53,7 +54,7 @@ def box(x1, y1, x2, y2):
 
 def make_board_with_keepout(polys):
     """Write a temp board = base board + the given User.2 keepout polygons."""
-    text = open(BASE_BOARD).read()
+    text = Path(BASE_BOARD).read_text()
     blob = "\n" + "".join(_gr_poly(p) for p in polys) + "\n"
     idx = text.rstrip().rfind(")")
     fd, path = tempfile.mkstemp(suffix=".kicad_pcb", prefix="keepout_test_")
@@ -194,7 +195,7 @@ class TestKeepout:
         """Real board /CLK avoids a User.2 keepout across its path."""
         polys = [box(112.5, 64.5, 116.0, 68.0)]
         geom = ["--track-width", "0.2", "--clearance", "0.2", "--layers", "F.Cu", "B.Cu"]
-        text = open(LVDS_BOARD).read()
+        text = Path(LVDS_BOARD).read_text()
         blob = "\n" + "".join(_gr_poly(p) for p in polys) + "\n"
         idx = text.rstrip().rfind(")")
         fd, board = tempfile.mkstemp(suffix=".kicad_pcb", prefix="keepout_lvds_")

@@ -334,7 +334,7 @@ def try_place_via_with_ripup(
     all_copper_layers: list[str],
     via_blocked: bool,  # True if via placement failed, False if routing failed
     blocked_cells: list[tuple[int, int, int]] | None = None,  # Frontier from failed route
-    new_vias: list[dict] = None,  # Previously placed vias to re-block after rebuild
+    new_vias: list[dict] | None = None,  # Previously placed vias to re-block after rebuild
     hole_to_hole_clearance: float = 0.2,
     via_drill: float = 0.4,
     protected_net_ids: set[int] | None = None,  # Nets that should never be ripped up

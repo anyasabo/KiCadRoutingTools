@@ -90,10 +90,7 @@ class PyGameVisualizationCallback(VisualizationCallback):
             return False
 
         # Check for quit
-        if not self.visualizer.running:
-            return False
-
-        return True
+        return self.visualizer.running
 
     def on_net_complete(
         self, net_name: str, success: bool, path: list[tuple[int, int, int]] | None, iterations: int, direction: str

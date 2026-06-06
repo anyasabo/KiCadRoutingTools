@@ -30,12 +30,12 @@ def rip_up_net(
     remaining_net_ids: list[int],
     results: list[dict],
     config: GridRouteConfig,
-    track_proximity_cache: dict[int, dict] = None,
-    working_obstacles: "GridObstacleMap" = None,
-    net_obstacles_cache: dict[int, "NetObstacleData"] = None,
-    ripped_route_layer_costs: dict[int, "np.ndarray"] = None,
-    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
-    layer_map: dict[str, int] = None,
+    track_proximity_cache: dict[int, dict] | None = None,
+    working_obstacles: GridObstacleMap | None = None,
+    net_obstacles_cache: dict[int, "NetObstacleData"] | None = None,
+    ripped_route_layer_costs: dict[int, "np.ndarray"] | None = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] | None = None,
+    layer_map: dict[str, int] | None = None,
 ) -> tuple[dict | None, list[int], bool]:
     """Rip up a routed net (or diff pair), removing it from pcb_data and tracking structures.
 
@@ -148,12 +148,12 @@ def restore_net(
     remaining_net_ids: list[int],
     results: list[dict],
     config: GridRouteConfig,
-    track_proximity_cache: dict[int, dict] = None,
-    layer_map: dict[str, int] = None,
-    working_obstacles: "GridObstacleMap" = None,
-    net_obstacles_cache: dict[int, "NetObstacleData"] = None,
-    ripped_route_layer_costs: dict[int, "np.ndarray"] = None,
-    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
+    track_proximity_cache: dict[int, dict] | None = None,
+    layer_map: dict[str, int] | None = None,
+    working_obstacles: GridObstacleMap | None = None,
+    net_obstacles_cache: dict[int, "NetObstacleData"] | None = None,
+    ripped_route_layer_costs: dict[int, "np.ndarray"] | None = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] | None = None,
 ):
     """Restore a previously ripped net to pcb_data and tracking structures.
 

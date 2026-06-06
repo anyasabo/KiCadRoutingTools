@@ -79,13 +79,10 @@ def route_diff_pairs(
     # Cache for obstacle cells - persists across retry iterations for performance
     obstacle_cache = {}
 
-    user_cancelled = False
-
     for pair_name, pair in diff_pair_ids_to_route:
         # Check for cancellation request
         if state.cancel_check is not None and state.cancel_check():
             print("\nRouting cancelled by user")
-            user_cancelled = True
             break
 
         route_index += 1

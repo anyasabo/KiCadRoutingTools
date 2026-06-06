@@ -120,7 +120,7 @@ def resolve_net_id(pcb_data: PCBData, net_name: str) -> int | None:
 
 
 def filter_nets_from_content(
-    content: str, net_ids_to_exclude: list[int], net_names_to_exclude: list[str] = None
+    content: str, net_ids_to_exclude: list[int], net_names_to_exclude: list[str] | None = None
 ) -> str:
     """
     Filter out segments and vias for specific net IDs from PCB file content.
@@ -189,7 +189,7 @@ def filter_nets_from_content(
 
 
 def filter_zones_from_content(
-    content: str, zones_to_remove: list[tuple[int, str]], zone_names_to_remove: list[tuple[str, str]] = None
+    content: str, zones_to_remove: list[tuple[int, str]], zone_names_to_remove: list[tuple[str, str]] | None = None
 ) -> str:
     """
     Filter out zones for specific (net_id, layer) pairs from PCB file content.
@@ -265,11 +265,11 @@ def write_plane_output(
     zone_sexpr: str | None,
     new_vias: list[dict],
     new_segments: list[dict],
-    exclude_net_ids: list[int] = None,
-    zones_to_replace: list[tuple[int, str]] = None,
+    exclude_net_ids: list[int] | None = None,
+    zones_to_replace: list[tuple[int, str]] | None = None,
     add_teardrops: bool = False,
-    net_id_to_name: dict[int, str] = None,
-    zone_names_for_replace: list[tuple[str, str]] = None,
+    net_id_to_name: dict[int, str] | None = None,
+    zone_names_for_replace: list[tuple[str, str]] | None = None,
 ) -> bool:
     """Write the complete output file with zone (optional), vias, and traces.
 

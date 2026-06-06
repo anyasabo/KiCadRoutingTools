@@ -150,10 +150,7 @@ class SpatialIndex:
 
 def matches_any_pattern(name: str, patterns: list[str]) -> bool:
     """Check if a net name matches any of the given patterns (fnmatch style)."""
-    for pattern in patterns:
-        if fnmatch.fnmatch(name, pattern):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
 def segment_to_segment_distance(seg1: Segment, seg2: Segment) -> float:
@@ -767,7 +764,7 @@ def run_drc(
 
     # Pre-compute matching nets for filtering
     if net_patterns:
-        matching_net_ids = set(net_id for net_id in pcb_data.nets.keys() if net_matches_filter(net_id))
+        matching_net_ids = set(net_id for net_id in pcb_data.nets if net_matches_filter(net_id))
         if not quiet:
             print(f"Filtering to {len(matching_net_ids)} matching nets")
     else:
@@ -952,7 +949,7 @@ def run_drc(
     if not quiet:
         print("Checking pad-to-segment clearances...")
 
-    pad_net_ids = list(pads_by_net.keys())
+    list(pads_by_net.keys())
     for seg in pcb_data.segments:
         seg_net = seg.net_id
         seg_net_matches = matching_net_ids is None or seg_net in matching_net_ids
@@ -1025,7 +1022,7 @@ def run_drc(
                     )
 
     # Dummy variables for compatibility with remaining code
-    via_net_ids = list(vias_by_net.keys())
+    list(vias_by_net.keys())
     matching_via_nets = matching_net_ids
     matching_seg_net_set = matching_net_ids
     matching_pad_nets = matching_net_ids

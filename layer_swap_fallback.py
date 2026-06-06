@@ -70,15 +70,15 @@ def try_fallback_layer_swap(
     diff_pair_extra_clearance: float,
     all_swap_vias: list,
     all_segment_modifications: list,
-    all_stubs_by_layer: dict = None,
-    stub_endpoints_by_layer: dict = None,
-    routed_net_paths: dict = None,
-    routed_results: dict = None,
-    diff_pair_by_net_id: dict = None,
-    layer_map: dict = None,
-    target_swaps: dict = None,
-    results: list = None,
-    obstacle_cache: dict = None,
+    all_stubs_by_layer: dict | None = None,
+    stub_endpoints_by_layer: dict | None = None,
+    routed_net_paths: dict | None = None,
+    routed_results: dict | None = None,
+    diff_pair_by_net_id: dict | None = None,
+    layer_map: dict | None = None,
+    target_swaps: dict | None = None,
+    results: list | None = None,
+    obstacle_cache: dict | None = None,
 ):
     """
     Try to swap the blocked side's stubs to another layer as a fallback when routing fails.
@@ -291,7 +291,7 @@ def try_fallback_layer_swap(
                     ripped_items = []
                     for N in range(1, min(config.max_rip_up_count + 1, len(rippable_blockers) + 1)):
                         blocker = rippable_blockers[N - 1]
-                        blocker_canonical = get_canonical_net_id(blocker.net_id, diff_pair_by_net_id)
+                        get_canonical_net_id(blocker.net_id, diff_pair_by_net_id)
 
                         # Determine net IDs to rip (both P and N for diff pairs)
                         if blocker.net_id in diff_pair_by_net_id:

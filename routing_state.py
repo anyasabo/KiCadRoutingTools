@@ -84,8 +84,8 @@ class RoutingState:
     pad_swaps: list[dict] = field(default_factory=list)
 
     # Obstacle maps (set by caller)
-    base_obstacles: Any = None
-    diff_pair_base_obstacles: Any = None
+    base_obstacles: Any | None = None
+    diff_pair_base_obstacles: Any | None = None
     diff_pair_extra_clearance: float = 0.0
     working_obstacles: Any = None  # Incremental working map with all net obstacles
 
@@ -139,9 +139,9 @@ def create_routing_state(
     all_swap_vias: list | None = None,
     total_layer_swaps: int = 0,
     net_obstacles_cache: dict | None = None,
-    working_obstacles: Any = None,
-    cancel_check: Any = None,
-    progress_callback: Any = None,
+    working_obstacles: Any | None = None,
+    cancel_check: Any | None = None,
+    progress_callback: Any | None = None,
 ) -> RoutingState:
     """
     Create and initialize a RoutingState object.
@@ -175,7 +175,7 @@ def create_routing_state(
     )
 
 
-def record_net_event(state: RoutingState, net_id: int, event: str, details: dict = None):
+def record_net_event(state: RoutingState, net_id: int, event: str, details: dict | None = None):
     """
     Record an event in a net's history for debugging.
 
@@ -202,7 +202,7 @@ def get_net_history_summary(state: RoutingState, net_id: int, pcb_data: "PCBData
         return "No history recorded"
 
     history = state.net_history[net_id]
-    net_name = pcb_data.nets[net_id].name if net_id in pcb_data.nets else f"net_{net_id}"
+    pcb_data.nets[net_id].name if net_id in pcb_data.nets else f"net_{net_id}"
 
     lines = []
     for entry in history:

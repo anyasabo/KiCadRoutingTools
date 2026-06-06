@@ -238,8 +238,8 @@ def route_planes(
     print(f"{'=' * 60}")
 
     # Group zones by net - process each net once with all its zone layers
-    unique_nets: dict[int, tuple[str, Set[str]]] = {}  # net_id -> (net_name, set of layers)
-    for net_name, plane_layer, net_id in zip(net_names, plane_layers, net_ids):
+    unique_nets: dict[int, tuple[str, set[str]]] = {}  # net_id -> (net_name, set of layers)
+    for net_name, plane_layer, net_id in zip(net_names, plane_layers, net_ids, strict=False):
         if net_id not in unique_nets:
             unique_nets[net_id] = (net_name, set())
         unique_nets[net_id][1].add(plane_layer)
@@ -381,9 +381,9 @@ def _write_output(
     input_file: str,
     output_file: str,
     segments: list[dict],
-    vias: list[dict] = None,
-    debug_lines: list[str] = None,
-    net_id_to_name: dict = None,
+    vias: list[dict] | None = None,
+    debug_lines: list[str] | None = None,
+    net_id_to_name: dict | None = None,
 ):
     """Write the output PCB file with new segments, vias, and optional debug lines."""
     with open(input_file, encoding="utf-8") as f:

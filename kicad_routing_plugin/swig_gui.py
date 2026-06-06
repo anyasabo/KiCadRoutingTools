@@ -2008,7 +2008,7 @@ class RoutingDialog(wx.Dialog):
         if self.use_netclass_check.GetValue():
             nets_by_class = self._group_nets_by_class(selected_nets)
             class_params = {}
-            for class_name in nets_by_class.keys():
+            for class_name in nets_by_class:
                 params = self._get_netclass_params(class_name)
                 if params:
                     class_params[class_name] = params

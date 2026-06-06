@@ -307,7 +307,7 @@ def build_via_obstacle_map(
     grid_cushion = config.grid_step / 2
     via_via_expansion_mm = config.via_size + config.clearance + grid_cushion
     via_via_radius_sq = (via_via_expansion_mm / config.grid_step) ** 2
-    via_via_radius_int = int(math.ceil(math.sqrt(via_via_radius_sq)))
+    int(math.ceil(math.sqrt(via_via_radius_sq)))
 
     # Add existing vias as obstacles (including same net - can't place via too close to another)
     # Batched: pre-compute circle template, collect all centers, expand with numpy
@@ -385,7 +385,11 @@ def _add_segment_via_obstacle(obstacles: GridObstacleMap, seg: Segment, coord: G
 
 
 def _add_pad_via_obstacle(
-    obstacles: GridObstacleMap, pad: Pad, coord: GridCoord, config: GridRouteConfig, clearance_override: float = None
+    obstacles: GridObstacleMap,
+    pad: Pad,
+    coord: GridCoord,
+    config: GridRouteConfig,
+    clearance_override: float | None = None,
 ):
     """Add a pad as via blocking obstacle using rectangular shape with rounded corners.
 
@@ -423,7 +427,6 @@ def _is_rectangular_outline(
         return False
 
     min_x, min_y, max_x, max_y = board_bounds
-    corners = [(min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y)]
 
     # Check each vertex - must be on an edge of the bounding box
     for vx, vy in board_outline:

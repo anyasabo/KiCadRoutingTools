@@ -103,8 +103,8 @@ def build_diff_pair_obstacles(
     extra_clearance: float,
     add_own_stubs_func=None,
     net_obstacles_cache: dict[int, NetObstacleData] | None = None,
-    ripped_route_layer_costs: dict[int, np.ndarray] = None,
-    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
+    ripped_route_layer_costs: dict[int, np.ndarray] | None = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] | None = None,
 ):
     """
     Build complete obstacle map for diff pair routing.
@@ -208,8 +208,8 @@ def build_single_ended_obstacles(
     layer_map: dict,
     diagonal_margin: float = 0.25,
     net_obstacles_cache: dict[int, NetObstacleData] | None = None,
-    ripped_route_layer_costs: dict[int, np.ndarray] = None,
-    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
+    ripped_route_layer_costs: dict[int, np.ndarray] | None = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] | None = None,
 ):
     """
     Build complete obstacle map for single-ended routing.
@@ -364,8 +364,8 @@ def prepare_obstacles_inplace(
     track_proximity_cache: dict,
     layer_map: dict,
     net_obstacles_cache: dict[int, NetObstacleData],
-    ripped_route_layer_costs: dict[int, np.ndarray] = None,
-    ripped_route_via_positions: dict[int, list[tuple[int, int]]] = None,
+    ripped_route_layer_costs: dict[int, np.ndarray] | None = None,
+    ripped_route_via_positions: dict[int, list[tuple[int, int]]] | None = None,
 ) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Prepare working_obstacles IN-PLACE for routing a single-ended net.
@@ -440,7 +440,7 @@ def prepare_obstacles_inplace(
     # Pad drill hole clearance
     # Skip the pad center - the router can use existing through-holes for layer transitions
     if config.hole_to_hole_clearance > 0:
-        hole_clearance_grid = coord.to_grid_dist(config.hole_to_hole_clearance + config.via_drill / 2)
+        coord.to_grid_dist(config.hole_to_hole_clearance + config.via_drill / 2)
         for pad in pcb_data.pads_by_net.get(net_id, []):
             if pad.drill and pad.drill > 0:
                 # Include pad drill radius in clearance calculation

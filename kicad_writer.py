@@ -75,7 +75,12 @@ def move_copper_text_to_silkscreen(content: str) -> str:
 
 
 def generate_segment_sexpr(
-    start: tuple[float, float], end: tuple[float, float], width: float, layer: str, net_id: int, net_name: str = None
+    start: tuple[float, float],
+    end: tuple[float, float],
+    width: float,
+    layer: str,
+    net_id: int,
+    net_name: str | None = None,
 ) -> str:
     """Generate KiCad S-expression for a track segment.
 
@@ -115,7 +120,7 @@ def generate_via_sexpr(
     layers: list[str],
     net_id: int,
     free: bool = False,
-    net_name: str = None,
+    net_name: str | None = None,
 ) -> str:
     """Generate KiCad S-expression for a via.
 
@@ -239,7 +244,7 @@ def generate_zone_sexpr(
 
 
 def add_tracks_to_pcb(
-    input_path: str, output_path: str, tracks: list[dict], net_id_to_name: dict[int, str] = None
+    input_path: str, output_path: str, tracks: list[dict], net_id_to_name: dict[int, str] | None = None
 ) -> bool:
     """
     Add track segments to a PCB file.
@@ -297,9 +302,9 @@ def add_tracks_and_vias_to_pcb(
     input_path: str,
     output_path: str,
     tracks: list[dict],
-    vias: list[dict] = None,
-    remove_vias: list[dict] = None,
-    net_id_to_name: dict[int, str] = None,
+    vias: list[dict] | None = None,
+    remove_vias: list[dict] | None = None,
+    net_id_to_name: dict[int, str] | None = None,
 ) -> bool:
     """
     Add track segments and vias to a PCB file, optionally removing existing vias.
@@ -512,9 +517,9 @@ def swap_segment_nets_at_positions(
     positions: set,
     old_net_id: int,
     new_net_id: int,
-    layer: str = None,
-    old_net_name: str = None,
-    new_net_name: str = None,
+    layer: str | None = None,
+    old_net_name: str | None = None,
+    new_net_name: str | None = None,
 ) -> tuple[str, int]:
     """
     Swap net IDs of segments that have endpoints at the given positions.
@@ -579,8 +584,8 @@ def swap_via_nets_at_positions(
     old_net_id: int,
     new_net_id: int,
     tolerance: float = 0.02,
-    old_net_name: str = None,
-    new_net_name: str = None,
+    old_net_name: str | None = None,
+    new_net_name: str | None = None,
 ) -> tuple[str, int]:
     """
     Swap net IDs of vias that are at the given positions.
@@ -606,10 +611,7 @@ def swap_via_nets_at_positions(
 
     def is_near_any_position(x, y, positions, tol):
         """Check if (x, y) is within tolerance of any position in the set."""
-        for px, py in positions:
-            if abs(x - px) < tol and abs(y - py) < tol:
-                return True
-        return False
+        return any(abs(x - px) < tol and abs(y - py) < tol for px, py in positions)
 
     def replace_net(match):
         nonlocal count

@@ -11,7 +11,7 @@ from bga_fanout.types import BGAGrid, Channel, DiffPairPads
 
 
 def find_escape_channel(
-    pad_x: float, pad_y: float, grid: BGAGrid, channels: list[Channel], force_orientation: str = None
+    pad_x: float, pad_y: float, grid: BGAGrid, channels: list[Channel], force_orientation: str | None = None
 ) -> tuple[Channel | None, str]:
     """
     Find the best channel for a pad to escape through.
@@ -287,8 +287,8 @@ def find_diff_pair_escape(
     Returns (channel, direction). Channel is None for edge pads.
     """
     # Calculate pair center and orientation
-    center_x = (p_pad_x + n_pad_x) / 2
-    center_y = (p_pad_y + n_pad_y) / 2
+    (p_pad_x + n_pad_x) / 2
+    (p_pad_y + n_pad_y) / 2
 
     # Check if this is an edge pair
     is_edge_p, edge_dir_p = is_edge_pad(p_pad_x, p_pad_y, grid)
@@ -340,9 +340,9 @@ def assign_pair_escapes(
     diff_pair_gap: float = 0.1,
     via_size: float = 0.5,
     rebalance: bool = False,
-    pre_occupied: dict[tuple[str, str, float], str] = None,
+    pre_occupied: dict[tuple[str, str, float], str] | None = None,
     force_escape_direction: bool = False,
-) -> dict[str, tuple[Channel | None, str]]:
+) -> tuple[dict[str, tuple[Channel | None, str]], dict[str, str]]:
     """
     Assign escape directions to all differential pairs, avoiding overlaps.
 
@@ -372,7 +372,7 @@ def assign_pair_escapes(
     # Key: (layer, exit_x or exit_y rounded to 0.1mm)
     # For horizontal escape: track exit Y positions
     # For vertical escape: track exit X positions
-    used_exits: dict[tuple[str, str, float], set[str]] = defaultdict(set)  # (layer, 'h'/'v', pos) -> set of pair_ids
+    defaultdict(set)  # (layer, 'h'/'v', pos) -> set of pair_ids
 
     pair_spacing = track_width * 2 + clearance  # Space needed for a diff pair
 

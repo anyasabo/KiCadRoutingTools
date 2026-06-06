@@ -8,20 +8,15 @@ download fails (no network, no matching release, etc.) it falls back to a local
 locally; pass --tag vX.Y.Z to pin a specific release.
 """
 
-import sys
-
-if sys.version_info[0] < 3:
-    print("ERROR: Python 3 is required. You are running Python %d.%d." % sys.version_info[:2])
-    print("Try:  python3 build_router.py")
-    sys.exit(1)
-
 import argparse
+import contextlib
 import json
 import os
 import platform
 import shutil
 import ssl
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 
@@ -71,7 +66,7 @@ def clean(script_dir, rust_dir):
     # Remove target directory (all Rust build outputs)
     target_dir = os.path.join(rust_dir, "target")
     if os.path.exists(target_dir):
-        print("Removing %s" % target_dir)
+        print(f"Removing {target_dir}")
         shutil.rmtree(target_dir)
 
     # Remove compiled library files in rust_router directory
@@ -82,7 +77,7 @@ def clean(script_dir, rust_dir):
     ]
     for lib_file in lib_files:
         if os.path.exists(lib_file):
-            print("Removing %s" % lib_file)
+            print(f"Removing {lib_file}")
             os.remove(lib_file)
 
     # Remove stale copies in parent directory
@@ -93,7 +88,7 @@ def clean(script_dir, rust_dir):
     ]
     for stale in stale_files:
         if os.path.exists(stale):
-            print("Removing stale module: %s" % stale)
+            print(f"Removing stale module: {stale}")
             os.remove(stale)
 
     print("Clean complete.")
@@ -131,9 +126,9 @@ def detect_platform_asset():
 def fetch_release(tag):
     """Fetch a release's JSON metadata from GitHub. tag may be None for latest."""
     if tag:
-        url = "https://api.github.com/repos/%s/releases/tags/%s" % (GITHUB_REPO, tag)
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}"
     else:
-        url = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
     req = urllib.request.Request(
         url,
@@ -157,29 +152,29 @@ def try_download_prebuilt(script_dir, rust_dir, tag):
     """Attempt to download a prebuilt binary. Returns True on success."""
     asset_name, dst_name = detect_platform_asset()
     if asset_name is None:
-        print("No prebuilt binary is published for this platform (%s %s)." % (sys.platform, platform.machine()))
+        print(f"No prebuilt binary is published for this platform ({sys.platform} {platform.machine()}).")
         return False
 
     label = tag if tag else "latest"
-    print("Looking up %s release on github.com/%s ..." % (label, GITHUB_REPO))
+    print(f"Looking up {label} release on github.com/{GITHUB_REPO} ...")
 
     try:
         release = fetch_release(tag)
     except urllib.error.HTTPError as e:
-        print("ERROR: GitHub returned HTTP %s for %s release." % (e.code, label))
+        print(f"ERROR: GitHub returned HTTP {e.code} for {label} release.")
         if e.code == 404:
             print("       (No matching release exists yet.)")
         return False
     except ssl.SSLError as e:
-        print("ERROR: %s" % e)
-        print("       %s" % _ssl_help_message())
+        print(f"ERROR: {e}")
+        print(f"       {_ssl_help_message()}")
         return False
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         if isinstance(getattr(e, "reason", None), ssl.SSLError):
-            print("ERROR: %s" % e.reason)
-            print("       %s" % _ssl_help_message())
+            print(f"ERROR: {e.reason}")
+            print(f"       {_ssl_help_message()}")
         else:
-            print("ERROR: Could not reach GitHub: %s" % e)
+            print(f"ERROR: Could not reach GitHub: {e}")
         return False
 
     assets = release.get("assets", [])
@@ -187,26 +182,27 @@ def try_download_prebuilt(script_dir, rust_dir, tag):
     if asset is None:
         names = ", ".join(a.get("name", "?") for a in assets) or "(none)"
         print(
-            "ERROR: Release %s has no asset named %s. Available: %s"
-            % (release.get("tag_name", label), asset_name, names)
+            "ERROR: Release {} has no asset named {}. Available: {}".format(
+                release.get("tag_name", label), asset_name, names
+            )
         )
         return False
 
     dst = os.path.join(rust_dir, dst_name)
     download_url = asset["browser_download_url"]
-    print("Downloading %s (%s bytes) -> %s" % (asset_name, asset.get("size", "?"), dst))
+    print("Downloading {} ({} bytes) -> {}".format(asset_name, asset.get("size", "?"), dst))
     try:
         download_to(download_url, dst)
     except ssl.SSLError as e:
-        print("ERROR: %s" % e)
-        print("       %s" % _ssl_help_message())
+        print(f"ERROR: {e}")
+        print(f"       {_ssl_help_message()}")
         return False
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         if isinstance(getattr(e, "reason", None), ssl.SSLError):
-            print("ERROR: %s" % e.reason)
-            print("       %s" % _ssl_help_message())
+            print(f"ERROR: {e.reason}")
+            print(f"       {_ssl_help_message()}")
         else:
-            print("ERROR: Download failed: %s" % e)
+            print(f"ERROR: Download failed: {e}")
         return False
 
     # Remove stale copies in parent directory before importing
@@ -214,13 +210,11 @@ def try_download_prebuilt(script_dir, rust_dir, tag):
 
     if not _verify_import(rust_dir):
         print("ERROR: Downloaded binary failed to import. Try --from-source.")
-        try:
+        with contextlib.suppress(OSError):
             os.remove(dst)
-        except OSError:
-            pass
         return False
 
-    print("Installed prebuilt binary from release %s." % release.get("tag_name", label))
+    print("Installed prebuilt binary from release {}.".format(release.get("tag_name", label)))
     return True
 
 
@@ -278,7 +272,7 @@ def build_from_source(script_dir, rust_dir):
         src = os.path.join(rust_dir, "target", "release", "libgrid_router.so")
         dst = os.path.join(rust_dir, "grid_router.so")
 
-    print("Copying %s -> %s" % (src, dst))
+    print(f"Copying {src} -> {dst}")
     shutil.copy2(src, dst)
 
     _remove_stale_copies(script_dir)
@@ -297,7 +291,7 @@ def _remove_stale_copies(script_dir):
     ]
     for stale in stale_files:
         if os.path.exists(stale):
-            print("Removing stale module: %s" % stale)
+            print(f"Removing stale module: {stale}")
             os.remove(stale)
 
 
@@ -310,9 +304,9 @@ def _verify_import(rust_dir):
     try:
         import grid_router
     except ImportError as e:
-        print("Import failed: %s" % e)
+        print(f"Import failed: {e}")
         return False
-    print("grid_router v%s ready." % getattr(grid_router, "__version__", "unknown"))
+    print("grid_router v{} ready.".format(getattr(grid_router, "__version__", "unknown")))
     return True
 
 

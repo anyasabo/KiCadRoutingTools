@@ -21,10 +21,15 @@ from routing_utils import build_layer_map, iter_pad_blocked_cells
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from grid_router import GridObstacleMap
-except ImportError:
-    GridObstacleMap = None
+else:
+    try:
+        from grid_router import GridObstacleMap
+    except ImportError:
+        GridObstacleMap = None
 
 
 @dataclass

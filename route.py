@@ -85,9 +85,9 @@ def batch_route(
     input_file: str,
     output_file: str,
     net_names: list[str],
-    layers: list[str] = None,
-    bga_exclusion_zones: list[tuple[float, float, float, float]] | None = None,
-    direction_order: str = None,
+    layers: list[str] | None = None,
+    bga_exclusion_zones: list[tuple[float, float, float, float, float]] | None = None,
+    direction_order: str | None = None,
     ordering_strategy: str = "inside_out",
     disable_bga_zones: list[str] | None = None,
     track_width: float = 0.1,
@@ -158,7 +158,7 @@ def batch_route(
     progress_callback=None,
     return_results: bool = False,
     pcb_data=None,
-    net_clearances: dict = None,
+    net_clearances: dict | None = None,
 ) -> tuple[int, int, float]:
     """
     Route single-ended nets using the Rust router.

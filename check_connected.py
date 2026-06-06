@@ -42,10 +42,7 @@ def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> 
 
 def matches_any_pattern(name: str, patterns: list[str]) -> bool:
     """Check if a net name matches any of the given patterns (fnmatch style)."""
-    for pattern in patterns:
-        if fnmatch.fnmatch(name, pattern):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name, pattern) for pattern in patterns)
 
 
 from geometry_utils import UnionFind
@@ -149,7 +146,7 @@ def check_net_connectivity(
     segments: list[Segment],
     vias: list[Via],
     pads: list[Pad],
-    zones: list[Zone] = None,
+    zones: list[Zone] | None = None,
     tolerance: float = 0.02,
     verbose: bool = False,
 ) -> dict:
@@ -325,7 +322,7 @@ def check_net_connectivity(
         for seg, seg_start_id in seg_index.query_at(px, py, player):
             seg_end_id = seg_start_id + 1
             # Skip if this point IS one of the segment's endpoints
-            if pid == seg_start_id or pid == seg_end_id:
+            if pid in (seg_start_id, seg_end_id):
                 continue
             # Check if point lies on this segment
             seg_tolerance = max(seg.width / 2, tolerance)
@@ -355,7 +352,7 @@ def check_net_connectivity(
 
     disconnected = []
     seen_pads = set()  # Track (x, y, component_ref) to avoid duplicates for through-hole pads
-    for pid, loc in zip(pad_ids, pad_locations):
+    for pid, loc in zip(pad_ids, pad_locations, strict=False):
         if uf.find(pid) != main_root:
             # For through-hole pads, only report once (not per layer)
             pad_key = (round(loc[0], 4), round(loc[1], 4), loc[3])  # (x, y, component_ref)
@@ -404,7 +401,7 @@ def check_net_connectivity(
     return {
         "connected": len(unique_roots) == 1,
         "num_components": len(unique_roots),
-        "pad_components": {loc: uf.find(pid) for pid, loc in zip(pad_ids, pad_locations)},
+        "pad_components": {loc: uf.find(pid) for pid, loc in zip(pad_ids, pad_locations, strict=False)},
         "disconnected_pads": disconnected,
         "message": None,
         "debug_info": debug_info,
@@ -419,11 +416,11 @@ def find_gap_between_components(debug_info: dict, tolerance: float) -> dict | No
     if not debug_info:
         return None
 
-    component_summaries = debug_info["components"]
+    debug_info["components"]
     component_points = debug_info.get("component_points", {})
-    all_points = debug_info["all_points"]
-    segments = debug_info["segments"]
-    vias = debug_info["vias"]
+    debug_info["all_points"]
+    debug_info["segments"]
+    debug_info["vias"]
 
     if len(component_points) < 2:
         return None

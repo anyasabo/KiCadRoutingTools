@@ -13,7 +13,11 @@ from routing_utils import pos_key
 
 
 def apply_polarity_swap(
-    pcb_data: PCBData, result: dict, pad_swaps: list[dict], pair_name: str = None, already_swapped: set[str] = None
+    pcb_data: PCBData,
+    result: dict,
+    pad_swaps: list[dict],
+    pair_name: str | None = None,
+    already_swapped: set[str] | None = None,
 ) -> bool:
     """
     Apply polarity swap for a diff pair route result.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """List and optionally delete all git-ignored files in the repository."""
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -86,10 +87,8 @@ def main():
             dir_size = 0
             for root, subdirs, filenames in os.walk(path):
                 for filename in filenames:
-                    try:
+                    with contextlib.suppress(OSError):
                         dir_size += os.path.getsize(os.path.join(root, filename))
-                    except OSError:
-                        pass
             total_size += dir_size
             size_str = f"{dir_size:,} bytes"
             if dir_size > 1024 * 1024:

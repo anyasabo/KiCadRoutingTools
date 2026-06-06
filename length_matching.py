@@ -78,7 +78,11 @@ class ClearanceIndex:
         return cells
 
     def build(
-        self, pcb_data: PCBData, config: GridRouteConfig, extra_segments: list[Segment] = None, extra_vias: list = None
+        self,
+        pcb_data: PCBData,
+        config: GridRouteConfig,
+        extra_segments: list[Segment] = None,
+        extra_vias: list | None = None,
     ):
         """
         Build the spatial index from PCB data.
@@ -268,11 +272,11 @@ def get_safe_amplitude_at_point(
     pcb_data: PCBData,
     net_id: int,
     config: GridRouteConfig,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     is_first_bump: bool = True,
-    paired_net_id: int = None,
-    clearance_index: "ClearanceIndex" = None,
+    paired_net_id: int | None = None,
+    clearance_index: ClearanceIndex | None = None,
 ) -> float:
     """
     Find the maximum safe amplitude for a meander bump at a specific point.
@@ -532,7 +536,7 @@ def check_meander_clearance(
     pcb_data: PCBData,
     net_id: int,
     config: GridRouteConfig,
-    paired_net_id: int = None,
+    paired_net_id: int | None = None,
 ) -> bool:
     """
     Check if a meander at this segment would have clearance from other traces/vias.
@@ -562,7 +566,7 @@ def check_meander_clearance(
     px = -uy
     py = ux
 
-    margin = config.track_width / 2 + config.clearance * 1.5
+    config.track_width / 2 + config.clearance * 1.5
 
     # Quick check: is there ANY space for meanders?
     # Sample a few points along the segment
@@ -717,13 +721,13 @@ def generate_trombone_meander(
     extra_length: float,
     amplitude: float,
     track_width: float,
-    pcb_data: PCBData = None,
-    config: GridRouteConfig = None,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    pcb_data: PCBData | None = None,
+    config: GridRouteConfig | None = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     min_bumps: int = 0,
-    paired_net_id: int = None,
-    clearance_index: "ClearanceIndex" = None,
+    paired_net_id: int | None = None,
+    clearance_index: ClearanceIndex | None = None,
 ) -> tuple[list[Segment], int]:
     """
     Generate trombone-style meander segments to replace a straight segment.
@@ -789,7 +793,7 @@ def generate_trombone_meander(
         return [segment], 0
 
     # Calculate how much extra length we need per bump on average
-    target_extra_per_bump = extra_length / max_bumps
+    extra_length / max_bumps
 
     # Each bump adds approximately 2 * (amplitude - 2*chamfer) extra length
     # So target_amplitude = target_extra_per_bump / 2 + 2*chamfer
@@ -1256,15 +1260,15 @@ def apply_meanders_to_route(
     segments: list[Segment],
     extra_length: float,
     config: GridRouteConfig,
-    pcb_data: PCBData = None,
-    net_id: int = None,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    pcb_data: PCBData | None = None,
+    net_id: int | None = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     min_bumps: int = 0,
-    amplitude_override: float = None,
-    paired_net_id: int = None,
-    excluded_centerline_ranges: list[tuple[float, float]] = None,
-    clearance_index: "ClearanceIndex" = None,
+    amplitude_override: float | None = None,
+    paired_net_id: int | None = None,
+    excluded_centerline_ranges: list[tuple[float, float]] | None = None,
+    clearance_index: ClearanceIndex | None = None,
 ) -> tuple[list[Segment], int]:
     """
     Apply meanders to a route to add extra length.
@@ -1320,7 +1324,6 @@ def apply_meanders_to_route(
             origin_y = first_seg.start_y
 
     # Try each straight run until we find one that works
-    min_amplitude = MIN_AMPLITUDE  # Minimum useful amplitude
 
     # Track run status for verbose output
     run_status = []  # List of (length, status) where status is 'inter-meander', 'clearance', 'used', 'too-short'
@@ -1406,7 +1409,7 @@ def _apply_meanders_to_net_with_iteration(
     metric_func,
     extra_length_func,
     metric_unit: str = "mm",
-) -> tuple[dict, list[Segment], int]:
+) -> tuple[dict, list[Segment], int, float]:
     """
     Apply meanders to a single net with bump iteration and amplitude scaling.
 
@@ -1525,7 +1528,7 @@ def _apply_meanders_to_net_with_iteration(
         # Single-ended net
         net_id = None
         original_segments = result["new_segments"]
-        stub_length = result.get("stub_length", 0.0)
+        result.get("stub_length", 0.0)
         if original_segments:
             net_id = original_segments[0].net_id
 
@@ -1617,9 +1620,9 @@ def apply_length_matching_to_group(
     net_results: dict[str, dict],
     net_names: list[str],
     config: GridRouteConfig,
-    pcb_data: PCBData = None,
-    prev_group_segments: list[Segment] = None,
-    prev_group_vias: list = None,
+    pcb_data: PCBData | None = None,
+    prev_group_segments: list[Segment] | None = None,
+    prev_group_vias: list | None = None,
 ) -> dict[str, dict]:
     """
     Apply length matching to a group of nets.
@@ -1766,9 +1769,9 @@ def apply_time_matching_to_group(
     net_results: dict[str, dict],
     net_names: list[str],
     config: GridRouteConfig,
-    pcb_data: PCBData = None,
-    prev_group_segments: list[Segment] = None,
-    prev_group_vias: list = None,
+    pcb_data: PCBData | None = None,
+    prev_group_segments: list[Segment] | None = None,
+    prev_group_vias: list | None = None,
 ) -> dict[str, dict]:
     """
     Apply time matching to a group of nets.
@@ -2117,11 +2120,11 @@ def generate_centerline_meander(
     coord,
     config: GridRouteConfig,
     spacing_mm: float,
-    pcb_data: PCBData = None,
-    p_net_id: int = None,
-    n_net_id: int = None,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    pcb_data: PCBData | None = None,
+    p_net_id: int | None = None,
+    n_net_id: int | None = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     min_bumps: int = 0,
 ) -> tuple[list[tuple[float, float, int]], int]:
     """
@@ -2181,7 +2184,7 @@ def generate_centerline_meander(
 
     # Account for full diff pair width in clearance
     # The meander bump needs clearance for both P and N tracks
-    diff_pair_half_width = spacing_mm + config.track_width / 2
+    spacing_mm + config.track_width / 2
 
     # Build new path with meanders
     new_path = list(float_path[:start_idx])
@@ -2388,8 +2391,8 @@ def get_safe_amplitude_for_diff_pair(
     n_net_id: int,
     config: GridRouteConfig,
     spacing_mm: float,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     is_first_bump: bool = True,
 ) -> float:
     """
@@ -2506,7 +2509,7 @@ def get_safe_amplitude_for_diff_pair(
                 if conflict_found:
                     break
                 for pad_net_id, pad_list in pcb_data.pads_by_net.items():
-                    if pad_net_id == p_net_id or pad_net_id == n_net_id:
+                    if pad_net_id in (p_net_id, n_net_id):
                         continue
                     if conflict_found:
                         break
@@ -2533,10 +2536,10 @@ def apply_meanders_to_diff_pair(
     extra_length: float,
     config: GridRouteConfig,
     pcb_data: PCBData,
-    extra_segments: list[Segment] = None,
-    extra_vias: list = None,
+    extra_segments: list[Segment] | None = None,
+    extra_vias: list | None = None,
     min_bumps: int = 0,
-    amplitude_override: float = None,
+    amplitude_override: float | None = None,
 ) -> tuple[dict, int]:
     """
     Apply meanders to a differential pair by modifying the centerline and regenerating P/N paths.

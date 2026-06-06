@@ -94,7 +94,7 @@ def _get_single_ended_stub_on_layer(pcb_data: PCBData, net_id: int, layer: str, 
 
 
 def _validate_single_ended_swap(
-    stub, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] = None
+    stub, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] | None = None
 ) -> bool:
     """Validate that a single-ended stub can move to dest_layer without conflicts."""
     from stub_layer_switching import segments_intersect_2d
@@ -1109,7 +1109,7 @@ def apply_diff_pair_layer_swaps(
 
                 # Try each available layer except source and target
                 for alt_layer in config.layers:
-                    if alt_layer == tgt_layer or alt_layer == src_layer:
+                    if alt_layer in (tgt_layer, src_layer):
                         continue
                     # Don't swap to F.Cu unless it's an edge stub
                     if not can_swap_to_top_layer and alt_layer == "F.Cu":
@@ -1201,7 +1201,7 @@ def apply_diff_pair_layer_swaps(
                         continue
 
                     for alt_layer in config.layers:
-                        if alt_layer == src_layer or alt_layer == tgt_layer:
+                        if alt_layer in (src_layer, tgt_layer):
                             continue
                         if not can_swap_to_top_layer and alt_layer == "F.Cu":
                             if not is_edge_stub(se_stub.pad_x, se_stub.pad_y, config.bga_exclusion_zones):

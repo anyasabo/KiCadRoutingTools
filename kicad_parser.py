@@ -942,7 +942,7 @@ def extract_nets(content: str, kicad_version: int = 0) -> tuple[dict[int, Net], 
 
 
 def extract_footprints_and_pads(
-    content: str, nets: dict[int, Net], name_to_id: dict[str, int] = None
+    content: str, nets: dict[int, Net], name_to_id: dict[str, int] | None = None
 ) -> tuple[dict[str, Footprint], dict[int, list[Pad]]]:
     """Extract footprints and their pads with global coordinates."""
     footprints = {}
@@ -1006,7 +1006,6 @@ def extract_footprints_and_pads(
 
         # Extract pads
         # Pattern for pad: (pad "num" type shape ... (at x y [rot]) ... (size sx sy) ... (net id "name") ...)
-        pad_pattern = r'\(pad\s+"([^"]+)"\s+(\w+)\s+(\w+)(.*?)\)\s*(?=\(pad|\(model|\(zone|\Z|$)'
 
         # Simpler approach: find pad starts and extract info
         # Note: pad number can be empty string (pad "") so use [^"]* not [^"]+
@@ -1027,7 +1026,7 @@ def extract_footprints_and_pads(
             pad_text = fp_text[pad_start:pad_end]
 
             pad_num = pad_match.group(1)
-            pad_type = pad_match.group(2)  # smd, thru_hole, etc.
+            pad_match.group(2)  # smd, thru_hole, etc.
             pad_shape = pad_match.group(3)  # circle, rect, roundrect, etc.
 
             # Extract pad local position and rotation
@@ -1148,7 +1147,7 @@ def extract_footprints_and_pads(
     return footprints, pads_by_net
 
 
-def extract_vias(content: str, name_to_id: dict[str, int] = None) -> list[Via]:
+def extract_vias(content: str, name_to_id: dict[str, int] | None = None) -> list[Via]:
     """Extract all vias from PCB file."""
     vias = []
 
@@ -1199,7 +1198,7 @@ def extract_vias(content: str, name_to_id: dict[str, int] = None) -> list[Via]:
     return vias
 
 
-def extract_segments(content: str, name_to_id: dict[str, int] = None) -> list[Segment]:
+def extract_segments(content: str, name_to_id: dict[str, int] | None = None) -> list[Segment]:
     """Extract all track segments from PCB file."""
     segments = []
 
@@ -1276,7 +1275,7 @@ def _iter_zone_blocks(content: str):
         yield content[start_match.end() : zone_end]
 
 
-def extract_zones(content: str, name_to_id: dict[str, int] = None) -> list[Zone]:
+def extract_zones(content: str, name_to_id: dict[str, int] | None = None) -> list[Zone]:
     """Extract all filled zones from PCB file.
 
     Parses zone definitions including their net assignment, layer, and polygon outline.
@@ -2133,7 +2132,7 @@ def compare_pcb_data(from_board: "PCBData", from_file: "PCBData", tolerance: flo
             # Compare individual pads (sorted by pad number for consistency)
             b_pads = sorted(bf.pads, key=lambda p: p.pad_number)
             f_pads = sorted(ff.pads, key=lambda p: p.pad_number)
-            for bp, fp in zip(b_pads, f_pads):
+            for bp, fp in zip(b_pads, f_pads, strict=False):
                 if bp.pad_number != fp.pad_number:
                     diffs.append(f"Footprint {ref} pad number mismatch: board={bp.pad_number} file={fp.pad_number}")
                     continue
@@ -2170,7 +2169,7 @@ def compare_pcb_data(from_board: "PCBData", from_file: "PCBData", tolerance: flo
         # Compare zones by net_id and layer
         b_zones = sorted(from_board.zones, key=lambda z: (z.net_id, z.layer))
         f_zones = sorted(from_file.zones, key=lambda z: (z.net_id, z.layer))
-        for bz, fz in zip(b_zones, f_zones):
+        for bz, fz in zip(b_zones, f_zones, strict=False):
             if bz.net_id != fz.net_id:
                 diffs.append(f"Zone net_id mismatch: board={bz.net_id} file={fz.net_id}")
             if bz.layer != fz.layer:

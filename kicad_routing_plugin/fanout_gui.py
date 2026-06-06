@@ -41,7 +41,7 @@ def _get_net_classes_from_board():
 
         # Get all defined net classes
         net_classes = net_settings.GetNetclasses()
-        for class_name in net_classes.keys():
+        for class_name in net_classes:
             netclass_names.add(str(class_name))
 
         # Always include Default

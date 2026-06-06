@@ -11,7 +11,9 @@ from kicad_parser import PCBData, Segment, Via
 from routing_utils import POSITION_DECIMALS
 
 
-def get_copper_layers_from_segments(segments: list[Segment], existing_segments: list[Segment] = None) -> list[str]:
+def get_copper_layers_from_segments(
+    segments: list[Segment], existing_segments: list[Segment] | None = None
+) -> list[str]:
     """
     Build a list of all copper layers from segments.
 
@@ -168,10 +170,7 @@ def _process_layer_crossings(
     """
 
     def point_near_via(px, py, via_list):
-        for vx, vy, via_size in via_list:
-            if math.sqrt((px - vx) ** 2 + (py - vy) ** 2) < via_size / 4:
-                return True
-        return False
+        return any(math.sqrt((px - vx) ** 2 + (py - vy) ** 2) < via_size / 4 for vx, vy, via_size in via_list)
 
     segments_to_remove = set()
     segment_modifications = {}
@@ -342,9 +341,9 @@ def _apply_segment_modifications(
 
 def fix_self_intersections(
     segments: list[Segment],
-    existing_segments: list[Segment] = None,
+    existing_segments: list[Segment] | None = None,
     max_short_length: float = 1.0,
-    vias: list[Via] = None,
+    vias: list[Via] | None = None,
 ) -> list[Segment]:
     """Fix self-intersections by trimming short connector segments that cross existing segments.
 
@@ -404,10 +403,10 @@ def fix_self_intersections(
 
 def collapse_appendices(
     segments: list[Segment],
-    existing_segments: list[Segment] = None,
+    existing_segments: list[Segment] | None = None,
     max_appendix_length: float = 1.0,
-    vias: list[Via] = None,
-    pads: list = None,
+    vias: list[Via] | None = None,
+    pads: list | None = None,
     debug_lines: bool = False,
 ) -> list[Segment]:
     """Collapse short appendix segments by moving dead-end vertices to junction points.
@@ -490,10 +489,7 @@ def collapse_appendices(
 
     def point_near_any(px, py, points_list, tolerance):
         """Check if point is within tolerance of any point in list."""
-        for ex, ey in points_list:
-            if math.sqrt((px - ex) ** 2 + (py - ey) ** 2) < tolerance:
-                return True
-        return False
+        return any(math.sqrt((px - ex) ** 2 + (py - ey) ** 2) < tolerance for ex, ey in points_list)
 
     def point_near_any_via(px, py, vias_list):
         """Check if point is within via_size/4 of any via in list."""

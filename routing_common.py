@@ -70,7 +70,7 @@ def setup_bga_exclusion_zones(
                     f"Auto-detected {len(bga_exclusion_zones)} BGA exclusion zone(s) (excluding {', '.join(disable_bga_zones)}):"
                 )
                 enabled_fps = [fp for fp in bga_components if fp.reference not in disabled_refs]
-                for fp, zone in zip(enabled_fps, bga_exclusion_zones):
+                for fp, zone in zip(enabled_fps, bga_exclusion_zones, strict=False):
                     edge_tol = zone[4] if len(zone) > 4 else 1.6
                     print(
                         f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm"
@@ -84,7 +84,7 @@ def setup_bga_exclusion_zones(
         if bga_exclusion_zones:
             bga_components = find_components_by_type(pcb_data, "BGA")
             print(f"Auto-detected {len(bga_exclusion_zones)} BGA exclusion zone(s):")
-            for i, (fp, zone) in enumerate(zip(bga_components, bga_exclusion_zones)):
+            for i, (fp, zone) in enumerate(zip(bga_components, bga_exclusion_zones, strict=False)):
                 edge_tol = zone[4] if len(zone) > 4 else 1.6
                 print(
                     f"  {fp.reference}: ({zone[0]:.1f}, {zone[1]:.1f}) to ({zone[2]:.1f}, {zone[3]:.1f}), edge_tol={edge_tol:.2f}mm"
@@ -355,7 +355,7 @@ def sync_pcb_data_segments(
     routed_results: dict[int, dict],
     original_segment_ids: set[int],
     state=None,
-    config: GridRouteConfig = None,
+    config: GridRouteConfig | None = None,
 ) -> None:
     """
     Sync routed segments back to pcb_data and update obstacle cache.

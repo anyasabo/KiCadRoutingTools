@@ -26,12 +26,17 @@ from routing_utils import build_layer_map, segment_length
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from grid_router import GridObstacleMap, GridRouter, PoseRouter
-except ImportError:
-    GridObstacleMap = None
-    GridRouter = None
-    PoseRouter = None
+else:
+    try:
+        from grid_router import GridObstacleMap, GridRouter, PoseRouter
+    except ImportError:
+        GridObstacleMap = None
+        GridRouter = None
+        PoseRouter = None
 
 
 # Map direction (dx, dy) to theta_idx (0-7) for pose-based routing
@@ -872,8 +877,8 @@ def get_diff_pair_endpoints(
         - targets: List of (p_gx, p_gy, n_gx, n_gy, layer_idx)
         - error_message: None if successful, otherwise describes why routing can't proceed
     """
-    coord = GridCoord(config.grid_step)
-    layer_map = build_layer_map(config.layers)
+    GridCoord(config.grid_step)
+    build_layer_map(config.layers)
 
     # Get endpoints for P and N nets separately
     # Use stub free ends for diff pairs to get the actual stub tips
@@ -1212,7 +1217,7 @@ def get_diff_pair_connector_regions(pcb_data: PCBData, diff_pair: DiffPairNet, c
     if error or not sources or not targets:
         return None
 
-    coord = GridCoord(config.grid_step)
+    GridCoord(config.grid_step)
     layer_names = config.layers
 
     src = sources[0]
@@ -1313,12 +1318,12 @@ def _try_route_direction(
         - blocked_cells: list of blocked cells on failure
         - best_probe_combo: (src_idx, tgt_idx, src_candidate, tgt_candidate) when probing fails
     """
-    p_src_gx, p_src_gy = src[0], src[1]
-    n_src_gx, n_src_gy = src[2], src[3]
+    _p_src_gx, _p_src_gy = src[0], src[1]
+    _n_src_gx, _n_src_gy = src[2], src[3]
     src_layer = src[4]
 
-    p_tgt_gx, p_tgt_gy = tgt[0], tgt[1]
-    n_tgt_gx, n_tgt_gy = tgt[2], tgt[3]
+    _p_tgt_gx, _p_tgt_gy = tgt[0], tgt[1]
+    _n_tgt_gx, _n_tgt_gy = tgt[2], tgt[3]
     tgt_layer = tgt[4]
 
     # Get original stub positions (in mm)
@@ -1345,7 +1350,7 @@ def _try_route_direction(
     # So X must be (track_via_clearance + via_spacing - spacing_mm) away from centerline_via
     # Use larger radius to ensure escape path also keeps offset tracks clear of offset vias
     via_exclusion_mm = (track_via_clearance + via_spacing) * 2
-    via_exclusion_radius = max(1, int(via_exclusion_mm / config.grid_step + 0.5))  # Round up
+    max(1, int(via_exclusion_mm / config.grid_step + 0.5))  # Round up
 
     # Get segments for P and N nets to find stub directions
     p_segments = [s for s in pcb_data.segments if s.net_id == p_net_id]
@@ -1522,7 +1527,6 @@ def _try_route_direction(
     # During full search, use preferred_angles if provided, otherwise best angle
     is_probe = max_iterations_override is not None
     total_iterations = 0
-    last_blocked_cells = []
 
     # Determine which angle combinations to try
     if preferred_angles is not None:
@@ -1781,8 +1785,8 @@ def route_diff_pair_with_obstacles(
     diff_pair: DiffPairNet,
     config: GridRouteConfig,
     obstacles: GridObstacleMap,
-    base_obstacles: GridObstacleMap = None,
-    unrouted_stubs: list[tuple[float, float]] = None,
+    base_obstacles: GridObstacleMap | None = None,
+    unrouted_stubs: list[tuple[float, float]] | None = None,
 ) -> dict | None:
     """
     Route a differential pair using centerline + offset approach.
@@ -2006,7 +2010,7 @@ def route_diff_pair_with_obstacles(
             # Both probes reached max - do full search on first direction
             promising_src, promising_tgt, promising_label = first_src, first_tgt, first_label
             fallback_src, fallback_tgt, fallback_label = second_src, second_tgt, second_label
-            promising_probe_iters, promising_blocked = first_probe_iters, first_blocked
+            promising_probe_iters, _promising_blocked = first_probe_iters, first_blocked
             fallback_probe_iters, fallback_blocked = second_probe_iters, second_blocked
             promising_best_combo, fallback_best_combo = first_best_combo, second_best_combo
 
@@ -2137,7 +2141,7 @@ def route_diff_pair_with_obstacles(
     tgt_actual_dir_x, tgt_actual_dir_y = route_data["tgt_actual_dir_x"], route_data["tgt_actual_dir_y"]
     center_src_x, center_src_y = route_data["center_src_x"], route_data["center_src_y"]
     center_tgt_x, center_tgt_y = route_data["center_tgt_x"], route_data["center_tgt_y"]
-    via_spacing = route_data["via_spacing"]
+    route_data["via_spacing"]
     gnd_via_dirs = route_data.get("gnd_via_dirs", [])
 
     # Convert pose path (gx, gy, theta_idx, layer) to grid path (gx, gy, layer)

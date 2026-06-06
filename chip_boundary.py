@@ -192,7 +192,7 @@ def _project_to_boundary(
 
 
 def compute_boundary_position(
-    chip: ChipBoundary, point: tuple[float, float], far_side: str, clockwise: bool = True, exit_edge: str = None
+    chip: ChipBoundary, point: tuple[float, float], far_side: str, clockwise: bool = True, exit_edge: str | None = None
 ) -> float:
     """
     Compute normalized position [0, 1] along chip boundary.

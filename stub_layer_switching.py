@@ -379,7 +379,7 @@ def validate_setback_clear(
     dest_layer: str,
     pcb_data: PCBData,
     config: GridRouteConfig,
-    exclude_net_ids: set[int] = None,
+    exclude_net_ids: set[int] | None = None,
 ) -> tuple[bool, str]:
     """
     Check that at least one setback position is clear on the destination layer.
@@ -528,8 +528,8 @@ def validate_swap(
     pcb_data: PCBData,
     config: GridRouteConfig,
     swap_partner_name: str | None = None,
-    swap_partner_net_ids: set[int] = None,
-    stub_endpoints_by_layer: dict[str, list[tuple[str, list[tuple[float, float]]]]] = None,
+    swap_partner_net_ids: set[int] | None = None,
+    stub_endpoints_by_layer: dict[str, list[tuple[str, list[tuple[float, float]]]]] | None = None,
 ) -> tuple[bool, str]:
     """
     Validate that a stub layer swap is safe to apply.
@@ -657,7 +657,7 @@ def validate_single_stub_no_overlap(
     all_stubs_by_layer: dict[str, list[tuple[str, list[Segment]]]],
     pcb_data: PCBData,
     swap_partner_name: str | None = None,
-    swap_partner_net_ids: set[int] = None,
+    swap_partner_net_ids: set[int] | None = None,
 ) -> tuple[bool, str]:
     """
     Check that a single swapped stub won't overlap with other stubs on destination layer.
@@ -717,7 +717,7 @@ def validate_single_stub_no_overlap(
 
 
 def validate_single_setback_clear(
-    stub: StubInfo, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] = None
+    stub: StubInfo, dest_layer: str, pcb_data: PCBData, config: GridRouteConfig, exclude_net_ids: set[int] | None = None
 ) -> tuple[bool, str]:
     """
     Check that at least one setback position is clear for a single-ended stub.
@@ -811,7 +811,7 @@ def validate_single_swap(
     pcb_data: PCBData,
     config: GridRouteConfig,
     swap_partner_name: str | None = None,
-    swap_partner_net_ids: set[int] = None,
+    swap_partner_net_ids: set[int] | None = None,
 ) -> tuple[bool, str]:
     """
     Validate that a single-ended stub layer swap is safe to apply.

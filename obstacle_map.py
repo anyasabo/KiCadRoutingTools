@@ -17,17 +17,21 @@ import numpy as np
 from bresenham_utils import get_diagonal_via_blocking_params, is_diagonal_segment, walk_line
 from kicad_parser import PCBData, Segment
 from net_queries import expand_pad_layers
-from obstacle_costs import add_bga_proximity_costs
+from obstacle_costs import add_bga_proximity_costs, add_stub_proximity_costs
 from routing_config import GridCoord, GridRouteConfig
 from routing_utils import build_layer_map, iter_pad_blocked_cells
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from grid_router import GridObstacleMap
-except ImportError:
-    # Will fail at runtime if not available
-    GridObstacleMap = None
+else:
+    try:
+        from grid_router import GridObstacleMap
+    except ImportError:
+        GridObstacleMap = None
 
 
 def build_base_obstacle_map(
@@ -35,7 +39,7 @@ def build_base_obstacle_map(
     config: GridRouteConfig,
     nets_to_route: list[int],
     extra_clearance: float = 0.0,
-    net_clearances: dict = None,
+    net_clearances: dict | None = None,
 ) -> GridObstacleMap:
     """Build base obstacle map with static obstacles (BGA zones, pads, pre-existing tracks/vias).
 
@@ -209,7 +213,7 @@ def _polygon_grid_cells(points_mm, coord: GridCoord):
     gx_flat, gy_flat, inside, _ = _rasterize_polygon(points_mm, coord, margin=0.0)
     if gx_flat is None:
         return set()
-    return set(zip(gx_flat[inside].tolist(), gy_flat[inside].tolist()))
+    return set(zip(gx_flat[inside].tolist(), gy_flat[inside].tolist(), strict=False))
 
 
 def add_user_keepout_obstacles(
@@ -558,7 +562,7 @@ def _add_polygon_edge_obstacles(
 
     # Build polygon edge arrays: each edge is (x1, y1) -> (x2, y2)
     poly_arr = np.array(polygon, dtype=np.float64)  # shape (n_edges, 2)
-    n_edges = len(polygon)
+    len(polygon)
     x1 = poly_arr[:, 0]  # (n_edges,)
     y1 = poly_arr[:, 1]
     x2 = np.roll(poly_arr[:, 0], -1)  # next vertex
@@ -735,7 +739,7 @@ def add_diff_pair_own_stubs_as_obstacles(
     p_net_id: int,
     n_net_id: int,
     config: GridRouteConfig,
-    exclude_endpoints: list[tuple[float, float]] = None,
+    exclude_endpoints: list[tuple[float, float]] | None = None,
     extra_clearance: float = 0.0,
 ):
     """Add a diff pair's own stub segments as obstacles to prevent centerline from crossing them.
@@ -1167,8 +1171,8 @@ def _add_segment_obstacle(
     layer_idx: int,
     expansion_grid: int,
     via_block_grid: int,
-    blocked_cells: list[set[tuple[int, int]]] = None,
-    blocked_vias: set[tuple[int, int]] = None,
+    blocked_cells: list[set[tuple[int, int]]] | None = None,
+    blocked_vias: set[tuple[int, int]] | None = None,
 ):
     """Add a segment as obstacle to the map.
 
@@ -1210,8 +1214,8 @@ def _add_via_obstacle(
     via_track_expansion_grid,
     via_via_expansion_grid: int,
     diagonal_margin: float = 0.0,
-    blocked_cells: list[set[tuple[int, int]]] = None,
-    blocked_vias: set[tuple[int, int]] = None,
+    blocked_cells: list[set[tuple[int, int]]] | None = None,
+    blocked_vias: set[tuple[int, int]] | None = None,
 ):
     """Add a via as obstacle to the map.
 
@@ -1266,9 +1270,9 @@ def _add_pad_obstacle(
     layer_map: dict[str, int],
     config: GridRouteConfig,
     extra_clearance: float = 0.0,
-    blocked_cells: list[set[tuple[int, int]]] = None,
-    blocked_vias: set[tuple[int, int]] = None,
-    clearance_override: float = None,
+    blocked_cells: list[set[tuple[int, int]]] | None = None,
+    blocked_vias: set[tuple[int, int]] | None = None,
+    clearance_override: float | None = None,
 ):
     """Add a pad as obstacle to the map.
 
@@ -1454,7 +1458,7 @@ def build_base_obstacle_map_with_vis(
     config: GridRouteConfig,
     nets_to_route: list[int],
     extra_clearance: float = 0.0,
-    net_clearances: dict = None,
+    net_clearances: dict | None = None,
 ) -> tuple[GridObstacleMap, VisualizationData]:
     """Build base obstacle map and capture visualization data.
 
@@ -1580,8 +1584,8 @@ def add_net_obstacles_with_vis(
     net_id: int,
     config: GridRouteConfig,
     extra_clearance: float = 0.0,
-    blocked_cells: list[set[tuple[int, int]]] = None,
-    blocked_vias: set[tuple[int, int]] = None,
+    blocked_cells: list[set[tuple[int, int]]] | None = None,
+    blocked_vias: set[tuple[int, int]] | None = None,
     diagonal_margin: float = 0.0,
 ):
     """Add a net's segments, vias, and pads as obstacles, capturing vis data.
@@ -1817,7 +1821,7 @@ def get_net_bounds(pcb_data: PCBData, net_ids: list[int], padding: float = 5.0) 
 
 
 def draw_exclusion_zones_debug(
-    config: GridRouteConfig, unrouted_stubs: list[tuple[float, float]] = None
+    config: GridRouteConfig, unrouted_stubs: list[tuple[float, float]] | None = None
 ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
     """Get exclusion zone outline lines for User.5 layer debugging.
 

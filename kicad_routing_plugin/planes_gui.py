@@ -15,6 +15,8 @@ ROOT_DIR = os.path.dirname(PLUGIN_DIR)
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+import contextlib
+
 import routing_defaults as defaults
 
 from .fanout_gui import NetSelectionPanel
@@ -662,7 +664,7 @@ class PlanesTab(wx.Panel):
                         layer_nets[layer].append(net)
 
         print(f"\nCreating planes for {len(expanded_nets)} net/layer pairs:")
-        for net, layer in zip(expanded_nets, expanded_layers):
+        for net, layer in zip(expanded_nets, expanded_layers, strict=False):
             print(f"  {net} -> {layer}")
         # Show multi-net layers
         for layer, nets in layer_nets.items():
@@ -790,7 +792,7 @@ class PlanesTab(wx.Panel):
 
         all_layers = self._get_all_copper_layers()
 
-        print(f"Repairing zones: {list(zip(net_names, plane_layers))}")
+        print(f"Repairing zones: {list(zip(net_names, plane_layers, strict=False))}")
 
         try:
             routes_added, regions_connected, new_vias, new_segments = repair_planes(
@@ -1036,10 +1038,8 @@ class PlanesTab(wx.Panel):
                 zone.SetPadConnection(zc_full)
                 # Hatch the outline so the zone is visible immediately;
                 # the actual copper fill is computed below via ZONE_FILLER.
-                try:
+                with contextlib.suppress(Exception):
                     zone.HatchBorder()
-                except Exception:
-                    pass
 
                 board.Add(zone)
                 new_zone_objs.append(zone)

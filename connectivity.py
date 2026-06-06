@@ -214,7 +214,7 @@ def is_edge_stub(pad_x: float, pad_y: float, bga_zones: list) -> bool:
 
 
 def find_connected_groups(
-    segments: list[Segment], tolerance: float = 0.01, layer_aware: bool = True, vias: list = None
+    segments: list[Segment], tolerance: float = 0.01, layer_aware: bool = True, vias: list | None = None
 ) -> list[list[Segment]]:
     """Find groups of connected segments using union-find with spatial hashing.
 
@@ -305,7 +305,11 @@ def _point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) ->
 
 
 def get_zone_connected_pad_groups(
-    segments: list[Segment], vias: list[Via], pads: list[Pad], zones: list[Zone], routing_layers: list[str] = None
+    segments: list[Segment],
+    vias: list[Via],
+    pads: list[Pad],
+    zones: list[Zone],
+    routing_layers: list[str] | None = None,
 ) -> dict[int, int]:
     """
     Get connected component membership for each pad based on zone/plane connectivity.
@@ -1301,7 +1305,7 @@ def get_net_routing_endpoints(pcb_data: PCBData, net_id: int) -> list[tuple[floa
 
 
 def find_connected_segment_positions(
-    pcb_data: PCBData, start_x: float, start_y: float, net_id: int, tolerance: float = 0.1, layer: str = None
+    pcb_data: PCBData, start_x: float, start_y: float, net_id: int, tolerance: float = 0.1, layer: str | None = None
 ) -> set:
     """
     Find all segment endpoint positions connected to a starting position for a given net.

@@ -18,7 +18,6 @@ import math
 import os
 import sys
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,7 +50,7 @@ from bga_fanout.types import (
     Channel,
     DiffPairPads,
     FanoutRoute,
-    create_track,
+    create_track,  # noqa: F401 (re-exported)
 )
 from kicad_parser import KICAD_10_MIN_VERSION, Footprint, Pad, PCBData, find_components_by_type, parse_kicad_pcb
 from kicad_writer import add_tracks_and_vias_to_pcb
@@ -182,7 +181,7 @@ def reassign_on_channel_pads(
     grid: BGAGrid,
     num_layers: int,
     exit_margin: float,
-    footprint: "Footprint" = None,
+    footprint: Footprint | None = None,
 ) -> int:
     """
     Reassign on-channel pads to adjacent channels when their straight path is blocked.
@@ -610,7 +609,7 @@ def generate_bga_fanout(
     pcb_data: PCBData,
     net_filter: list[str] | None = None,
     diff_pair_patterns: list[str] | None = None,
-    layers: list[str] = None,
+    layers: list[str] | None = None,
     track_width: float = 0.1,
     clearance: float = 0.1,
     diff_pair_gap: float = 0.101,
@@ -622,7 +621,7 @@ def generate_bga_fanout(
     via_drill: float = 0.3,
     check_for_previous: bool = False,
     no_inner_top_layer: bool = False,
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict], list]:
     """
     Generate BGA fanout tracks for a footprint.
 
@@ -1035,7 +1034,6 @@ def generate_bga_fanout(
                         # Find channel between inner pad and edge pad (horizontally adjacent)
                         h_channels = [c for c in channels if c.orientation == "horizontal"]
                         inner_y = inner_pad_info.global_y
-                        edge_y = edge_pad_info.global_y
 
                         # Channel should be between the two pads OR closest to inner going away from edge
                         # Since they're on same row, find channel above or below
@@ -1119,7 +1117,6 @@ def generate_bga_fanout(
                         # Vertical escape - similar logic but X/Y swapped
                         v_channels = [c for c in channels if c.orientation == "vertical"]
                         inner_x = inner_pad_info.global_x
-                        edge_x = edge_pad_info.global_x
 
                         channels_left = [c for c in v_channels if c.position < inner_x]
                         channels_right = [c for c in v_channels if c.position > inner_x]

@@ -140,7 +140,6 @@ def get_farther_channel(route: "FanoutRoute", channels: list[Channel], grid: BGA
     if route.channel is None:
         return None
 
-    pitch = grid.pitch_y if route.channel.orientation == "horizontal" else grid.pitch_x
     pad_x, pad_y = route.pad_pos
 
     if route.channel.orientation == "horizontal":
@@ -188,7 +187,7 @@ def try_jogged_route(
     available_layers: list[str],
     track_width: float,
     clearance: float,
-    jog_length: float = None,
+    jog_length: float | None = None,
     no_inner_top_layer: bool = False,
 ) -> tuple["FanoutRoute", str, list[dict]] | None:
     """
@@ -417,11 +416,11 @@ def resolve_collisions(
     track_width: float,
     clearance: float,
     diff_pair_spacing: float,
-    existing_tracks: list[dict] = None,
-    grid: BGAGrid = None,
-    channels: list[Channel] = None,
+    existing_tracks: list[dict] | None = None,
+    grid: BGAGrid | None = None,
+    channels: list[Channel] | None = None,
     exit_margin: float = 0.5,
-    net_names: dict[int, str] = None,
+    net_names: dict[int, str] | None = None,
     no_inner_top_layer: bool = False,
 ) -> tuple[int, list[str]]:
     """Try to resolve collisions by reassigning layers for colliding pairs.
@@ -592,11 +591,9 @@ def resolve_collisions(
                         if route_dist > conflicting_dist:
                             # route is farther from edge - jog route instead of conflicting
                             to_jog = route
-                            to_keep = conflicting
                         else:
                             # conflicting is farther from edge - jog conflicting
                             to_jog = conflicting
-                            to_keep = route
 
                         farther_ch = get_farther_channel(to_jog, channels, grid)
                         if farther_ch is None:

@@ -19,19 +19,19 @@ def check_python_dependencies():
 
     # Check numpy (required by the Rust router module)
     try:
-        import numpy
+        import numpy  # noqa: F401
     except ImportError:
         missing.append("numpy")
 
     # Check scipy (required for optimal target assignment and Voronoi)
     try:
-        from scipy.optimize import linear_sum_assignment
+        from scipy.optimize import linear_sum_assignment  # noqa: F401
     except ImportError:
         missing.append("scipy")
 
     # Check shapely (required for polygon union in multi-net plane layers)
     try:
-        from shapely.geometry import Polygon
+        from shapely.geometry import Polygon  # noqa: F401
     except ImportError:
         missing.append("shapely")
 

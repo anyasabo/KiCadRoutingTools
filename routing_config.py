@@ -37,7 +37,7 @@ class GridRouteConfig:
     heuristic_weight: float = 1.9
     turn_cost: int = 1000  # Penalty for direction changes (encourages straighter paths)
     # BGA exclusion zones (auto-detected from PCB) - vias blocked inside these areas
-    bga_exclusion_zones: list[tuple[float, float, float, float]] = field(default_factory=list)
+    bga_exclusion_zones: list[tuple[float, float, float, float, float]] = field(default_factory=list)
     stub_proximity_radius: float = 2.0  # mm - radius around stubs to penalize
     stub_proximity_cost: float = 0.2  # mm equivalent cost at stub center
     via_proximity_cost: float = 10.0  # via cost multiplier in stub/BGA proximity zones (0 = block vias)
@@ -47,9 +47,7 @@ class GridRouteConfig:
     direction_order: str = "forward"
     # Differential pair routing parameters
     diff_pair_gap: float = 0.101  # mm - gap between P and N traces (center-to-center = track_width + gap)
-    diff_pair_centerline_setback: float = (
-        None  # mm - distance in front of stubs to start centerline route (None = 2 * spacing)
-    )
+    diff_pair_centerline_setback: float | None = None
     min_turning_radius: float = 0.2  # mm - minimum turning radius for pose-based routing
     fix_polarity: bool = True  # Swap target pad nets if polarity swap needed
     debug_lines: bool = False  # Output debug geometry on User.2/3/8/9 layers

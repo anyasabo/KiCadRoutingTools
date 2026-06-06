@@ -22,10 +22,10 @@ def order_nets_mps(
     enable_layer_switch: bool = False,
     config=None,
     can_swap_to_top_layer: bool = True,
-    all_segment_modifications: list = None,
-    all_swap_vias: list = None,
-    all_stubs_by_layer: dict = None,
-    stub_endpoints_by_layer: dict = None,
+    all_segment_modifications: list | None = None,
+    all_swap_vias: list | None = None,
+    all_stubs_by_layer: dict | None = None,
+    stub_endpoints_by_layer: dict | None = None,
     verbose: bool = False,
 ) -> tuple[list[tuple[str, int]], int]:
     """

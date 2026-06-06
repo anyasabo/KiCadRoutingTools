@@ -49,10 +49,15 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "rust_router"))
 
-try:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     from grid_router import GridObstacleMap
-except ImportError:
-    GridObstacleMap = None
+else:
+    try:
+        from grid_router import GridObstacleMap
+    except ImportError:
+        GridObstacleMap = None
 
 
 def add_stub_proximity_costs(
@@ -225,7 +230,7 @@ def add_cross_layer_tracks(
     pcb_data: PCBData,
     config: GridRouteConfig,
     layer_map: dict[str, int],
-    exclude_net_ids: set[int] = None,
+    exclude_net_ids: set[int] | None = None,
 ):
     """Populate cross-layer track positions for vertical alignment attraction.
 

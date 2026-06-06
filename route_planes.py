@@ -134,10 +134,10 @@ def find_via_position(
     obstacles: GridObstacleMap,
     coord: GridCoord,
     max_search_radius: float,
-    routing_obstacles: GridObstacleMap = None,
-    config: GridRouteConfig = None,
-    pad_layer: str = None,
-    net_id: int = None,
+    routing_obstacles: GridObstacleMap | None = None,
+    config: GridRouteConfig | None = None,
+    pad_layer: str | None = None,
+    net_id: int | None = None,
     verbose: bool = False,
     failed_route_positions: set[tuple[int, int]] | None = None,
     pending_pads: list[dict] | None = None,
@@ -511,7 +511,7 @@ def _block_route_as_obstacle(
             if ex * ex + ey * ey <= radius_sq:
                 circle_offsets.append((ex, ey))
     circle_offsets_arr = np.array(circle_offsets, dtype=np.int32)  # shape (K, 2)
-    num_offsets = len(circle_offsets)
+    len(circle_offsets)
 
     # Collect all center points along all segments using Bresenham
     centers = []
@@ -1227,15 +1227,15 @@ def create_plane(
     grid_step: float = defaults.GRID_STEP,
     max_search_radius: float = defaults.PLANE_MAX_SEARCH_RADIUS,
     max_via_reuse_radius: float = defaults.PLANE_MAX_VIA_REUSE_RADIUS,
-    close_via_radius: float = None,
+    close_via_radius: float | None = None,
     hole_to_hole_clearance: float = defaults.HOLE_TO_HOLE_CLEARANCE,
-    all_layers: list[str] = None,
+    all_layers: list[str] | None = None,
     verbose: bool = False,
     dry_run: bool = False,
     rip_blocker_nets: bool = False,
     max_rip_nets: int = defaults.PLANE_MAX_RIP_NETS,
     reroute_ripped_nets: bool = False,
-    layer_nets: dict[str, list[str]] = None,
+    layer_nets: dict[str, list[str]] | None = None,
     plane_proximity_radius: float = 3.0,
     plane_proximity_cost: float = 2.0,
     plane_track_via_clearance: float = defaults.PLANE_TRACK_VIA_CLEARANCE,
@@ -1327,7 +1327,7 @@ def create_plane(
 
     should_create_zones = []  # Per-net flag for whether to create zone
     zones_to_replace = []  # List of (net_id, layer) tuples for zones to replace
-    for i, (net_name, plane_layer, net_id) in enumerate(zip(net_names, plane_layers, net_ids)):
+    for i, (net_name, plane_layer, net_id) in enumerate(zip(net_names, plane_layers, net_ids, strict=False)):
         if skip_existing_zones:
             # GUI path: never error on existing zones of other nets - in KiCad,
             # zones with different nets may coexist on a layer. Only check for a
@@ -1444,7 +1444,7 @@ def create_plane(
     # Collect ALL pads from ALL power nets that need vias (for cross-net protection)
     # This ensures when routing GND, we also protect +3.3V pad zones and vice versa
     all_power_pads_needing_vias: list[dict] = []
-    for net_id_tmp, plane_layer_tmp in zip(net_ids, plane_layers):
+    for net_id_tmp, plane_layer_tmp in zip(net_ids, plane_layers, strict=False):
         target_pads_tmp = identify_target_pads(pcb_data, net_id_tmp, plane_layer_tmp)
         for p in target_pads_tmp:
             if p["needs_via"]:
@@ -1456,7 +1456,7 @@ def create_plane(
 
     # Process each net/layer pair
     for net_idx, (net_name, plane_layer, net_id, should_create_zone) in enumerate(
-        zip(net_names, plane_layers, net_ids, should_create_zones)
+        zip(net_names, plane_layers, net_ids, should_create_zones, strict=False)
     ):
         print(f"\n{'=' * 60}")
         print(f"Processing net '{net_name}' on layer {plane_layer}")
@@ -2365,7 +2365,7 @@ Examples:
     plane_layers = []
     layer_nets = {}
 
-    for net_arg, layer in zip(args.nets, args.plane_layers):
+    for net_arg, layer in zip(args.nets, args.plane_layers, strict=False):
         nets_on_layer = [n.strip() for n in net_arg.split("|")]
         for net in nets_on_layer:
             net_names.append(net)

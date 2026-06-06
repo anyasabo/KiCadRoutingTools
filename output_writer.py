@@ -36,8 +36,8 @@ def write_routed_output(
     pad_swaps: list[dict],
     pcb_data,
     debug_lines: bool = False,
-    exclusion_zone_lines: list = None,
-    boundary_debug_labels: list = None,
+    exclusion_zone_lines: list | None = None,
+    boundary_debug_labels: list | None = None,
     skip_routing: bool = False,
     add_teardrops: bool = False,
 ) -> bool:
@@ -128,7 +128,9 @@ def write_routed_output(
     return True
 
 
-def _apply_diff_pair_target_swaps(content: str, target_swap_info: list[dict], net_id_to_name: dict = None) -> str:
+def _apply_diff_pair_target_swaps(
+    content: str, target_swap_info: list[dict], net_id_to_name: dict | None = None
+) -> str:
     """Apply diff pair target swaps to file content."""
     if not target_swap_info:
         return content
@@ -240,7 +242,7 @@ def _apply_diff_pair_target_swaps(content: str, target_swap_info: list[dict], ne
 
 
 def _apply_single_ended_target_swaps(
-    content: str, single_ended_target_swap_info: list[dict], net_id_to_name: dict = None
+    content: str, single_ended_target_swap_info: list[dict], net_id_to_name: dict | None = None
 ) -> str:
     """Apply single-ended target swaps to file content."""
     if not single_ended_target_swap_info:
@@ -303,7 +305,7 @@ def _apply_single_ended_target_swaps(
     return content
 
 
-def _apply_polarity_swaps(content: str, pad_swaps: list[dict], pcb_data, net_id_to_name: dict = None) -> str:
+def _apply_polarity_swaps(content: str, pad_swaps: list[dict], pcb_data, net_id_to_name: dict | None = None) -> str:
     """Apply polarity fix pad and stub swaps to file content."""
     if not pad_swaps:
         return content
@@ -352,7 +354,7 @@ def _apply_polarity_swaps(content: str, pad_swaps: list[dict], pcb_data, net_id_
     return content
 
 
-def _generate_routing_text(results: list[dict], all_swap_vias: list, net_id_to_name: dict = None) -> str:
+def _generate_routing_text(results: list[dict], all_swap_vias: list, net_id_to_name: dict | None = None) -> str:
     """Generate routing text for new segments and vias."""
     routing_text = ""
 

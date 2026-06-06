@@ -50,10 +50,9 @@ def matches_net_filter(net_name: str, patterns: list[str]) -> bool:
 
     # Check inclusion: if there are include patterns, must match at least one
     if include_patterns:
-        for pattern in include_patterns:
-            if fnmatch.fnmatch(net_name, pattern):
-                return True
-        return False  # Has include patterns but didn't match any
+        return any(
+            fnmatch.fnmatch(net_name, pattern) for pattern in include_patterns
+        )  # Has include patterns but didn't match any
 
     # No include patterns (only exclusions) and didn't match any exclusion
     return True
@@ -89,10 +88,10 @@ class MPSResult:
     unit_names: dict[int, str]  # unit_id -> display name
     round_assignments: dict[int, int]  # unit_id -> round_number (1-indexed)
     num_rounds: int
-    geometric_conflicts: dict[int, set[int]] = None  # All crossings regardless of layer (for swap checking)
+    geometric_conflicts: dict[int, set[int]] | None = None
 
 
-def calculate_route_length(segments: list[Segment], vias: list[Via] = None, pcb_data=None) -> float:
+def calculate_route_length(segments: list[Segment], vias: list[Via] | None = None, pcb_data=None) -> float:
     """
     Calculate the total length of a routed path.
 
@@ -262,7 +261,7 @@ def identify_power_nets(pcb_data: PCBData, patterns: list[str], widths: list[flo
             continue
 
         # Check patterns in order - first match wins
-        for pattern, width in zip(patterns, widths):
+        for pattern, width in zip(patterns, widths, strict=False):
             if fnmatch.fnmatch(net.name, pattern):
                 power_net_widths[net_id] = width
                 break
@@ -374,7 +373,7 @@ def find_differential_pairs(pcb_data: PCBData, patterns: list[str]) -> dict[str,
 
 
 def find_single_ended_nets(
-    pcb_data: PCBData, patterns: list[str], exclude_net_ids: set[int] = None
+    pcb_data: PCBData, patterns: list[str], exclude_net_ids: set[int] | None = None
 ) -> list[tuple[str, int]]:
     """
     Find all single-ended nets matching the given glob patterns.
@@ -862,7 +861,7 @@ def _compute_mps_unit_endpoints(
 
 
 def _compute_mps_center(
-    unit_endpoints: dict[int, list[tuple[float, float]]], center: tuple[float, float] = None
+    unit_endpoints: dict[int, list[tuple[float, float]]], center: tuple[float, float] | None = None
 ) -> tuple[float, float]:
     """Compute center point for angular projection if not provided."""
     if center is not None:
@@ -1019,14 +1018,14 @@ def _greedy_order_mps_units(
 def compute_mps_net_ordering(
     pcb_data: PCBData,
     net_ids: list[int],
-    center: tuple[float, float] = None,
-    diff_pairs: dict = None,
+    center: tuple[float, float] | None = None,
+    diff_pairs: dict | None = None,
     use_boundary_ordering: bool = True,
-    bga_exclusion_zones: list[tuple[float, float, float, float]] = None,
+    bga_exclusion_zones: list[tuple[float, float, float, float]] | None = None,
     reverse_rounds: bool = False,
     crossing_layer_check: bool = True,
     return_extended_info: bool = False,
-    use_segment_intersection: bool = None,
+    use_segment_intersection: bool | None = None,
 ) -> list[int] | MPSResult:
     """
     Compute optimal net routing order using Maximum Planar Subset (MPS) algorithm.

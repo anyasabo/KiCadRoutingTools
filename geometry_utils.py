@@ -220,10 +220,7 @@ def segments_intersect_2d(
         return True
     if abs(d3) <= tolerance and on_segment(seg1_start, seg1_end, seg2_start):
         return True
-    if abs(d4) <= tolerance and on_segment(seg1_start, seg1_end, seg2_end):
-        return True
-
-    return False
+    return bool(abs(d4) <= tolerance and on_segment(seg1_start, seg1_end, seg2_end))
 
 
 def segment_to_segment_distance(

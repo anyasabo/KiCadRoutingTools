@@ -67,8 +67,8 @@ def run_phase3_tap_routing(
     results: list[dict],
     track_proximity_cache: dict[int, dict],
     layer_map: dict[str, int],
-    progress_callback: Any = None,
-    cancel_check: Any = None,
+    progress_callback: Any | None = None,
+    cancel_check: Any | None = None,
 ) -> Phase3Stats:
     """
     Route tap connections for all pending multi-point nets.

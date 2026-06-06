@@ -14,7 +14,7 @@ import math
 from collections.abc import Callable
 
 try:
-    from scipy.optimize import linear_sum_assignment
+    from scipy.optimize import linear_sum_assignment  # noqa: F401
 
     HAS_SCIPY = True
 except ImportError:
@@ -176,10 +176,10 @@ def build_cost_matrix(
     config: GridRouteConfig,
     pcb_data: PCBData,
     use_boundary_ordering: bool = True,
-    get_source_centroid_func: Callable[[tuple], tuple[float, float]] = None,
-    get_target_centroid_func: Callable[[tuple], tuple[float, float]] = None,
-    get_layer_idx_func: Callable[[tuple], int] = None,
-) -> tuple[list[list[float]], list[str]]:
+    get_source_centroid_func: Callable[[tuple], tuple[float, float]] | None = None,
+    get_target_centroid_func: Callable[[tuple], tuple[float, float]] | None = None,
+    get_layer_idx_func: Callable[[tuple], int] | None = None,
+) -> tuple[list[list[float]], list[str], dict]:
     """
     Build N x N cost matrix for optimal target assignment.
 
@@ -215,7 +215,11 @@ def build_cost_matrix(
     if get_target_centroid_func is None:
         get_target_centroid_func = get_target_centroid
     if get_layer_idx_func is None:
-        get_layer_idx_func = lambda e: e[4]
+
+        def _default_layer_idx(e):
+            return e[4]
+
+        get_layer_idx_func = _default_layer_idx
 
     n = len(pair_data)
     pair_names = [pd[0] for pd in pair_data]
@@ -359,7 +363,6 @@ def build_cost_matrix(
 
     # Add crossing penalties
     # For each (i,j) assignment, check if it crosses any other potential (k,l) assignment
-    total_crossings_detected = 0
     for i in range(n):
         for j in range(n):
             crossing_count = 0
@@ -438,9 +441,9 @@ def compute_optimal_assignment(
     config: GridRouteConfig,
     pcb_data: PCBData,
     use_boundary_ordering: bool = True,
-    get_source_centroid_func: Callable[[tuple], tuple[float, float]] = None,
-    get_target_centroid_func: Callable[[tuple], tuple[float, float]] = None,
-    get_layer_idx_func: Callable[[tuple], int] = None,
+    get_source_centroid_func: Callable[[tuple], tuple[float, float]] | None = None,
+    get_target_centroid_func: Callable[[tuple], tuple[float, float]] | None = None,
+    get_layer_idx_func: Callable[[tuple], int] | None = None,
 ) -> tuple[dict[str, str] | None, list[tuple[str, str]] | None]:
     """
     Compute optimal target swaps using pairwise swap optimization.
@@ -771,7 +774,7 @@ def apply_single_swap(
     p2_targets: list,
     target_swaps: dict[str, str],
     target_swap_info: list[dict],
-    config: "GridRouteConfig" = None,
+    config: GridRouteConfig | None = None,
 ) -> bool:
     """
     Apply a single pairwise target swap to pcb_data.

@@ -1,30 +1,20 @@
-"""
-Shared utilities for test scripts.
-"""
+"""Shared utilities for test scripts."""
 
-import os
 import shlex
 import subprocess
+from pathlib import Path
 
-# Get the root directory (parent of tests/)
-TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(TESTS_DIR)
+TESTS_DIR = Path(__file__).resolve().parent
+ROOT_DIR = TESTS_DIR.parent
 
 
-def run(cmd: str, unbuffered: bool = False) -> None:
-    """Run a command string and print output.
+def run(cmd: str, unbuffered: bool = False) -> subprocess.CompletedProcess:
+    """Run a command string from the project root.
 
-    Commands are executed from the project root directory, so paths like
-    'python3 route.py' and 'kicad_files/...' work correctly.
-
-    Args:
-        cmd: Command string to run (will be parsed using shell-style splitting)
-        unbuffered: If True, add -u flag to python commands
+    Raises subprocess.CalledProcessError if the command exits non-zero.
     """
-    if unbuffered and cmd.startswith('python3 '):
-        cmd = 'python3 -u ' + cmd[8:]
+    if unbuffered and cmd.startswith("python3 "):
+        cmd = "python3 -u " + cmd[8:]
     print(f"\n>>> {cmd}")
     args = shlex.split(cmd)
-    result = subprocess.run(args, cwd=ROOT_DIR)
-    if result.returncode != 0:
-        print(f"Command failed with exit code {result.returncode}")
+    return subprocess.run(args, cwd=ROOT_DIR, check=True)

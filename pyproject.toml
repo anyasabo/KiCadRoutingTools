@@ -1,0 +1,63 @@
+[project]
+name = "kicad-routing-tools"
+version = "0.15.7"
+requires-python = ">=3.14"
+description = "Grid-based PCB autorouter for KiCad with Rust acceleration"
+license = "MIT"
+dependencies = [
+    "numpy>=1.21.0",
+    "scipy>=1.7.0",
+    "shapely>=1.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "pyright>=1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "slow: marks tests that run full routing pipelines (minutes each)",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long
+    "SIM108", # ternary operator
+]
+
+[tool.ruff.lint.per-file-ignores]
+"kicad_routing_plugin/*" = ["F401", "E402"]
+"pygame_visualizer/*" = ["F401", "E402"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+pythonPlatform = "Linux"
+typeCheckingMode = "basic"
+reportMissingImports = "warning"
+reportMissingModuleSource = false
+reportMissingTypeStubs = false
+exclude = [
+    "kicad_routing_plugin/",
+    "pygame_visualizer/",
+    "rust_router/",
+    "kicad_files/",
+    "**/__pycache__/",
+]

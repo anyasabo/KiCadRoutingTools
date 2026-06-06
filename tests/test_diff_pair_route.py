@@ -1,44 +1,35 @@
-#!/usr/bin/env python3
-"""
-Pass/fail test for differential-pair routing correctness.
+"""Differential-pair routing correctness tests."""
 
-Routes individual differential pairs with `route_diff.py` and asserts each is
-**fully connected** and **DRC-clean** (scoped to the pair). Unlike the big
-`test_fanout_and_route.py` pipeline, this is a small, fast, focused regression
-guard for the diff-pair router on its own: a routed pair must actually connect
-its two endpoints without introducing clearance violations.
-
-Board: `kicad_files/routed_output.kicad_pcb` — the post-fanout board that feeds
-the LVDS differential stage of `test_fanout_and_route.py`. Each
-`/fpga_adc/lvds_rx1_NN` pair is a clean 2-pad point-to-point on F.Cu.
-
-Note: the board has pre-existing DRC violations among OTHER already-routed nets,
-so DRC is scoped to each pair's own nets (`--nets "*lvds_rx1_NN*"`), matching how
-`test_fanout_and_route.py` checks the LVDS stage (`--nets "*lvds*"`).
-
-Run:
-    python3 tests/test_diff_pair_route.py        # uses KiCad's python (needs the Rust router)
-    python3 tests/test_diff_pair_route.py -v      # verbose routing output
-"""
-
-import argparse
 import os
 import subprocess
 import sys
-import tempfile
 
-TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(TESTS_DIR)
-sys.path.insert(0, ROOT_DIR)
+import pytest
 
-BOARD = os.path.join(ROOT_DIR, "kicad_files", "routed_output.kicad_pcb")
-# Same geometry as test_fanout_and_route.py's LVDS diff stage.
-GEOM = ["--track-width", "0.1", "--clearance", "0.1", "--via-size", "0.3", "--via-drill", "0.2",
-        "--layers", "F.Cu", "In1.Cu", "In2.Cu", "In3.Cu", "B.Cu",
-        "--impedance", "100", "--proximity-heuristic-factor", "0.0"]
+from tests.conftest import KICAD_FILES, ROOT_DIR
+
+BOARD = str(KICAD_FILES / "routed_output.kicad_pcb")
+GEOM = [
+    "--track-width",
+    "0.1",
+    "--clearance",
+    "0.1",
+    "--via-size",
+    "0.3",
+    "--via-drill",
+    "0.2",
+    "--layers",
+    "F.Cu",
+    "In1.Cu",
+    "In2.Cu",
+    "In3.Cu",
+    "B.Cu",
+    "--impedance",
+    "100",
+    "--proximity-heuristic-factor",
+    "0.0",
+]
 CLEARANCE = "0.1"
-# Pairs confirmed to route fully-connected + DRC-clean in isolation on this board.
-# (lvds_rx1_14 does NOT route alone, so it's intentionally excluded.)
 PAIRS = ["lvds_rx1_11", "lvds_rx1_10", "lvds_rx1_12"]
 
 
@@ -59,60 +50,28 @@ def is_connected(board, pattern):
 
 def drc_clean(board, pattern):
     """True if the pair has no DRC violations (scoped to its own nets)."""
-    cmd = [sys.executable, "check_drc.py", board, "--clearance", CLEARANCE,
-           "--nets", f"*{pattern}*", "--clearance-margin", "0.1"]
+    cmd = [
+        sys.executable,
+        "check_drc.py",
+        board,
+        "--clearance",
+        CLEARANCE,
+        "--nets",
+        f"*{pattern}*",
+        "--clearance-margin",
+        "0.1",
+    ]
     r = subprocess.run(cmd, cwd=ROOT_DIR, capture_output=True, text=True)
     return "NO DRC VIOLATIONS" in (r.stdout + r.stderr)
 
 
-def scenario_pair(pattern, verbose):
-    log = []
-    fd, out = tempfile.mkstemp(suffix=".kicad_pcb", prefix=f"diffroute_{pattern}_")
-    os.close(fd)
-    try:
-        routed, txt = route_pair(pattern, out)
-        if not routed or not os.path.exists(out):
-            return f"DP {pattern}", False, ["route_diff did not report 1/1 routed"]
-        conn = is_connected(out, pattern)
-        clean = drc_clean(out, pattern)
-        log.append(f"routed=1/1  connected={conn}  drc_clean(pair-scoped)={clean}")
-        passed = routed and conn and clean
-        return f"DP /fpga_adc/{pattern} routes connected + DRC-clean", passed, log
-    finally:
-        if os.path.exists(out):
-            os.remove(out)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Differential-pair routing correctness test")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose routing output")
-    args = parser.parse_args()
-
-    if not os.path.exists(BOARD):
-        print(f"ERROR: board not found: {BOARD}")
-        return 2
-
-    print("=" * 70)
-    print("Differential-pair routing correctness test")
-    print("=" * 70)
-
-    results = []
-    for pattern in PAIRS:
-        name, passed, log = scenario_pair(pattern, args.verbose)
-        status = "PASS" if passed else "FAIL"
-        print(f"\n[{status}] {name}")
-        for line in log:
-            print(f"        {line}")
-        results.append((name, passed))
-
-    print("\n" + "=" * 70)
-    n_pass = sum(1 for _, p in results if p)
-    for name, passed in results:
-        print(f"  {'PASS' if passed else 'FAIL'}  {name}")
-    print(f"\n{n_pass}/{len(results)} pairs passed")
-    print("=" * 70)
-    return 0 if n_pass == len(results) else 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+@pytest.mark.skipif(not os.path.exists(BOARD), reason="Board not present: routed_output.kicad_pcb")
+@pytest.mark.parametrize("pattern", PAIRS)
+def test_diff_pair(pattern, tmp_path):
+    """Each differential pair routes connected + DRC-clean."""
+    out = str(tmp_path / f"diffroute_{pattern}.kicad_pcb")
+    routed, txt = route_pair(pattern, out)
+    assert routed, f"route_diff did not report 1/1 routed for {pattern}"
+    assert os.path.exists(out)
+    assert is_connected(out, pattern), f"{pattern} not fully connected"
+    assert drc_clean(out, pattern), f"{pattern} has DRC violations"

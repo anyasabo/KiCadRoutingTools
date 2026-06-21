@@ -1100,13 +1100,8 @@ def extract_footprints_and_pads(
                 if prim_coords:
                     pxs = [float(x) for x, _ in prim_coords]
                     pys = [float(y) for _, y in prim_coords]
-                    prim_min_x, prim_max_x = min(pxs), max(pxs)
-                    prim_min_y, prim_max_y = min(pys), max(pys)
-                    size_x = prim_max_x - prim_min_x
-                    size_y = prim_max_y - prim_min_y
-                    # Shift pad center to the primitive centroid
-                    local_x += (prim_min_x + prim_max_x) / 2
-                    local_y += (prim_min_y + prim_max_y) / 2
+                    size_x = max(pxs) - min(pxs)
+                    size_y = max(pys) - min(pys)
 
             # Calculate global coordinates
             global_x, global_y = local_to_global(fp_x, fp_y, fp_rotation, local_x, local_y)
